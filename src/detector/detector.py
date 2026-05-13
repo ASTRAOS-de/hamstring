@@ -8,12 +8,14 @@ import tempfile
 import asyncio
 import numpy as np
 import requests
+import marshmallow_dataclass
 from numpy import median
 from abc import ABC, abstractmethod
 import importlib
 
 sys.path.append(os.getcwd())
 from src.base.clickhouse_kafka_sender import ClickHouseKafkaSender
+from src.base.data_classes.batch import Batch
 from src.base.utils import setup_config, generate_collisions_resistant_uuid
 from src.base.kafka_handler import (
     ExactlyOnceKafkaConsumeHandler,
@@ -31,15 +33,79 @@ config = setup_config()
 INSPECTORS = config["pipeline"]["data_inspection"]
 DETECTORS = config["pipeline"]["data_analysis"]
 
+PIPELINE_TOPIC_PREFIXES = config["environment"]["kafka_topics_prefix"]["pipeline"]
+INSPECTOR_TO_DETECTOR_TOPIC_PREFIX = PIPELINE_TOPIC_PREFIXES["inspector_to_detector"]
+DETECTOR_TO_ALERTER_TOPIC_PREFIX = PIPELINE_TOPIC_PREFIXES["detector_to_alerter"]
+DETECTOR_TO_DETECTOR_TOPIC_PREFIX = PIPELINE_TOPIC_PREFIXES.get(
+    "detector_to_detector", "pipeline-detector_to_detector"
+)
 
-CONSUME_TOPIC_PREFIX = config["environment"]["kafka_topics_prefix"]["pipeline"][
-    "inspector_to_detector"
-]
-PRODUCE_TOPIC_PREFIX = config["environment"]["kafka_topics_prefix"]["pipeline"][
-    "detector_to_alerter"
-]
+# Backwards-compatible aliases for tests and external imports.
+CONSUME_TOPIC_PREFIX = INSPECTOR_TO_DETECTOR_TOPIC_PREFIX
+PRODUCE_TOPIC_PREFIX = DETECTOR_TO_ALERTER_TOPIC_PREFIX
 
 PLUGIN_PATH = "src.detector.plugins"
+
+
+def _normalize_topic_suffixes(topic_suffixes) -> list[str]:
+    if topic_suffixes is None:
+        return []
+    if isinstance(topic_suffixes, str):
+        return [suffix.strip() for suffix in topic_suffixes.split(",") if suffix.strip()]
+    if isinstance(topic_suffixes, (list, tuple, set)):
+        return [str(suffix).strip() for suffix in topic_suffixes if str(suffix).strip()]
+    return [str(topic_suffixes).strip()]
+
+
+def build_alerter_topics(detector_config: dict) -> list[str]:
+    if detector_config.get("send_to_alerter") is False:
+        return []
+
+    topic_suffixes = detector_config.get("produce_topics", "")
+    if topic_suffixes is None or topic_suffixes == []:
+        return []
+
+    topic_suffixes = _normalize_topic_suffixes(topic_suffixes)
+    if not topic_suffixes:
+        topic_suffixes = ["generic"]
+
+    return [
+        f"{DETECTOR_TO_ALERTER_TOPIC_PREFIX}-{topic_suffix}"
+        for topic_suffix in topic_suffixes
+    ]
+
+
+def build_downstream_detector_topics(detector_config: dict) -> list[str]:
+    detector_names = []
+    for config_key in ("next_detectors", "produce_detector_topics"):
+        detector_names.extend(_normalize_topic_suffixes(detector_config.get(config_key)))
+
+    return [
+        f"{DETECTOR_TO_DETECTOR_TOPIC_PREFIX}-{detector_name}"
+        for detector_name in dict.fromkeys(detector_names)
+    ]
+
+
+def detector_consumes_from_detector(detector_config: dict) -> bool:
+    consume_from = str(detector_config.get("consume_from", "")).strip().lower()
+    if consume_from:
+        return consume_from == "detector"
+
+    detector_source_keys = (
+        "upstream_detector_name",
+        "source_detector_name",
+        "input_detector_name",
+    )
+    if any(detector_config.get(source_key) for source_key in detector_source_keys):
+        return True
+
+    return not detector_config.get("inspector_name")
+
+
+def build_detector_consume_topic(detector_config: dict) -> str:
+    if detector_consumes_from_detector(detector_config):
+        return f"{DETECTOR_TO_DETECTOR_TOPIC_PREFIX}-{detector_config['name']}"
+    return f"{INSPECTOR_TO_DETECTOR_TOPIC_PREFIX}-{detector_config['name']}"
 
 
 class WrongChecksum(Exception):  # pragma: no cover
@@ -61,7 +127,13 @@ class DetectorAbstractBase(ABC):  # pragma: no cover
     """
 
     @abstractmethod
-    def __init__(self, detector_config, consume_topic, produce_topics=None) -> None:
+    def __init__(
+        self,
+        detector_config,
+        consume_topic,
+        produce_topics=None,
+        downstream_detector_topics=None,
+    ) -> None:
         pass
 
     @abstractmethod
@@ -89,7 +161,13 @@ class DetectorBase(DetectorAbstractBase):
     that provide model-specific prediction logic.
     """
 
-    def __init__(self, detector_config, consume_topic, produce_topics=None) -> None:
+    def __init__(
+        self,
+        detector_config,
+        consume_topic,
+        produce_topics=None,
+        downstream_detector_topics=None,
+    ) -> None:
         """
         Initialize the detector with configuration and Kafka topic settings.
 
@@ -110,11 +188,20 @@ class DetectorBase(DetectorAbstractBase):
 
         self.consume_topic = consume_topic
         if produce_topics is None:
-            self.produce_topics = [f"{PRODUCE_TOPIC_PREFIX}-generic"]
+            self.produce_topics = [f"{DETECTOR_TO_ALERTER_TOPIC_PREFIX}-generic"]
         elif isinstance(produce_topics, str):
-            self.produce_topics = [produce_topics]
+            self.produce_topics = _normalize_topic_suffixes(produce_topics)
         else:
             self.produce_topics = produce_topics
+
+        if downstream_detector_topics is None:
+            self.downstream_detector_topics = []
+        elif isinstance(downstream_detector_topics, str):
+            self.downstream_detector_topics = _normalize_topic_suffixes(
+                downstream_detector_topics
+            )
+        else:
+            self.downstream_detector_topics = downstream_detector_topics
         self.suspicious_batch_id = None
         self.key = None
         self.messages = []
@@ -362,10 +449,12 @@ class DetectorBase(DetectorAbstractBase):
         """
         logger.info("Store alert.")
         row_id = generate_collisions_resistant_uuid()
+        downstream_messages = []
         if len(self.warnings) > 0:
             overall_score = median(
                 [warning["probability"] for warning in self.warnings]
             )
+            downstream_messages = self._get_downstream_messages()
             alert = {
                 "overall_score": overall_score,
                 "result": self.warnings,
@@ -375,17 +464,20 @@ class DetectorBase(DetectorAbstractBase):
                 "detector_name": self.name,
             }
 
-            logger.info(f"Producing alert to Kafka: {alert}")
+            if self.produce_topics:
+                logger.info(f"Producing alert to Kafka: {alert}")
 
-            if self.kafka_produce_handler is None:
-                self.kafka_produce_handler = ExactlyOnceKafkaProduceHandler()
+                if self.kafka_produce_handler is None:
+                    self.kafka_produce_handler = ExactlyOnceKafkaProduceHandler()
 
-            for topic in self.produce_topics:
-                self.kafka_produce_handler.produce(
-                    topic=topic,
-                    data=json.dumps(alert),
-                    key=self.key,
-                )
+                for topic in self.produce_topics:
+                    self.kafka_produce_handler.produce(
+                        topic=topic,
+                        data=json.dumps(alert),
+                        key=self.key,
+                    )
+            else:
+                logger.info("No alerter topics configured. Skipping alert output.")
 
             self.alerts.insert(
                 dict(
@@ -393,9 +485,7 @@ class DetectorBase(DetectorAbstractBase):
                     alert_timestamp=datetime.datetime.now(),
                     suspicious_batch_id=self.suspicious_batch_id,
                     overall_score=overall_score,
-                    domain_names=json.dumps(
-                        [warning["request"] for warning in self.warnings]
-                    ),
+                    domain_names=json.dumps(self._get_warning_requests()),
                     result=json.dumps(self.warnings),
                 )
             )
@@ -470,6 +560,9 @@ class DetectorBase(DetectorAbstractBase):
             )
         )
 
+        if downstream_messages:
+            self._send_detector_batch(row_id, downstream_messages)
+
         self.fill_levels.insert(
             dict(
                 timestamp=datetime.datetime.now(),
@@ -478,6 +571,46 @@ class DetectorBase(DetectorAbstractBase):
                 entry_count=0,
             )
         )
+
+    def _send_detector_batch(self, parent_row_id, messages) -> None:
+        if not self.downstream_detector_topics:
+            return
+
+        logger.info(
+            f"Producing detector output to Kafka topics: {self.downstream_detector_topics}"
+        )
+        data_to_send = {
+            "batch_tree_row_id": parent_row_id,
+            "batch_id": self.suspicious_batch_id,
+            "begin_timestamp": self.begin_timestamp,
+            "end_timestamp": self.end_timestamp,
+            "data": messages,
+        }
+        batch_schema = marshmallow_dataclass.class_schema(Batch)()
+
+        if self.kafka_produce_handler is None:
+            self.kafka_produce_handler = ExactlyOnceKafkaProduceHandler()
+
+        for topic in self.downstream_detector_topics:
+            self.kafka_produce_handler.produce(
+                topic=topic,
+                data=batch_schema.dumps(data_to_send),
+                key=self.key,
+            )
+
+    def _get_warning_requests(self) -> list:
+        return [
+            warning.get("request", warning.get("request_domain", warning))
+            for warning in self.warnings
+        ]
+
+    def _get_downstream_messages(self) -> list:
+        messages = [
+            warning["request"] for warning in self.warnings if "request" in warning
+        ]
+        if messages:
+            return messages
+        return self.messages
 
     # TODO: test bootstrap!
     def bootstrap_detector_instance(self):
@@ -543,15 +676,9 @@ async def main():  # pragma: no cover
 
     tasks = []
     for detector_config in DETECTORS:
-        consume_topic = f"{CONSUME_TOPIC_PREFIX}-{detector_config['name']}"
-        produce_topics_str = detector_config.get("produce_topics", "")
-        if produce_topics_str:
-            produce_topics = [
-                f"{PRODUCE_TOPIC_PREFIX}-{t.strip()}"
-                for t in produce_topics_str.split(",")
-            ]
-        else:
-            produce_topics = [f"{PRODUCE_TOPIC_PREFIX}-generic"]
+        consume_topic = build_detector_consume_topic(detector_config)
+        produce_topics = build_alerter_topics(detector_config)
+        downstream_detector_topics = build_downstream_detector_topics(detector_config)
 
         class_name = detector_config["detector_class_name"]
         module_name = f"{PLUGIN_PATH}.{detector_config['detector_module_name']}"
@@ -561,6 +688,7 @@ async def main():  # pragma: no cover
             detector_config=detector_config,
             consume_topic=consume_topic,
             produce_topics=produce_topics,
+            downstream_detector_topics=downstream_detector_topics,
         )
         tasks.append(asyncio.create_task(detector.start()))
     await asyncio.gather(*tasks)

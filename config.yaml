@@ -79,7 +79,7 @@ pipeline:
           module: streamad.model
           model_args:
             is_global: false
-      anomaly_threshold: 0.01
+      anomaly_threshold: 0.1
       score_threshold: 0.5
       time_type: ms
       time_range: 20
@@ -96,7 +96,10 @@ pipeline:
       checksum: 5db8bfb617e80361362c33b1d1afc6d762c28e9fa9275fb11514a3bdef76bb88
       base_url: https://heibox.uni-heidelberg.de/d/0d5cbcbe16cd46a58021/
       threshold: 0.5
+      consume_from: inspector
       inspector_name: dga_inspector
+      next_detectors: domainator
+      send_to_alerter: true
       produce_topics: ""
     - name: "domainator"
       detector_module_name: "domainator_detector"
@@ -105,7 +108,10 @@ pipeline:
       checksum: 9d86d66b4976c9b325bed0934a9a9eb3a20960b08be9afe491454624cc0aaa6c
       base_url: https://heibox.uni-heidelberg.de/d/0d5cbcbe16cd46a58021/
       threshold: 0.5
-      inspector_name: no_inspector
+      consume_from: detector
+      inspector_name: ""
+      next_detectors: ""
+      send_to_alerter: true
       produce_topics: ""
 
   alerting:
@@ -113,7 +119,10 @@ pipeline:
     log_file_path: "/opt/logs/alerts.txt"
     log_to_kafka: true
     external_kafka_topic: "hamstring_alerts"
-
+    plugins:
+      - name: attributor
+        alerter_class_name: AttributorAlerter
+        alerter_module_name: attributor_alerter
   monitoring:
     clickhouse_connector:
       batch_size: 50  # do not set higher
@@ -151,6 +160,7 @@ environment:
       prefilter_to_inspector: "pipeline-prefilter_to_inspector"
       inspector_to_detector: "pipeline-inspector_to_detector"
       detector_to_alerter: "pipeline-detector_to_alerter"
+      detector_to_detector: "pipeline-detector_to_detector"
   monitoring:
     clickhouse_server:
       hostname: clickhouse-server

@@ -411,7 +411,8 @@ async def main():
         produce_topics = [
             f"{PRODUCE_TOPIC_PREFIX}-{detector['name']}"
             for detector in DETECTORS
-            if detector["inspector_name"] == inspector["name"]
+            if detector.get("inspector_name") == inspector["name"]
+            and str(detector.get("consume_from", "")).strip().lower() != "detector"
         ]
         class_name = inspector["inspector_class_name"]
         module_name = f"{PLUGIN_PATH}.{inspector['inspector_module_name']}"

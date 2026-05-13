@@ -7,7 +7,13 @@ from unittest.mock import MagicMock, patch, mock_open
 from requests import HTTPError
 
 from src.base.data_classes.batch import Batch
-from src.detector.detector import DetectorBase, WrongChecksum
+from src.detector.detector import (
+    DetectorBase,
+    WrongChecksum,
+    build_alerter_topics,
+    build_detector_consume_topic,
+    build_downstream_detector_topics,
+)
 from src.base.kafka_handler import KafkaMessageFetchException
 
 MINIMAL_DETECTOR_CONFIG = {
@@ -27,7 +33,13 @@ class TestDetector(DetectorBase):
     Testclass that does not take any action to not dialute the tests
     """
 
-    def __init__(self, detector_config, consume_topic, produce_topics=None) -> None:
+    def __init__(
+        self,
+        detector_config,
+        consume_topic,
+        produce_topics=None,
+        downstream_detector_topics=None,
+    ) -> None:
         self.model_base_url = detector_config["base_url"]
         self.model_name = detector_config["model"]
         super().__init__(
@@ -36,6 +48,7 @@ class TestDetector(DetectorBase):
             produce_topics=(
                 produce_topics if produce_topics is not None else ["test_produce_topic"]
             ),
+            downstream_detector_topics=downstream_detector_topics,
         )
 
     def get_model_download_url(self):
@@ -151,6 +164,47 @@ class TestInit(unittest.TestCase):
         self.assertEqual([], sut.messages)
         self.assertEqual(mock_kafka_consume_handler_instance, sut.kafka_consume_handler)
         mock_kafka_consume_handler.assert_called_once_with("test_topic")
+
+
+class TestDetectorTopicConfiguration(unittest.TestCase):
+    def test_build_alerter_topics_defaults_to_generic(self):
+        topics = build_alerter_topics({"name": "first"})
+
+        self.assertEqual(["pipeline-detector_to_alerter-generic"], topics)
+
+    def test_build_alerter_topics_can_be_disabled(self):
+        topics = build_alerter_topics(
+            {"name": "first", "produce_topics": [], "send_to_alerter": False}
+        )
+
+        self.assertEqual([], topics)
+
+    def test_build_downstream_detector_topics(self):
+        topics = build_downstream_detector_topics(
+            {"name": "first", "next_detectors": "second, third"}
+        )
+
+        self.assertEqual(
+            [
+                "pipeline-detector_to_detector-second",
+                "pipeline-detector_to_detector-third",
+            ],
+            topics,
+        )
+
+    def test_build_consume_topic_for_inspector_source(self):
+        topic = build_detector_consume_topic(
+            {"name": "first", "inspector_name": "inspector"}
+        )
+
+        self.assertEqual("pipeline-inspector_to_detector-first", topic)
+
+    def test_build_consume_topic_for_detector_source(self):
+        topic = build_detector_consume_topic(
+            {"name": "second", "consume_from": "detector"}
+        )
+
+        self.assertEqual("pipeline-detector_to_detector-second", topic)
 
 
 class TestGetData(unittest.TestCase):
@@ -325,6 +379,87 @@ class TestSendWarning(unittest.TestCase):
         sut.send_warning()
 
         sut.kafka_produce_handler.produce.assert_not_called()
+
+    @patch("src.detector.detector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.detector.detector.ClickHouseKafkaSender")
+    @patch("src.detector.detector.DetectorBase._get_model")
+    def test_save_warning_to_downstream_detector_without_alerter(
+        self, mock_get_model, mock_clickhouse, mock_kafka_consume_handler
+    ):
+        mock_get_model.return_value = (MagicMock(), MagicMock())
+        mock_kafka_consume_handler_instance = MagicMock()
+        mock_kafka_consume_handler.return_value = mock_kafka_consume_handler_instance
+
+        sut = TestDetector(
+            consume_topic="test_topic",
+            detector_config=MINIMAL_DETECTOR_CONFIG,
+            produce_topics=[],
+            downstream_detector_topics=["pipeline-detector_to_detector-next"],
+        )
+        request = {"logline_id": "test_id", "domain_name": "malicious.example"}
+        sut.warnings = [
+            {
+                "request": request,
+                "probability": 0.8765,
+                "model": "rf",
+                "sha256": "021af76b2385ddbc76f6e3ad10feb0bb081f9cf05cff2e52333e31040bbf36cc",
+            }
+        ]
+        sut.parent_row_id = f"{uuid.uuid4()}-{uuid.uuid4()}"
+        sut.key = "192.168.1.1"
+        sut.suspicious_batch_id = uuid.uuid4()
+        sut.begin_timestamp = datetime.now()
+        sut.end_timestamp = sut.begin_timestamp + timedelta(0, 3)
+        sut.messages = [request]
+        sut.kafka_produce_handler = MagicMock()
+        sut.send_warning()
+
+        sut.kafka_produce_handler.produce.assert_called_once()
+        produce_call = sut.kafka_produce_handler.produce.call_args.kwargs
+        self.assertEqual("pipeline-detector_to_detector-next", produce_call["topic"])
+        self.assertEqual("192.168.1.1", produce_call["key"])
+
+        downstream_batch = json.loads(produce_call["data"])
+        self.assertEqual(str(sut.suspicious_batch_id), downstream_batch["batch_id"])
+        self.assertEqual([request], downstream_batch["data"])
+
+    @patch("src.detector.detector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.detector.detector.ClickHouseKafkaSender")
+    @patch("src.detector.detector.DetectorBase._get_model")
+    def test_downstream_detector_batch_falls_back_to_source_messages(
+        self, mock_get_model, mock_clickhouse, mock_kafka_consume_handler
+    ):
+        mock_get_model.return_value = (MagicMock(), MagicMock())
+        mock_kafka_consume_handler_instance = MagicMock()
+        mock_kafka_consume_handler.return_value = mock_kafka_consume_handler_instance
+
+        sut = TestDetector(
+            consume_topic="test_topic",
+            detector_config=MINIMAL_DETECTOR_CONFIG,
+            produce_topics=[],
+            downstream_detector_topics=["pipeline-detector_to_detector-next"],
+        )
+        request = {"logline_id": "test_id", "domain_name": "malicious.example"}
+        sut.warnings = [
+            {
+                "request_domain": "malicious.example",
+                "probability": 0.8765,
+                "model": "rf",
+                "sha256": "021af76b2385ddbc76f6e3ad10feb0bb081f9cf05cff2e52333e31040bbf36cc",
+            }
+        ]
+        sut.parent_row_id = f"{uuid.uuid4()}-{uuid.uuid4()}"
+        sut.key = "192.168.1.1"
+        sut.suspicious_batch_id = uuid.uuid4()
+        sut.begin_timestamp = datetime.now()
+        sut.end_timestamp = sut.begin_timestamp + timedelta(0, 3)
+        sut.messages = [request]
+        sut.kafka_produce_handler = MagicMock()
+        sut.send_warning()
+
+        produce_call = sut.kafka_produce_handler.produce.call_args.kwargs
+        downstream_batch = json.loads(produce_call["data"])
+        self.assertEqual([request], downstream_batch["data"])
 
     # @patch(
     #     "src.detector.detector.CHECKSUM",

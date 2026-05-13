@@ -749,12 +749,21 @@ You may use the provided, pre-trained models or supply your own. To use a custom
 - `model`: model name
 - `checksum`: SHA256 digest for integrity validation
 - `threshold`: probability threshold for classifying a request as malicious
-- `inspector_name`: name of the inspector configuration for input
+- `inspector_name`: name of the inspector configuration for input. Omit this or set `consume_from: detector` when consuming from another detector.
+- `consume_from`: use `detector` to consume from the detector-to-detector topic for this detector instance
 - `detector_module_name`: name of the python module the implementation details reside
 - `detector_class_name`: name of the class in the python module to load the detector implementation details
-- `produce_topics`: (Optional) Comma-separated list of topic suffixes to produce alerts to. If left empty, alerts are sent to the ``generic`` alerter topic.
+- `produce_topics`: (Optional) Comma-separated list of topic suffixes to produce alerts to. If left empty, alerts are sent to the ``generic`` alerter topic. Use `send_to_alerter: false` or `produce_topics: []` for intermediary detectors that should not produce to an alerter.
+- `next_detectors`: (Optional) Comma-separated list of detector instance names that receive this detector's suspicious output.
 
 These parameters are loaded at startup and used to download, verify, and load the model/scaler if not already cached locally (in temp directory).
+
+Detector Chaining
+-----------------
+
+Detector instances can be chained by setting ``next_detectors`` on the upstream detector and ``consume_from: detector`` on the downstream detector. Detector-to-detector topics use the naming pattern ``[detector_to_detector_prefix]-[detector_name]``.
+
+For intermediary detectors that should only forward suspicious output to another detector, set ``send_to_alerter: false`` or ``produce_topics: []``.
 
 
 Stage 7: Alerter
