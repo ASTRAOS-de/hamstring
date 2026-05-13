@@ -234,7 +234,10 @@ To entirely skip the anomaly detection phase, you can set ``inspector_module_nam
      - A unique name amongst the detector configurations top identify the detector instance.
    * - inspector_name
      -
-     - The name of the inspector configuration the detector consumes data from. The same inspector name can be referenced in multiple detector configurations.
+     - The name of the inspector configuration the detector consumes data from. The same inspector name can be referenced in multiple detector configurations. Omit this or set ``consume_from: detector`` when the detector consumes from another detector.
+   * - consume_from
+     - ``inspector``
+     - Set to ``detector`` for detector instances that consume from the detector-to-detector topic instead of an inspector.
    * - detector_module_name
      -
      - Name of the python file in ``"src/detector/plugins/"`` the detector should use.
@@ -255,7 +258,13 @@ To entirely skip the anomaly detection phase, you can set ``inspector_module_nam
      - Threshold for the detector's classification.
    * - produce_topics
      - ``(empty)``
-     - (Optional) Comma-separated list of topic suffixes to produce alerts to. If left empty, defaults to the ``generic`` topic.
+     - (Optional) Comma-separated list of alerter topic suffixes to produce alerts to. If left empty, defaults to the ``generic`` alerter topic. Use ``send_to_alerter: false`` or ``produce_topics: []`` for intermediary detectors that should not produce to an alerter.
+   * - next_detectors
+     - ``(empty)``
+     - (Optional) Comma-separated list of detector instance names that should receive this detector's suspicious output on detector-to-detector topics.
+   * - send_to_alerter
+     - ``true``
+     - Set to ``false`` to disable the detector-to-alerter Kafka output while still allowing detector-to-detector forwarding.
 
 
 ``pipeline.alerting``
