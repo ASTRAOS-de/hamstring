@@ -8,7 +8,7 @@ import sys
 
 sys.path.append(os.getcwd())
 
-from src.detector.plugins.domainator_detector import DomainatorDetector
+from src.detector.plugins.domainator_attributor import DomainatorAttributor
 from src.base.data_classes.batch import Batch
 from src.detector.plugins.domainator_utils import (
     get_domainator_features
@@ -27,23 +27,23 @@ DEFAULT_DATA = {
 }
 
 
-class TestDomainatorDetector(unittest.TestCase):
+class TestDomainatorAttributor(unittest.TestCase):
     def setUp(self):
-        patcher = patch("src.detector.plugins.domainator_detector.logger")
+        patcher = patch("src.detector.plugins.domainator_attributor.logger")
         self.mock_logger = patcher.start()
         self.addCleanup(patcher.stop)
 
     def _create_detector(self, mock_kafka_handler=None, mock_clickhouse=None):
-        """Helper method to create a DomainatorDetector instance with proper mocks."""
+        """Helper method to create a DomainatorAttributor instance with proper mocks."""
         if mock_kafka_handler is None:
             mock_kafka_handler = MagicMock()
         if mock_clickhouse is None:
             mock_clickhouse = MagicMock()
 
         detector_config = {
-            "name": "domainator_detector",
-            "detector_module_name": "domainator_detector",
-            "detector_class_name": "DomainatorDetector",
+            "name": "domainator_attributor",
+            "detector_module_name": "domainator_attributor",
+            "detector_class_name": "DomainatorAttributor",
             "model": "rf",
             "checksum": "9d86d66b4976c9b325bed0934a9a9eb3a20960b08be9afe491454624cc0aaa6c",
             "base_url": "https://heibox.uni-heidelberg.de/d/0d5cbcbe16cd46a58021/",
@@ -56,10 +56,10 @@ class TestDomainatorDetector(unittest.TestCase):
         ), patch(
             "src.detector.detector.ClickHouseKafkaSender", return_value=mock_clickhouse
         ), patch.object(
-            DomainatorDetector, "_get_model", return_value=(MagicMock(), MagicMock())
+            DomainatorAttributor, "_get_model", return_value=(MagicMock(), MagicMock())
         ):
 
-            detector = DomainatorDetector(
+            detector = DomainatorAttributor(
                 detector_config, "test_topic", ["test_produce_topic"]
             )
             detector.model = MagicMock()
@@ -81,10 +81,25 @@ class TestDomainatorDetector(unittest.TestCase):
         mock_kafka = MagicMock()
         mock_ch = MagicMock()
         sut = self._create_detector(mock_kafka, mock_ch)
+        sut.labels = ['tool-A', 'tool-B']
         for _ in range(0, 4, 1):
             sut.messages.append((DEFAULT_DATA))
         with patch(
-            "src.detector.plugins.domainator_detector.DomainatorDetector.predict",
+            "src.detector.plugins.domainator_attributor.DomainatorAttributor.predict",
+            return_value=[[0.01, 0.99]],
+        ):
+            sut.detect()
+            self.assertNotEqual([], sut.warnings)
+
+    def test_detect_message_list(self):
+        mock_kafka = MagicMock()
+        mock_ch = MagicMock()
+        sut = self._create_detector(mock_kafka, mock_ch)
+        sut.labels = ['tool-A', 'tool-B']
+        for _ in range(0, 2, 1):
+            sut.messages.append([DEFAULT_DATA, DEFAULT_DATA])
+        with patch(
+            "src.detector.plugins.domainator_attributor.DomainatorAttributor.predict",
             return_value=[[0.01, 0.99]],
         ):
             sut.detect()

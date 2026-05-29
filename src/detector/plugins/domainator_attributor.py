@@ -15,18 +15,19 @@ module_name = "data_analysis.detector"
 logger = get_logger(module_name)
 
 
-class DomainatorDetector(DetectorBase):
+class DomainatorAttributor(DetectorBase):
     """
-    Detector implementation for identifying data exfiltration and command and control on the
-    subdomain level.
+    Detector implementation for the attribution of a tool or malware that was used in the 
+    data exfiltration and command and control, using the subdomain level labels.
 
-    This class extends the DetectorBase to provide specific functionality for detecting
-    malicious queries. It analyzes subdomain similarity characteristics based on grouping
-    of the queries in windows of fixed size, in order to identify potential data exfiltration
-    or command and control.
+    This class extends the DetectorBase to provide specific functionality for identifying
+    the tool sending the malicious queries. It analyzes subdomain similarity characteristics 
+    based on grouping of the queries in windows of fixed size, similar to the Domainator detector
+    approach. It can be used both as a standalone detector or as a next stage in a pipeline of detectors,
+    dependent on the provided model. 
 
-    The detector extracts various statistical similarity features from windows of subdomains
-    to make predictions about whether a query is likely malicious.
+    The identity detector extracts various statistical similarity features from windows of subdomains
+    to make predictions about what tool likely sent the malicious query or what job/behaviour was observed. 
     """
 
     def __init__(
@@ -37,7 +38,7 @@ class DomainatorDetector(DetectorBase):
         downstream_detector_topics=None,
     ):
         """
-        Initialize the Domainator detector with configuration parameters.
+        Initialize the Domainator attributor with configuration parameters.
 
         Sets up the detector with the model base URL and passes configuration to the
         base class for standard detector initialization.
@@ -49,9 +50,12 @@ class DomainatorDetector(DetectorBase):
         """
         self.model_base_url = detector_config["base_url"]
         self.message_queues = defaultdict(list)
+        
         super().__init__(
             detector_config, consume_topic, produce_topics, downstream_detector_topics
         )
+        
+        self.labels = self.model.classes_
 
     def get_model_download_url(self):
         """
@@ -72,7 +76,7 @@ class DomainatorDetector(DetectorBase):
 
     def get_scaler_download_url(self):
         """
-        Generate the complete URL for downloading the Domainator detection models scaler.
+        Generate the complete URL for downloading the Domainator identification models scaler.
 
         Constructs the URL using the base URL from configuration and appends the
         specific model filename with checksum for verification.
@@ -89,8 +93,8 @@ class DomainatorDetector(DetectorBase):
 
     def predict(self, messages):
         """
-        Process a window of messages and predict if the domain is likely to be used
-        for malicious exfiltration and communication.
+        Process a window of messages and predict what tool was likely used
+        to sent a potentially malicious exfiltration and communication.
 
         Extracts features from the subdomains in the messages and uses the loaded
         machine learning model to generate prediction probabilities.
@@ -105,23 +109,40 @@ class DomainatorDetector(DetectorBase):
         """
         queries = [message["domain_name"] for message in messages]
 
-        y_pred = self.model.predict_proba(get_domainator_features(queries))
+        y_pred = self.model.predict_proba(get_domainator_features(queries))        
         return y_pred
 
     def detect(self):
         logger.info("Start detecting malicious requests.")
+        
         for message in self.messages:
-            message_domain = strip_domain(message["domain_name"])
-            self.message_queues[message_domain].append(message)
+            if isinstance(message, list):
+                # This assumes the current example for the request structure.
+                # Both DomainatorDetector and DomainatorAttributor provide a list to the 'request' key,
+                # due to their structure of processing a window (list) of incoming messages.
+                # Would be better to have a key:value pair in request that defines the domain name outside of the list?
+                message_domain = strip_domain(message[0]["domain_name"])
+                self.message_queues[message_domain].extend(message)
+            else:
+                message_domain = strip_domain(message["domain_name"])
+                self.message_queues[message_domain].append(message)
 
             if len(self.message_queues[message_domain]) >= 3:
                 y_pred = self.predict(self.message_queues[message_domain])
                 logger.info(f"Prediction: {y_pred}")
-                if np.argmax(y_pred, axis=1) == 1 and y_pred[0][1] > self.threshold:
+
+                y_pred_labelled = [
+                    {"attribute": label, "probability": float(score)}
+                    for label, score in zip(self.labels, y_pred[0])
+                    if score >= self.threshold
+                ]
+                logger.info(f"Prediction with labels: {y_pred_labelled}")
+
+                if np.argmax(y_pred, axis=1) == 1 and len(y_pred_labelled) > 0:
                     logger.info("Append malicious request domain to warning.")
                     warning = {
                         "request": self.message_queues[message_domain],
-                        "probability": float(y_pred[0][1]),
+                        "probability": y_pred_labelled,
                         "name": self.name,
                         "sha256": self.checksum,
                     }
