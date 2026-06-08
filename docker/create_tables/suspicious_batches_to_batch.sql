@@ -3,4 +3,4 @@ CREATE TABLE IF NOT EXISTS suspicious_batches_to_batch (
     batch_id UUID NOT NULL
 )
 ENGINE = MergeTree
-PRIMARY KEY (suspicious_batch_id);
+ORDER BY (batch_id, suspicious_batch_id);

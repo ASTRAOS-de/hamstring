@@ -37,17 +37,24 @@ def prepare_all_tables():
         with open(file_name, "r") as file:
             return file.read()
 
-    for filename in os.listdir(CREATE_TABLES_DIRECTORY):
+    def _iter_statements(sql_content: str):
+        for statement in sql_content.split(";"):
+            statement = statement.strip()
+            if statement:
+                yield statement
+
+    for filename in sorted(os.listdir(CREATE_TABLES_DIRECTORY)):
         if filename.endswith(".sql"):
             file_path = os.path.join(CREATE_TABLES_DIRECTORY, filename)
             sql_content = _load_contents(file_path)
 
             with clickhouse_connect.get_client(host=CLICKHOUSE_HOSTNAME) as client:
-                try:
-                    client.command(sql_content)
-                except Exception as e:
-                    logger.critical("Error in CREATE TABLE statement")
-                    raise e
+                for statement in _iter_statements(sql_content):
+                    try:
+                        client.command(statement)
+                    except Exception as e:
+                        logger.critical("Error in CREATE TABLE statement")
+                        raise e
 
 
 class MonitoringAgent:

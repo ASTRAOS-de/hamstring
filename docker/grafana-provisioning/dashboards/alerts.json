@@ -117,7 +117,7 @@
           },
           "pluginVersion": "4.5.1",
           "queryType": "table",
-          "rawSql": "SELECT \n    toStartOf${Granularity}(toDateTime64(alert_timestamp, 6)) AS time_bucket,\n    count(src_ip) AS \"count\"\nFROM alerts\nWHERE alert_timestamp >= toStartOf${Granularity}(toDateTime64($__fromTime, 6)) AND alert_timestamp <= $__toTime\nGROUP BY time_bucket\nORDER BY time_bucket\nWITH FILL\nFROM toStartOf${Granularity}(toDateTime64($__fromTime, 6))\nTO toStartOf${Granularity}(toDateTime64($__toTime, 6))\nSTEP toInterval${Granularity}(1);",
+          "rawSql": "SELECT\n    toStartOf${Granularity}(time_bucket) AS time_bucket,\n    sum(alert_count) AS \"count\"\nFROM alerts_1m\nWHERE time_bucket >= toStartOf${Granularity}(toDateTime($__fromTime))\n  AND time_bucket <= toStartOf${Granularity}(toDateTime($__toTime))\nGROUP BY time_bucket\nORDER BY time_bucket\nWITH FILL\nFROM toStartOf${Granularity}(toDateTime($__fromTime))\nTO toStartOf${Granularity}(toDateTime($__toTime))\nSTEP toInterval${Granularity}(1);",
           "refId": "B"
         }
       ],
@@ -295,7 +295,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1e-9
+          "le": 1e-09
         },
         "legend": {
           "show": false
@@ -336,7 +336,7 @@
           },
           "pluginVersion": "4.6.0",
           "queryType": "table",
-          "rawSql": "SELECT \n    alert_month AS time,\n    SUM(CASE WHEN day = 1 THEN alert_count ELSE 0 END) AS `1`,\n    SUM(CASE WHEN day = 2 THEN alert_count ELSE 0 END) AS `2`,\n    SUM(CASE WHEN day = 3 THEN alert_count ELSE 0 END) AS `3`,\n    SUM(CASE WHEN day = 4 THEN alert_count ELSE 0 END) AS `4`,\n    SUM(CASE WHEN day = 5 THEN alert_count ELSE 0 END) AS `5`,\n    SUM(CASE WHEN day = 6 THEN alert_count ELSE 0 END) AS `6`,\n    SUM(CASE WHEN day = 7 THEN alert_count ELSE 0 END) AS `7`,\n    SUM(CASE WHEN day = 8 THEN alert_count ELSE 0 END) AS `8`,\n    SUM(CASE WHEN day = 9 THEN alert_count ELSE 0 END) AS `9`,\n    SUM(CASE WHEN day = 10 THEN alert_count ELSE 0 END) AS `10`,\n    SUM(CASE WHEN day = 11 THEN alert_count ELSE 0 END) AS `11`,\n    SUM(CASE WHEN day = 12 THEN alert_count ELSE 0 END) AS `12`,\n    SUM(CASE WHEN day = 13 THEN alert_count ELSE 0 END) AS `13`,\n    SUM(CASE WHEN day = 14 THEN alert_count ELSE 0 END) AS `14`,\n    SUM(CASE WHEN day = 15 THEN alert_count ELSE 0 END) AS `15`,\n    SUM(CASE WHEN day = 16 THEN alert_count ELSE 0 END) AS `16`,\n    SUM(CASE WHEN day = 17 THEN alert_count ELSE 0 END) AS `17`,\n    SUM(CASE WHEN day = 18 THEN alert_count ELSE 0 END) AS `18`,\n    SUM(CASE WHEN day = 19 THEN alert_count ELSE 0 END) AS `19`,\n    SUM(CASE WHEN day = 20 THEN alert_count ELSE 0 END) AS `20`,\n    SUM(CASE WHEN day = 21 THEN alert_count ELSE 0 END) AS `21`,\n    SUM(CASE WHEN day = 22 THEN alert_count ELSE 0 END) AS `22`,\n    SUM(CASE WHEN day = 23 THEN alert_count ELSE 0 END) AS `23`,\n    SUM(CASE WHEN day = 24 THEN alert_count ELSE 0 END) AS `24`,\n    SUM(CASE WHEN day = 25 THEN alert_count ELSE 0 END) AS `25`,\n    SUM(CASE WHEN day = 26 THEN alert_count ELSE 0 END) AS `26`,\n    SUM(CASE WHEN day = 27 THEN alert_count ELSE 0 END) AS `27`,\n    SUM(CASE WHEN day = 28 THEN alert_count ELSE 0 END) AS `28`,\n    SUM(CASE WHEN day = 29 THEN alert_count ELSE 0 END) AS `29`,\n    SUM(CASE WHEN day = 30 THEN alert_count ELSE 0 END) AS `30`,\n    SUM(CASE WHEN day = 31 THEN alert_count ELSE 0 END) AS `31`\nFROM (\n    SELECT \n        toStartOfMonth(alert_timestamp) AS alert_month,\n        toDayOfMonth(alert_timestamp) - 1 AS day,\n        COUNT(*) AS alert_count\n    FROM alerts\n    WHERE alert_timestamp >= toStartOfMonth(now() - INTERVAL 1 MONTH)\n      AND alert_timestamp < toStartOfMonth(now())\n    GROUP BY alert_month, day\n) AS subquery\nGROUP BY alert_month\nORDER BY alert_month\nWITH FILL\nFROM toStartOfMonth(now() - INTERVAL 1 YEAR)\nTO toStartOfMonth(now())\nSTEP toIntervalMonth(1);\n",
+          "rawSql": "SELECT\n    alert_month AS time,\n    sumIf(alert_count, day = 1) AS `1`,\n    sumIf(alert_count, day = 2) AS `2`,\n    sumIf(alert_count, day = 3) AS `3`,\n    sumIf(alert_count, day = 4) AS `4`,\n    sumIf(alert_count, day = 5) AS `5`,\n    sumIf(alert_count, day = 6) AS `6`,\n    sumIf(alert_count, day = 7) AS `7`,\n    sumIf(alert_count, day = 8) AS `8`,\n    sumIf(alert_count, day = 9) AS `9`,\n    sumIf(alert_count, day = 10) AS `10`,\n    sumIf(alert_count, day = 11) AS `11`,\n    sumIf(alert_count, day = 12) AS `12`,\n    sumIf(alert_count, day = 13) AS `13`,\n    sumIf(alert_count, day = 14) AS `14`,\n    sumIf(alert_count, day = 15) AS `15`,\n    sumIf(alert_count, day = 16) AS `16`,\n    sumIf(alert_count, day = 17) AS `17`,\n    sumIf(alert_count, day = 18) AS `18`,\n    sumIf(alert_count, day = 19) AS `19`,\n    sumIf(alert_count, day = 20) AS `20`,\n    sumIf(alert_count, day = 21) AS `21`,\n    sumIf(alert_count, day = 22) AS `22`,\n    sumIf(alert_count, day = 23) AS `23`,\n    sumIf(alert_count, day = 24) AS `24`,\n    sumIf(alert_count, day = 25) AS `25`,\n    sumIf(alert_count, day = 26) AS `26`,\n    sumIf(alert_count, day = 27) AS `27`,\n    sumIf(alert_count, day = 28) AS `28`,\n    sumIf(alert_count, day = 29) AS `29`,\n    sumIf(alert_count, day = 30) AS `30`,\n    sumIf(alert_count, day = 31) AS `31`\nFROM (\n    SELECT\n        toStartOfMonth(time_bucket) AS alert_month,\n        toDayOfMonth(time_bucket) AS day,\n        sum(alert_count) AS alert_count\n    FROM alerts_1m\n    WHERE time_bucket >= toStartOfMonth(now() - INTERVAL 1 YEAR)\n      AND time_bucket < toStartOfMonth(now())\n    GROUP BY alert_month, day\n) AS subquery\nGROUP BY alert_month\nORDER BY alert_month\nWITH FILL\nFROM toStartOfMonth(now() - INTERVAL 1 YEAR)\nTO toStartOfMonth(now())\nSTEP toIntervalMonth(1);",
           "refId": "A"
         }
       ],
@@ -391,7 +391,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1e-9
+          "le": 1e-09
         },
         "legend": {
           "show": false
@@ -432,7 +432,7 @@
           },
           "pluginVersion": "4.6.0",
           "queryType": "table",
-          "rawSql": "SELECT \n    alert_day AS time,\n    SUM(CASE WHEN hour = 0 THEN alert_count ELSE 0 END) AS `0`,\n    SUM(CASE WHEN hour = 1 THEN alert_count ELSE 0 END) AS `1`,\n    SUM(CASE WHEN hour = 2 THEN alert_count ELSE 0 END) AS `2`,\n    SUM(CASE WHEN hour = 3 THEN alert_count ELSE 0 END) AS `3`,\n    SUM(CASE WHEN hour = 4 THEN alert_count ELSE 0 END) AS `4`,\n    SUM(CASE WHEN hour = 5 THEN alert_count ELSE 0 END) AS `5`,\n    SUM(CASE WHEN hour = 6 THEN alert_count ELSE 0 END) AS `6`,\n    SUM(CASE WHEN hour = 7 THEN alert_count ELSE 0 END) AS `7`,\n    SUM(CASE WHEN hour = 8 THEN alert_count ELSE 0 END) AS `8`,\n    SUM(CASE WHEN hour = 9 THEN alert_count ELSE 0 END) AS `9`,\n    SUM(CASE WHEN hour = 10 THEN alert_count ELSE 0 END) AS `10`,\n    SUM(CASE WHEN hour = 11 THEN alert_count ELSE 0 END) AS `11`,\n    SUM(CASE WHEN hour = 12 THEN alert_count ELSE 0 END) AS `12`,\n    SUM(CASE WHEN hour = 13 THEN alert_count ELSE 0 END) AS `13`,\n    SUM(CASE WHEN hour = 14 THEN alert_count ELSE 0 END) AS `14`,\n    SUM(CASE WHEN hour = 15 THEN alert_count ELSE 0 END) AS `15`,\n    SUM(CASE WHEN hour = 16 THEN alert_count ELSE 0 END) AS `16`,\n    SUM(CASE WHEN hour = 17 THEN alert_count ELSE 0 END) AS `17`,\n    SUM(CASE WHEN hour = 18 THEN alert_count ELSE 0 END) AS `18`,\n    SUM(CASE WHEN hour = 19 THEN alert_count ELSE 0 END) AS `19`,\n    SUM(CASE WHEN hour = 20 THEN alert_count ELSE 0 END) AS `20`,\n    SUM(CASE WHEN hour = 21 THEN alert_count ELSE 0 END) AS `21`,\n    SUM(CASE WHEN hour = 22 THEN alert_count ELSE 0 END) AS `22`,\n    SUM(CASE WHEN hour = 23 THEN alert_count ELSE 0 END) AS `23`\nFROM (\n    SELECT \n        toDateTime(toStartOfDay(alert_timestamp)) AS alert_day,\n        toHour(alert_timestamp) AS hour,\n        COUNT(*) AS alert_count\n    FROM alerts\n    WHERE alert_timestamp >= toStartOfMonth(now() - INTERVAL 1 MONTH)\n      AND alert_timestamp < toStartOfMonth(now())\n    GROUP BY alert_day, hour\n) AS subquery\nGROUP BY alert_day\nORDER BY alert_day\nWITH FILL\nFROM toDateTime(toStartOfMonth(now() - INTERVAL 1 MONTH))\nTO toDateTime(toStartOfMonth(now()))\nSTEP toIntervalDay(1);\n\n",
+          "rawSql": "SELECT\n    alert_day AS time,\n    sumIf(alert_count, hour = 0) AS `0`,\n    sumIf(alert_count, hour = 1) AS `1`,\n    sumIf(alert_count, hour = 2) AS `2`,\n    sumIf(alert_count, hour = 3) AS `3`,\n    sumIf(alert_count, hour = 4) AS `4`,\n    sumIf(alert_count, hour = 5) AS `5`,\n    sumIf(alert_count, hour = 6) AS `6`,\n    sumIf(alert_count, hour = 7) AS `7`,\n    sumIf(alert_count, hour = 8) AS `8`,\n    sumIf(alert_count, hour = 9) AS `9`,\n    sumIf(alert_count, hour = 10) AS `10`,\n    sumIf(alert_count, hour = 11) AS `11`,\n    sumIf(alert_count, hour = 12) AS `12`,\n    sumIf(alert_count, hour = 13) AS `13`,\n    sumIf(alert_count, hour = 14) AS `14`,\n    sumIf(alert_count, hour = 15) AS `15`,\n    sumIf(alert_count, hour = 16) AS `16`,\n    sumIf(alert_count, hour = 17) AS `17`,\n    sumIf(alert_count, hour = 18) AS `18`,\n    sumIf(alert_count, hour = 19) AS `19`,\n    sumIf(alert_count, hour = 20) AS `20`,\n    sumIf(alert_count, hour = 21) AS `21`,\n    sumIf(alert_count, hour = 22) AS `22`,\n    sumIf(alert_count, hour = 23) AS `23`\nFROM (\n    SELECT\n        toStartOfDay(time_bucket) AS alert_day,\n        toHour(time_bucket) AS hour,\n        sum(alert_count) AS alert_count\n    FROM alerts_1m\n    WHERE time_bucket >= toStartOfMonth(now() - INTERVAL 1 MONTH)\n      AND time_bucket < toStartOfMonth(now())\n    GROUP BY alert_day, hour\n) AS subquery\nGROUP BY alert_day\nORDER BY alert_day\nWITH FILL\nFROM toStartOfMonth(now() - INTERVAL 1 MONTH)\nTO toStartOfMonth(now())\nSTEP toIntervalDay(1);",
           "refId": "A"
         }
       ],
@@ -487,7 +487,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1e-9
+          "le": 1e-09
         },
         "legend": {
           "show": false
@@ -528,7 +528,7 @@
           },
           "pluginVersion": "4.6.0",
           "queryType": "table",
-          "rawSql": "SELECT \n    alert_hour as time,\n    SUM(CASE WHEN quarter = 0 THEN alert_count ELSE 0 END) AS `0`,\n    SUM(CASE WHEN quarter = 1 THEN alert_count ELSE 0 END) AS `15`,\n    SUM(CASE WHEN quarter = 2 THEN alert_count ELSE 0 END) AS `30`,\n    SUM(CASE WHEN quarter = 3 THEN alert_count ELSE 0 END) AS `45`\nFROM (\n    SELECT \n        toDateTime(DATE_FORMAT(alert_timestamp, '%Y-%m-%d %H:00:00')) AS alert_hour,\n        FLOOR(MINUTE(alert_timestamp) / 15) AS quarter,\n        COUNT(*) AS alert_count\n    FROM alerts\n    WHERE alert_hour >= toDateTime(DATE_FORMAT(now() - INTERVAL 1 DAY, '%Y-%m-%d %H:00:00'))\n      AND alert_timestamp <= now()\n    GROUP BY alert_hour, quarter\n) AS subquery\nGROUP BY alert_hour\nORDER BY alert_hour\nWITH FILL\nFROM toDateTime(DATE_FORMAT(now() - INTERVAL 1 DAY, '%Y-%m-%d %H:00:00'))\nTO toDateTime(now())\nSTEP toIntervalHour(1);\n",
+          "rawSql": "SELECT\n    alert_hour AS time,\n    sumIf(alert_count, quarter = 0) AS `0`,\n    sumIf(alert_count, quarter = 1) AS `15`,\n    sumIf(alert_count, quarter = 2) AS `30`,\n    sumIf(alert_count, quarter = 3) AS `45`\nFROM (\n    SELECT\n        toStartOfHour(time_bucket) AS alert_hour,\n        intDiv(toMinute(time_bucket), 15) AS quarter,\n        sum(alert_count) AS alert_count\n    FROM alerts_1m\n    WHERE time_bucket >= toStartOfHour(now() - INTERVAL 1 DAY)\n      AND time_bucket <= now()\n    GROUP BY alert_hour, quarter\n) AS subquery\nGROUP BY alert_hour\nORDER BY alert_hour\nWITH FILL\nFROM toStartOfHour(now() - INTERVAL 1 DAY)\nTO toStartOfHour(now())\nSTEP toIntervalHour(1);",
           "refId": "A"
         }
       ],
@@ -714,7 +714,7 @@
           },
           "pluginVersion": "4.6.0",
           "queryType": "table",
-          "rawSql": "SELECT concat(rowNumberInAllBlocks() + 1, '.') AS \"Rank\", src_ip AS \"Client IP address\", count(logline_id) AS \"# Total Requests\"\nFROM loglines\nWHERE \"Client IP address\" IN (\n  SELECT DISTINCT src_ip\n  FROM alerts\n  WHERE alert_timestamp >= $__fromTime AND alert_timestamp <= $__toTime\n)\nGROUP BY \"Client IP address\"\nORDER BY \"# Total Requests\" DESC\nLIMIT 5",
+          "rawSql": "SELECT\n    concat(rowNumberInAllBlocks() + 1, '.') AS \"Rank\",\n    src_ip AS \"Client IP address\",\n    count(logline_id) AS \"# Total Requests\"\nFROM loglines\nWHERE timestamp >= $__fromTime AND timestamp <= $__toTime\n  AND src_ip IN (\n      SELECT DISTINCT src_ip\n      FROM alerts\n      WHERE alert_timestamp >= $__fromTime AND alert_timestamp <= $__toTime\n  )\nGROUP BY src_ip\nORDER BY \"# Total Requests\" DESC\nLIMIT 5;",
           "refId": "A"
         }
       ],

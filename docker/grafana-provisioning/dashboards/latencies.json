@@ -67,7 +67,7 @@
               }
             ]
           },
-          "unit": "µs"
+          "unit": "\u00b5s"
         },
         "overrides": []
       },
@@ -122,7 +122,7 @@
           },
           "pluginVersion": "4.5.1",
           "queryType": "table",
-          "rawSql": "SELECT\n      'Median Latency' AS value,\n      (\n            SELECT median(value) FROM (\n                  SELECT dateDiff(microsecond, sl.timestamp_in, slt.event_timestamp) AS value\n                  FROM server_logs sl\n                  INNER JOIN server_logs_timestamps slt ON sl.message_id = slt.message_id\n                  WHERE slt.event = 'timestamp_out' AND\n                        sl.timestamp_in >= $__fromTime AND slt.event_timestamp <= $__toTime\n            )\n      ) AS \"LogServer\",\n      (\n            SELECT median(value) FROM (\n                  SELECT dateDiff('microsecond', lt1.timestamp, lt2.timestamp) as value\n                  FROM logline_timestamps lt1\n                  INNER JOIN logline_timestamps lt2 ON lt1.logline_id = lt2.logline_id\n                  WHERE lt1.status = 'in_process' AND lt2.status = 'finished' AND\n                        lt1.stage = 'log_collection.collector' AND lt2.stage = 'log_collection.collector' AND\n                        lt1.timestamp >= $__fromTime AND lt2.timestamp <= $__toTime\n            )\n      ) AS \"LogCollector\",\n      (\n            SELECT median(value) FROM (\n                  SELECT dateDiff('microsecond', lt1.timestamp, lt2.timestamp) AS value\n                  FROM logline_timestamps lt1\n                  INNER JOIN logline_timestamps lt2 ON lt1.logline_id = lt2.logline_id\n                  WHERE lt1.stage = 'log_collection.batch_handler' AND lt1.status = 'in_process' AND\n                        lt2.stage = 'log_collection.batch_handler' AND lt2.status = 'batched' AND\n                        lt1.timestamp >= $__fromTime AND lt2.timestamp <= $__toTime\n            )\n      ) AS \"BatchHandler\",\n      (\n            SELECT median(value) FROM (\n                  SELECT dateDiff('microsecond', bt1.timestamp, bt2.timestamp) as value\n                  FROM batch_timestamps bt1\n                  INNER JOIN batch_timestamps bt2 ON bt1.batch_id = bt2.batch_id\n                  WHERE bt1.status = 'in_process' AND bt2.status = 'finished' AND\n                        bt1.stage = 'log_filtering.prefilter' AND bt2.stage = 'log_filtering.prefilter' AND\n                        bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\n            )\n      ) AS \"Prefilter\",\n      (\n            SELECT median(value) FROM (\n                  SELECT dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\n                  FROM batch_timestamps bt1\n                  INNER JOIN batch_timestamps bt2 ON bt1.batch_id = bt2.batch_id\n                  WHERE bt1.stage = 'data_inspection.inspector' AND bt1.status = 'in_process' AND\n                        bt2.stage = 'data_inspection.inspector' AND bt2.is_active = False AND\n                        bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\n\n                  UNION ALL\n\n                  SELECT dateDiff('microsecond', bt.timestamp, sbt.timestamp) AS value\n                  FROM batch_timestamps bt\n                  INNER JOIN suspicious_batches_to_batch sbtb ON bt.batch_id = sbtb.batch_id\n                  INNER JOIN suspicious_batch_timestamps sbt ON sbtb.suspicious_batch_id = sbt.suspicious_batch_id\n                  WHERE bt.stage = 'data_inspection.inspector' AND bt.status = 'in_process' AND\n                        sbt.stage = 'data_inspection.inspector' AND sbt.status = 'finished' AND\n                        bt.timestamp >= $__fromTime AND sbt.timestamp <= $__toTime\n            )\n      ) AS \"Inspector\",\n      (\n            SELECT median(value) FROM (\n                  SELECT dateDiff('microsecond', sbt1.timestamp, sbt2.timestamp) AS value\n                  FROM suspicious_batch_timestamps sbt1\n                  INNER JOIN suspicious_batch_timestamps sbt2 ON sbt1.suspicious_batch_id = sbt2.suspicious_batch_id\n                  WHERE sbt1.stage = 'data_analysis.detector' AND sbt1.status = 'in_process' AND\n                        sbt2.stage = 'data_analysis.detector' AND sbt2.is_active = False AND\n                        sbt1.timestamp >= $__fromTime AND sbt2.timestamp <= $__toTime\n            )\n      ) AS \"Detector\"",
+          "rawSql": "SELECT\n      'Median Latency' AS value,\n      (\n            SELECT if(isFinite(median(latency_us)), median(latency_us), 0)\n            FROM server_log_latency_values\n            WHERE event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n      ) AS \"LogServer\",\n      (\n            SELECT if(isFinite(median(latency_us)), median(latency_us), 0)\n            FROM logline_stage_latency_values\n            WHERE stage = 'log_collection.collector'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n      ) AS \"LogCollector\",\n      (\n            SELECT if(isFinite(median(latency_us)), median(latency_us), 0)\n            FROM logline_stage_latency_values\n            WHERE stage = 'log_collection.batch_handler'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n      ) AS \"BatchHandler\",\n      (\n            SELECT if(isFinite(median(latency_us)), median(latency_us), 0)\n            FROM batch_stage_latency_values\n            WHERE stage = 'log_filtering.prefilter'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n      ) AS \"Prefilter\",\n      (\n            SELECT if(isFinite(median(latency_us)), median(latency_us), 0)\n            FROM batch_stage_latency_values\n            WHERE stage = 'data_inspection.inspector'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n      ) AS \"Inspector\",\n      (\n            SELECT if(isFinite(median(latency_us)), median(latency_us), 0)\n            FROM suspicious_batch_stage_latency_values\n            WHERE stage = 'data_analysis.detector'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n      ) AS \"Detector\";",
           "refId": "A"
         }
       ],
@@ -184,7 +184,7 @@
               }
             ]
           },
-          "unit": "µs"
+          "unit": "\u00b5s"
         },
         "overrides": [
           {
@@ -255,7 +255,7 @@
           },
           "pluginVersion": "4.10.1",
           "queryType": "table",
-          "rawSql": "SELECT *\nFROM (\n      SELECT 'LogServer' AS name, median(value) as median\n      FROM (\n            SELECT dateDiff(microsecond, sl.timestamp_in, slt.event_timestamp) AS value\n            FROM server_logs sl\n            INNER JOIN server_logs_timestamps slt ON sl.message_id = slt.message_id\n            WHERE slt.event = 'timestamp_out' AND\n                  sl.timestamp_in >= $__fromTime AND slt.event_timestamp <= $__toTime\n      )\n\n      UNION ALL\n\n      SELECT 'Collector' AS name, median(value) as median\n      FROM (\n            SELECT dateDiff('microsecond', lt1.timestamp, lt2.timestamp) as value\n            FROM logline_timestamps lt1\n            INNER JOIN logline_timestamps lt2 ON lt1.logline_id = lt2.logline_id\n            WHERE lt1.status = 'in_process' AND lt2.status = 'finished' AND\n                  lt1.stage = 'log_collection.collector' AND lt2.stage = 'log_collection.collector' AND\n                  lt1.timestamp >= $__fromTime AND lt2.timestamp <= $__toTime\n      )\n\n      UNION ALL\n\n      SELECT 'BatchHandler' AS name, median(value) as median\n      FROM (\n            SELECT dateDiff('microsecond', lt1.timestamp, lt2.timestamp) AS value\n            FROM logline_timestamps lt1\n            INNER JOIN logline_timestamps lt2 ON lt1.logline_id = lt2.logline_id\n            WHERE lt1.stage = 'log_collection.batch_handler' AND lt1.status = 'in_process' AND\n                  lt2.stage = 'log_collection.batch_handler' AND lt2.status = 'batched' AND\n                  lt1.timestamp >= $__fromTime AND lt2.timestamp <= $__toTime\n      )\n\n      UNION ALL\n\n      SELECT 'Prefilter' AS name, median(value) as median\n      FROM (\n            SELECT bt2.timestamp AS time, dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\n            FROM batch_tree bt1\n            INNER JOIN batch_tree bt2 ON bt1.parent_batch_row_id = bt2.parent_batch_row_id\n            WHERE bt1.status = 'in_process' AND bt2.status = 'finished' AND\n                  bt1.instance_name = bt2.instance_name AND\n                  bt1.stage = 'log_filtering.prefilter' AND bt2.stage = 'log_filtering.prefilter' AND\n                  bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\n      )\n\n\n\n\n\n      UNION ALL\n\n      SELECT 'Inspector' AS name, median(value) as median\n      FROM (\n            SELECT bt2.timestamp AS time, dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\n            FROM batch_tree bt1\n            INNER JOIN batch_tree bt2 ON bt1.parent_batch_row_id = bt2.parent_batch_row_id\n            WHERE bt1.stage = 'data_inspection.inspector' AND bt1.status = 'in_process' AND\n                  bt2.stage = 'data_inspection.inspector' AND bt2.status = 'finished' AND\n                  bt1.instance_name = bt2.instance_name AND\n                  bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\n      )\n\n      UNION ALL\n\n      SELECT 'Detector' AS name, median(value) as median\n      FROM (\n            SELECT bt2.timestamp AS time, dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\n            FROM batch_tree bt1\n            INNER JOIN batch_tree bt2 ON bt1.parent_batch_row_id = bt2.parent_batch_row_id\n            WHERE bt1.stage = 'data_analysis.detector' AND bt1.status = 'in_process' AND\n                  bt2.stage = 'data_analysis.detector' AND bt2.status = 'finished' AND\n                  bt1.instance_name = bt2.instance_name AND\n                  dateDiff('microsecond', bt1.timestamp, bt2.timestamp) > 0 AND\n                  bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\n      )\n)\nWHERE name IN (${include_modules:csv});\n",
+          "rawSql": "SELECT *\nFROM (\nSELECT 'LogServer' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS median\nFROM server_log_latency_values\nWHERE event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n\nUNION ALL\n\nSELECT 'Collector' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS median\nFROM logline_stage_latency_values\nWHERE stage = 'log_collection.collector'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n\nUNION ALL\n\nSELECT 'BatchHandler' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS median\nFROM logline_stage_latency_values\nWHERE stage = 'log_collection.batch_handler'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n\nUNION ALL\n\nSELECT 'Prefilter' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS median\nFROM batch_stage_latency_values\nWHERE stage = 'log_filtering.prefilter'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n\nUNION ALL\n\nSELECT 'Inspector' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS median\nFROM batch_stage_latency_values\nWHERE stage = 'data_inspection.inspector'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n\nUNION ALL\n\nSELECT 'Detector' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS median\nFROM suspicious_batch_stage_latency_values\nWHERE stage = 'data_analysis.detector'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n)\nWHERE name IN (${include_modules:csv});",
           "refId": "A"
         }
       ],
@@ -309,7 +309,7 @@
           "displayName": "${__field.column}",
           "fieldMinMax": false,
           "mappings": [],
-          "unit": "µs"
+          "unit": "\u00b5s"
         },
         "overrides": [
           {
@@ -372,7 +372,7 @@
           },
           "pluginVersion": "4.5.1",
           "queryType": "table",
-          "rawSql": "SELECT 'LogServer' AS name, median(value) AS \" \"\nFROM (\n      SELECT slt.event_timestamp AS time, dateDiff(microsecond, sl.timestamp_in, slt.event_timestamp) AS value\n      FROM server_logs sl\n      INNER JOIN server_logs_timestamps slt ON sl.message_id = slt.message_id\n      WHERE slt.event = 'timestamp_out' AND\n            sl.timestamp_in >= $__fromTime AND slt.event_timestamp <= $__toTime\n)\n\nUNION ALL\n\nSELECT 'LogCollector' AS name, median(value) AS \" \"\nFROM (\n      SELECT lt2.timestamp as time, dateDiff('microsecond', lt1.timestamp, lt2.timestamp) as value\n      FROM logline_timestamps lt1\n      INNER JOIN logline_timestamps lt2 ON lt1.logline_id = lt2.logline_id\n      WHERE lt1.status = 'in_process' AND lt2.status = 'finished' AND\n            lt1.stage = 'log_collection.collector' AND lt2.stage = 'log_collection.collector' AND\n            lt1.timestamp >= $__fromTime AND lt2.timestamp <= $__toTime\n)\n\nUNION ALL\n\nSELECT 'BatchHandler' AS name, median(value) AS \" \"\nFROM (\n      SELECT lt2.timestamp AS time, dateDiff('microsecond', lt1.timestamp, lt2.timestamp) AS value\n      FROM logline_timestamps lt1\n      INNER JOIN logline_timestamps lt2 ON lt1.logline_id = lt2.logline_id\n      WHERE lt1.stage = 'log_collection.batch_handler' AND lt1.status = 'in_process' AND\n            lt2.stage = 'log_collection.batch_handler' AND lt2.status = 'batched' AND\n            lt1.timestamp >= $__fromTime AND lt2.timestamp <= $__toTime\n)\n\nUNION ALL\n\nSELECT 'Prefilter' AS name, median(value) AS \" \"\nFROM (\n      SELECT bt2.timestamp AS time, dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\n      FROM batch_timestamps bt1\n      INNER JOIN batch_timestamps bt2 ON bt1.batch_id = bt2.batch_id\n      WHERE bt1.status = 'in_process' AND bt2.status = 'finished' AND\n            bt1.stage = 'log_filtering.prefilter' AND bt2.stage = 'log_filtering.prefilter' AND\n            bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\n)",
+          "rawSql": "SELECT 'LogServer' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS \" \"\nFROM server_log_latency_values\nWHERE event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n\nUNION ALL\n\nSELECT 'LogCollector' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS \" \"\nFROM logline_stage_latency_values\nWHERE stage = 'log_collection.collector'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n\nUNION ALL\n\nSELECT 'BatchHandler' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS \" \"\nFROM logline_stage_latency_values\nWHERE stage = 'log_collection.batch_handler'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n\nUNION ALL\n\nSELECT 'Prefilter' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS \" \"\nFROM batch_stage_latency_values\nWHERE stage = 'log_filtering.prefilter'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime;",
           "refId": "Data Preparation"
         },
         {
@@ -395,7 +395,7 @@
           },
           "pluginVersion": "4.5.1",
           "queryType": "table",
-          "rawSql": "SELECT 'Inspector' AS name, median(value) AS \" \"\nFROM (\n      SELECT dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\n      FROM batch_timestamps bt1\n      INNER JOIN batch_timestamps bt2 ON bt1.batch_id = bt2.batch_id\n      WHERE bt1.stage = 'data_inspection.inspector' AND bt1.status = 'in_process' AND\n            bt2.stage = 'data_inspection.inspector' AND bt2.is_active = False AND\n            bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\n\n      UNION ALL\n\n      SELECT dateDiff('microsecond', bt.timestamp, sbt.timestamp) AS value\n      FROM batch_timestamps bt\n      INNER JOIN suspicious_batches_to_batch sbtb ON bt.batch_id = sbtb.batch_id\n      INNER JOIN suspicious_batch_timestamps sbt ON sbtb.suspicious_batch_id = sbt.suspicious_batch_id\n      WHERE bt.stage = 'data_inspection.inspector' AND bt.status = 'in_process' AND\n            sbt.stage = 'data_inspection.inspector' AND sbt.status = 'finished' AND\n            bt.timestamp >= $__fromTime AND sbt.timestamp <= $__toTime\n      )\n\nUNION ALL\n\nSELECT 'Detector' AS name, median(value) AS \" \"\nFROM (\n      SELECT dateDiff('microsecond', sbt1.timestamp, sbt2.timestamp) AS value\n      FROM suspicious_batch_timestamps sbt1\n      INNER JOIN suspicious_batch_timestamps sbt2 ON sbt1.suspicious_batch_id = sbt2.suspicious_batch_id\n      WHERE sbt1.stage = 'data_analysis.detector' AND sbt1.status = 'in_process' AND\n            sbt2.stage = 'data_analysis.detector' AND sbt2.is_active = False AND\n            sbt1.timestamp >= $__fromTime AND sbt2.timestamp <= $__toTime\n)",
+          "rawSql": "SELECT 'Inspector' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS \" \"\nFROM batch_stage_latency_values\nWHERE stage = 'data_inspection.inspector'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n\nUNION ALL\n\nSELECT 'Detector' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS \" \"\nFROM suspicious_batch_stage_latency_values\nWHERE stage = 'data_analysis.detector'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime;",
           "refId": "Analysis"
         }
       ],
@@ -427,7 +427,7 @@
               }
             ]
           },
-          "unit": "µs"
+          "unit": "\u00b5s"
         },
         "overrides": [
           {
@@ -497,7 +497,7 @@
           },
           "pluginVersion": "4.10.1",
           "queryType": "table",
-          "rawSql": "SELECT *\nFROM (\n      SELECT 'Data analysis phase' AS name, sum(Median)\n      FROM (\n            SELECT 'Inspector' AS name, median(value) AS \"Median\"\n            FROM (\n                  SELECT bt2.timestamp AS time, dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\n                  FROM batch_tree bt1\n                  INNER JOIN batch_tree bt2 ON bt1.parent_batch_row_id = bt2.parent_batch_row_id\n                  WHERE bt1.stage = 'data_inspection.inspector' AND bt1.status = 'in_process' AND\n                        bt2.stage = 'data_inspection.inspector' AND bt2.status = 'finished' AND\n                        bt1.instance_name = bt2.instance_name AND\n                        bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\n            )\n\n            UNION ALL\n\n            SELECT 'Detector' AS name, median(value) AS \"Median\"\n            FROM (\n                  SELECT bt2.timestamp AS time, dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\n                  FROM batch_tree bt1\n                  INNER JOIN batch_tree bt2 ON bt1.parent_batch_row_id = bt2.parent_batch_row_id\n                  WHERE bt1.stage = 'data_analysis.detector' AND bt1.status = 'in_process' AND\n                        bt2.stage = 'data_analysis.detector' AND bt2.status = 'finished' AND\n                        bt1.instance_name = bt2.instance_name AND\n                        dateDiff('microsecond', bt1.timestamp, bt2.timestamp) > 0 AND\n                        bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\n            )\n      )\n\n      UNION ALL\n\n      SELECT 'Data preparation phase' AS name, sum(Median) as median\n      FROM (\n            SELECT 'LogServer' AS name, median(value) AS \"Median\"\n            FROM (\n                  SELECT slt.event_timestamp AS time, dateDiff(microsecond, sl.timestamp_in, slt.event_timestamp) AS value\n                  FROM server_logs sl\n                  INNER JOIN server_logs_timestamps slt ON sl.message_id = slt.message_id\n                  WHERE slt.event = 'timestamp_out' AND\n                        sl.timestamp_in >= $__fromTime AND slt.event_timestamp <= $__toTime\n            )\n\n            UNION ALL\n\n            SELECT 'LogCollector' AS name, median(value) AS \"Median\"\n            FROM (\n                  SELECT lt2.timestamp as time, dateDiff('microsecond', lt1.timestamp, lt2.timestamp) as value\n                  FROM logline_timestamps lt1\n                  INNER JOIN logline_timestamps lt2 ON lt1.logline_id = lt2.logline_id\n                  WHERE lt1.status = 'in_process' AND lt2.status = 'finished' AND\n                        lt1.stage = 'log_collection.collector' AND lt2.stage = 'log_collection.collector' AND\n                        lt1.timestamp >= $__fromTime AND lt2.timestamp <= $__toTime\n            )\n\n            UNION ALL\n\n            SELECT 'BatchHandler' AS name, median(value) AS \"Median\"\n            FROM (\n                  SELECT lt2.timestamp AS time, dateDiff('microsecond', lt1.timestamp, lt2.timestamp) AS value\n                  FROM logline_timestamps lt1\n                  INNER JOIN logline_timestamps lt2 ON lt1.logline_id = lt2.logline_id\n                  WHERE lt1.stage = 'log_collection.batch_handler' AND lt1.status = 'in_process' AND\n                        lt2.stage = 'log_collection.batch_handler' AND lt2.status = 'batched' AND\n                        lt1.timestamp >= $__fromTime AND lt2.timestamp <= $__toTime\n            )\n\n            UNION ALL\n\n            SELECT 'Prefilter' AS name, median(value) AS \"Median\"\n            FROM (\n                  SELECT bt2.timestamp AS time, dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\n                  FROM batch_tree bt1\n                  INNER JOIN batch_tree bt2 ON bt1.parent_batch_row_id = bt2.parent_batch_row_id\n                  WHERE bt1.status = 'in_process' AND bt2.status = 'finished' AND\n                        bt1.instance_name = bt2.instance_name AND\n                        bt1.stage = 'log_filtering.prefilter' AND bt2.stage = 'log_filtering.prefilter' AND\n                        bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\n            )\n      )\n);\n",
+          "rawSql": "SELECT 'Data analysis phase' AS name, sum(median) AS median\nFROM (\nSELECT 'Inspector' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS median\nFROM batch_stage_latency_values\nWHERE stage = 'data_inspection.inspector'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n\nUNION ALL\n\nSELECT 'Detector' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS median\nFROM suspicious_batch_stage_latency_values\nWHERE stage = 'data_analysis.detector'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n)\n\nUNION ALL\n\nSELECT 'Data preparation phase' AS name, sum(median) AS median\nFROM (\nSELECT 'LogServer' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS median\nFROM server_log_latency_values\nWHERE event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n\nUNION ALL\n\nSELECT 'LogCollector' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS median\nFROM logline_stage_latency_values\nWHERE stage = 'log_collection.collector'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n\nUNION ALL\n\nSELECT 'BatchHandler' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS median\nFROM logline_stage_latency_values\nWHERE stage = 'log_collection.batch_handler'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n\nUNION ALL\n\nSELECT 'Prefilter' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS median\nFROM batch_stage_latency_values\nWHERE stage = 'log_filtering.prefilter'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n);",
           "refId": "phases"
         }
       ],
@@ -548,7 +548,7 @@
               }
             ]
           },
-          "unit": "µs"
+          "unit": "\u00b5s"
         },
         "overrides": [
           {
@@ -618,7 +618,7 @@
           },
           "pluginVersion": "4.10.1",
           "queryType": "table",
-          "rawSql": "SELECT 'Including transport and wait time' AS name, sum(median)\nFROM (\n      SELECT 'LogServer' AS name, median(value) as median\n      FROM (\n            SELECT dateDiff(microsecond, sl.timestamp_in, slt.event_timestamp) AS value\n            FROM server_logs sl\n            INNER JOIN server_logs_timestamps slt ON sl.message_id = slt.message_id\n            WHERE slt.event = 'timestamp_out' AND\n                  sl.timestamp_in >= $__fromTime AND slt.event_timestamp <= $__toTime\n      )\n\n      UNION ALL\n\n      SELECT 'LogCollection' AS name, median(value) as median\n      FROM (\n            SELECT dateDiff('microsecond', lt1.timestamp, lt2.timestamp) as value\n            FROM logline_timestamps lt1\n            INNER JOIN logline_timestamps lt2 ON lt1.logline_id = lt2.logline_id\n            WHERE lt1.status = 'in_process' AND lt2.status = 'finished' AND\n                  lt1.stage = 'log_collection.collector' AND lt2.stage = 'log_collection.collector' AND\n                  lt1.timestamp >= $__fromTime AND lt2.timestamp <= $__toTime\n      )\n\n      UNION ALL\n\n      SELECT 'BatchHandler' AS name, median(value) as median\n      FROM (\n            SELECT dateDiff('microsecond', lt1.timestamp, bt2.timestamp) AS value\n            FROM logline_timestamps lt1\n            INNER JOIN logline_to_batches ltb ON ltb.logline_id = lt1.logline_id\n            INNER JOIN batch_timestamps bt2 ON bt2.batch_id = ltb.batch_id\n            WHERE lt1.stage = 'log_collection.batch_handler' AND lt1.status = 'in_process' AND\n                  bt2.stage = 'log_collection.batch_handler' AND bt2.status = 'completed' AND\n                  lt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\n      )\n\n      UNION ALL\n\n      SELECT 'Between BatchHandler and Prefilter' AS name, median(value) AS median\n      FROM (\n      SELECT dateDiff('microseconds', bt1.timestamp, bt2.timestamp) as value\n      FROM batch_tree bt1\n      INNER JOIN batch_tree bt2\n            ON bt1.batch_row_id = bt2.parent_batch_row_id\n      WHERE bt1.stage = 'log_collection.batch_handler' AND bt1.status = 'completed'\n      AND bt2.stage = 'log_filtering.prefilter' AND bt2.status = 'in_process' AND\n            bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\n)\n\n      UNION ALL\n\n      SELECT 'Prefilter' AS name, median(value) as median\n      FROM (\n            SELECT bt2.timestamp AS time, dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\n            FROM batch_tree bt1\n            INNER JOIN batch_tree bt2 ON bt1.parent_batch_row_id = bt2.parent_batch_row_id\n            WHERE bt1.status = 'in_process' AND bt2.status = 'finished' AND\n                  bt1.instance_name = bt2.instance_name AND\n                  bt1.stage = 'log_filtering.prefilter' AND bt2.stage = 'log_filtering.prefilter' AND\n                  bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\n      )\n\n\n\n\n\n      UNION ALL\n\n      SELECT 'Between Prefilter and Inspector' AS name, median(value) AS median\n      FROM (\n      SELECT dateDiff('microseconds', bt1.timestamp, bt2.timestamp) as value\n      FROM batch_tree bt1\n      INNER JOIN batch_tree bt2\n            ON bt1.batch_row_id = bt2.parent_batch_row_id\n      WHERE bt1.stage = 'log_filtering.prefilter' AND bt1.status = 'finished'\n      AND bt2.stage = 'data_inspection.inspector' AND bt2.status = 'in_process' AND\n            bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\n      )\n\n      UNION ALL\n\n      SELECT 'Inspector' AS name, median(value) as median\n      FROM (\n            SELECT bt2.timestamp AS time, dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\n            FROM batch_tree bt1\n            INNER JOIN batch_tree bt2 ON bt1.parent_batch_row_id = bt2.parent_batch_row_id\n            WHERE bt1.stage = 'data_inspection.inspector' AND bt1.status = 'in_process' AND\n                  bt2.stage = 'data_inspection.inspector' AND bt2.status = 'finished' AND\n                  bt1.instance_name = bt2.instance_name AND\n                  bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\n      )\n\n      UNION ALL\n      \n      SELECT 'Between Inspector and Detector' AS name, median(value) AS median\n      FROM (\n      SELECT dateDiff('microseconds', bt1.timestamp, bt2.timestamp) as value\n      FROM batch_tree bt1\n      INNER JOIN batch_tree bt2\n            ON bt1.batch_row_id = bt2.parent_batch_row_id\n      WHERE bt1.stage = 'data_inspection.inspector' AND bt1.status = 'finished'\n      AND bt2.stage = 'data_analysis.detector' AND bt2.status = 'in_process' AND\n            dateDiff('microsecond', bt1.timestamp, bt2.timestamp) > 0 AND\n            bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\n      )\n\n\n      \n      UNION ALL\n\n      SELECT 'Detector' AS name, median(value) as median\n      FROM (\n            SELECT bt2.timestamp AS time, dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\n            FROM batch_tree bt1\n            INNER JOIN batch_tree bt2 ON bt1.parent_batch_row_id = bt2.parent_batch_row_id\n            WHERE bt1.stage = 'data_analysis.detector' AND bt1.status = 'in_process' AND\n                  bt2.stage = 'data_analysis.detector' AND bt2.status = 'finished' AND\n                  bt1.instance_name = bt2.instance_name AND\n                  dateDiff('microsecond', bt1.timestamp, bt2.timestamp) > 0 AND\n                  bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\n      )\n)\n\nUNION ALL\n\nSELECT 'Excluding transport and wait time' AS name, sum(median)\nFROM (\n      SELECT 'LogServer' AS name, median(value) as median\n      FROM (\n            SELECT dateDiff(microsecond, sl.timestamp_in, slt.event_timestamp) AS value\n            FROM server_logs sl\n            INNER JOIN server_logs_timestamps slt ON sl.message_id = slt.message_id\n            WHERE slt.event = 'timestamp_out' AND\n                  sl.timestamp_in >= $__fromTime AND slt.event_timestamp <= $__toTime\n      )\n\n      UNION ALL\n\n      SELECT 'LogCollection' AS name, median(value) as median\n      FROM (\n            SELECT dateDiff('microsecond', lt1.timestamp, lt2.timestamp) as value\n            FROM logline_timestamps lt1\n            INNER JOIN logline_timestamps lt2 ON lt1.logline_id = lt2.logline_id\n            WHERE lt1.status = 'in_process' AND lt2.status = 'finished' AND\n                  lt1.stage = 'log_collection.collector' AND lt2.stage = 'log_collection.collector' AND\n                  lt1.timestamp >= $__fromTime AND lt2.timestamp <= $__toTime\n      )\n\n      UNION ALL\n\n      SELECT 'BatchHandler' AS name, median(value) as median\n      FROM (\n            SELECT dateDiff('microsecond', lt1.timestamp, lt2.timestamp) AS value\n            FROM logline_timestamps lt1\n            INNER JOIN logline_timestamps lt2 ON lt2.logline_id = lt1.logline_id\n            WHERE lt1.stage = 'log_collection.batch_handler' AND lt1.status = 'in_process' AND\n                  lt2.stage = 'log_collection.batch_handler' AND lt2.status = 'batched' AND\n                  lt1.timestamp >= $__fromTime AND lt2.timestamp <= $__toTime\n      )\n\n      UNION ALL\n\n      SELECT 'Prefilter' AS name, median(value) as median\n      FROM (\n            SELECT bt2.timestamp AS time, dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\n            FROM batch_tree bt1\n            INNER JOIN batch_tree bt2 ON bt1.parent_batch_row_id = bt2.parent_batch_row_id\n            WHERE bt1.status = 'in_process' AND bt2.status = 'finished' AND\n                  bt1.instance_name = bt2.instance_name AND\n                  bt1.stage = 'log_filtering.prefilter' AND bt2.stage = 'log_filtering.prefilter' AND\n                  bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\n      )\n\n\n      UNION ALL\n\n      SELECT 'Inspector' AS name, median(value) as median\n      FROM (\n            SELECT bt2.timestamp AS time, dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\n            FROM batch_tree bt1\n            INNER JOIN batch_tree bt2 ON bt1.parent_batch_row_id = bt2.parent_batch_row_id\n            WHERE bt1.stage = 'data_inspection.inspector' AND bt1.status = 'in_process' AND\n                  bt2.stage = 'data_inspection.inspector' AND bt2.status = 'finished' AND\n                  bt1.instance_name = bt2.instance_name AND\n                  bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\n      )\n\n      UNION ALL\n\n      SELECT 'Detector' AS name, median(value) as median\n      FROM (\n            SELECT bt2.timestamp AS time, dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\n            FROM batch_tree bt1\n            INNER JOIN batch_tree bt2 ON bt1.parent_batch_row_id = bt2.parent_batch_row_id\n            WHERE bt1.stage = 'data_analysis.detector' AND bt1.status = 'in_process' AND\n                  bt2.stage = 'data_analysis.detector' AND bt2.status = 'finished' AND\n                  bt1.instance_name = bt2.instance_name AND\n                  dateDiff('microsecond', bt1.timestamp, bt2.timestamp) > 0 AND\n                  bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\n      )\n);\n",
+          "rawSql": "SELECT 'Including transport and wait time' AS name, sum(median) AS median\nFROM (\nSELECT 'LogServer' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS median\nFROM server_log_latency_values\nWHERE event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n\nUNION ALL\n\nSELECT 'LogCollection' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS median\nFROM logline_stage_latency_values\nWHERE stage = 'log_collection.collector'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n\nUNION ALL\n\nSELECT 'BatchHandler' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS median\nFROM logline_stage_latency_values\nWHERE stage = 'log_collection.batch_handler'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n\nUNION ALL\n\nSELECT 'Prefilter' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS median\nFROM batch_stage_latency_values\nWHERE stage = 'log_filtering.prefilter'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n\nUNION ALL\n\nSELECT 'Inspector' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS median\nFROM batch_stage_latency_values\nWHERE stage = 'data_inspection.inspector'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n\nUNION ALL\n\nSELECT 'Detector' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS median\nFROM suspicious_batch_stage_latency_values\nWHERE stage = 'data_analysis.detector'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n\nUNION ALL\n\nSELECT 'Between BatchHandler and Prefilter' AS name, if(isFinite(median(value)), median(value), 0) AS median\nFROM (\n      SELECT dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\n      FROM batch_tree bt1\n      INNER JOIN batch_tree bt2\n              ON bt1.batch_row_id = bt2.parent_batch_row_id\n      WHERE bt1.stage = 'log_collection.batch_handler'\n        AND bt1.status = 'completed'\n        AND bt2.stage = 'log_filtering.prefilter'\n        AND bt2.status = 'in_process'\n        AND bt1.timestamp >= $__fromTime\n        AND bt2.timestamp <= $__toTime\n)\n\nUNION ALL\n\nSELECT 'Between Prefilter and Inspector' AS name, if(isFinite(median(value)), median(value), 0) AS median\nFROM (\n      SELECT dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\n      FROM batch_tree bt1\n      INNER JOIN batch_tree bt2\n              ON bt1.batch_row_id = bt2.parent_batch_row_id\n      WHERE bt1.stage = 'log_filtering.prefilter'\n        AND bt1.status = 'finished'\n        AND bt2.stage = 'data_inspection.inspector'\n        AND bt2.status = 'in_process'\n        AND bt1.timestamp >= $__fromTime\n        AND bt2.timestamp <= $__toTime\n)\n\nUNION ALL\n\nSELECT 'Between Inspector and Detector' AS name, if(isFinite(median(value)), median(value), 0) AS median\nFROM (\n      SELECT dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\n      FROM batch_tree bt1\n      INNER JOIN batch_tree bt2\n              ON bt1.batch_row_id = bt2.parent_batch_row_id\n      WHERE bt1.stage = 'data_inspection.inspector'\n        AND bt1.status = 'finished'\n        AND bt2.stage = 'data_analysis.detector'\n        AND bt2.status = 'in_process'\n        AND bt1.timestamp >= $__fromTime\n        AND bt2.timestamp <= $__toTime\n      AND dateDiff('microsecond', bt1.timestamp, bt2.timestamp) > 0\n)\n)\n\nUNION ALL\n\nSELECT 'Excluding transport and wait time' AS name, sum(median) AS median\nFROM (\nSELECT 'LogServer' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS median\nFROM server_log_latency_values\nWHERE event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n\nUNION ALL\n\nSELECT 'LogCollection' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS median\nFROM logline_stage_latency_values\nWHERE stage = 'log_collection.collector'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n\nUNION ALL\n\nSELECT 'BatchHandler' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS median\nFROM logline_stage_latency_values\nWHERE stage = 'log_collection.batch_handler'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n\nUNION ALL\n\nSELECT 'Prefilter' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS median\nFROM batch_stage_latency_values\nWHERE stage = 'log_filtering.prefilter'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n\nUNION ALL\n\nSELECT 'Inspector' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS median\nFROM batch_stage_latency_values\nWHERE stage = 'data_inspection.inspector'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n\nUNION ALL\n\nSELECT 'Detector' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS median\nFROM suspicious_batch_stage_latency_values\nWHERE stage = 'data_analysis.detector'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n);",
           "refId": "A"
         }
       ],
@@ -717,7 +717,7 @@
               }
             ]
           },
-          "unit": "µs"
+          "unit": "\u00b5s"
         },
         "overrides": [
           {
@@ -812,7 +812,7 @@
           },
           "pluginVersion": "4.5.1",
           "queryType": "timeseries",
-          "rawSql": "SELECT slt.event_timestamp AS time, dateDiff(microsecond, sl.timestamp_in, slt.event_timestamp) AS value\nFROM server_logs sl\nINNER JOIN server_logs_timestamps slt ON sl.message_id = slt.message_id\nWHERE slt.event = 'timestamp_out' AND\n      sl.timestamp_in >= $__fromTime AND slt.event_timestamp <= $__toTime\nORDER BY time ASC;",
+          "rawSql": "SELECT\n    end_timestamp AS time,\n    latency_us AS value\nFROM server_log_latency_values\nWHERE event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\nORDER BY time ASC;",
           "refId": "Latency"
         },
         {
@@ -835,7 +835,7 @@
           },
           "pluginVersion": "4.5.1",
           "queryType": "table",
-          "rawSql": "SELECT\n    toStartOfMinute(time) AS time_bucket,\n    median(latency) AS value\nFROM (\n      SELECT slt.event_timestamp AS time, dateDiff(microsecond, sl.timestamp_in, slt.event_timestamp) AS latency\n      FROM server_logs sl\n      INNER JOIN server_logs_timestamps slt ON sl.message_id = slt.message_id\n      WHERE slt.event = 'timestamp_out'\n        AND sl.timestamp_in >= $__fromTime AND slt.event_timestamp <= $__toTime\n)\nGROUP BY time_bucket\nORDER BY time_bucket;",
+          "rawSql": "SELECT\n    toStartOfMinute(end_timestamp) AS time_bucket,\n    if(isFinite(median(latency_us)), median(latency_us), 0) AS value\nFROM server_log_latency_values\nWHERE event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\nGROUP BY time_bucket\nORDER BY time_bucket;",
           "refId": "Median"
         }
       ],
@@ -867,7 +867,7 @@
               }
             ]
           },
-          "unit": "µs"
+          "unit": "\u00b5s"
         },
         "overrides": []
       },
@@ -916,7 +916,7 @@
           },
           "pluginVersion": "4.5.1",
           "queryType": "table",
-          "rawSql": "SELECT median(value) AS \"Median\"\nFROM (\n      SELECT slt.event_timestamp AS time, dateDiff(microsecond, sl.timestamp_in, slt.event_timestamp) AS value\n      FROM server_logs sl\n      INNER JOIN server_logs_timestamps slt ON sl.message_id = slt.message_id\n      WHERE slt.event = 'timestamp_out' AND\n            sl.timestamp_in >= $__fromTime AND slt.event_timestamp <= $__toTime\n)",
+          "rawSql": "SELECT if(isFinite(median(latency_us)), median(latency_us), 0) AS \"Median\"\nFROM server_log_latency_values\nWHERE event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime;",
           "refId": "A"
         }
       ],
@@ -984,7 +984,7 @@
               }
             ]
           },
-          "unit": "µs"
+          "unit": "\u00b5s"
         },
         "overrides": [
           {
@@ -1079,7 +1079,7 @@
           },
           "pluginVersion": "4.10.1",
           "queryType": "timeseries",
-          "rawSql": "SELECT bt2.timestamp AS time, dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\nFROM batch_tree bt1\nINNER JOIN batch_tree bt2 ON bt1.parent_batch_row_id = bt2.parent_batch_row_id\nWHERE bt1.status = 'in_process' AND bt2.status = 'finished' AND\n      bt1.instance_name = bt2.instance_name AND\n      bt1.stage = 'log_filtering.prefilter' AND bt2.stage = 'log_filtering.prefilter' AND\n      bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\nORDER BY time ASC;\n\n\n",
+          "rawSql": "SELECT\n    end_timestamp AS time,\n    latency_us AS value\nFROM batch_stage_latency_values\nWHERE stage = 'log_filtering.prefilter'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\nORDER BY time ASC;",
           "refId": "Latency"
         },
         {
@@ -1102,7 +1102,7 @@
           },
           "pluginVersion": "4.10.1",
           "queryType": "table",
-          "rawSql": "SELECT\n    toStartOfMinute(time) AS time_bucket,\n    median(latency) AS value\nFROM (\n    SELECT bt2.timestamp AS time, dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS latency\n    FROM batch_tree bt1\n    INNER JOIN batch_tree bt2 ON bt1.parent_batch_row_id = bt2.parent_batch_row_id\n    WHERE bt1.status = 'in_process' AND bt2.status = 'finished' AND\n        bt1.instance_name = bt2.instance_name AND\n        bt1.stage = 'log_filtering.prefilter' AND bt2.stage = 'log_filtering.prefilter' AND\n        bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\n)\nGROUP BY time_bucket\nORDER BY time_bucket;",
+          "rawSql": "SELECT\n    toStartOfMinute(end_timestamp) AS time_bucket,\n    if(isFinite(median(latency_us)), median(latency_us), 0) AS value\nFROM batch_stage_latency_values\nWHERE stage = 'log_filtering.prefilter'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\nGROUP BY time_bucket\nORDER BY time_bucket;",
           "refId": "Median"
         }
       ],
@@ -1134,7 +1134,7 @@
               }
             ]
           },
-          "unit": "µs"
+          "unit": "\u00b5s"
         },
         "overrides": []
       },
@@ -1183,7 +1183,7 @@
           },
           "pluginVersion": "4.10.1",
           "queryType": "table",
-          "rawSql": "SELECT median(value) AS \"Median\"\nFROM (\n      SELECT bt2.timestamp AS time, dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\n      FROM batch_tree bt1\n      INNER JOIN batch_tree bt2 ON bt1.parent_batch_row_id = bt2.parent_batch_row_id\n      WHERE bt1.status = 'in_process' AND bt2.status = 'finished' AND\n            bt1.instance_name = bt2.instance_name AND\n            bt1.stage = 'log_filtering.prefilter' AND bt2.stage = 'log_filtering.prefilter' AND\n            bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\n)\n\n\n\n",
+          "rawSql": "SELECT if(isFinite(median(latency_us)), median(latency_us), 0) AS \"Median\"\nFROM batch_stage_latency_values\nWHERE stage = 'log_filtering.prefilter'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime;",
           "refId": "A"
         }
       ],
@@ -1214,7 +1214,7 @@
               }
             ]
           },
-          "unit": "µs"
+          "unit": "\u00b5s"
         },
         "overrides": []
       },
@@ -1263,7 +1263,7 @@
           },
           "pluginVersion": "4.5.1",
           "queryType": "table",
-          "rawSql": "SELECT min(value) AS \"Minimum\", avg(value) AS \"Average\", max(value) AS \"Maximum\"\nFROM (\n      SELECT slt.event_timestamp AS time, dateDiff(microsecond, sl.timestamp_in, slt.event_timestamp) AS value\n      FROM server_logs sl\n      INNER JOIN server_logs_timestamps slt ON sl.message_id = slt.message_id\n      WHERE slt.event = 'timestamp_out' AND\n            sl.timestamp_in >= $__fromTime AND slt.event_timestamp <= $__toTime\n)",
+          "rawSql": "SELECT\n    min(latency_us) AS \"Minimum\",\n    if(isFinite(avg(latency_us)), avg(latency_us), 0) AS \"Average\",\n    max(latency_us) AS \"Maximum\"\nFROM server_log_latency_values\nWHERE event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime;",
           "refId": "A"
         }
       ],
@@ -1293,7 +1293,7 @@
               }
             ]
           },
-          "unit": "µs"
+          "unit": "\u00b5s"
         },
         "overrides": []
       },
@@ -1342,7 +1342,7 @@
           },
           "pluginVersion": "4.10.1",
           "queryType": "table",
-          "rawSql": "SELECT min(value) AS \"Minimum\", avg(value) AS \"Average\", max(value) AS \"Maximum\"\nFROM (\n      SELECT bt2.timestamp AS time, dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\n      FROM batch_tree bt1\n      INNER JOIN batch_tree bt2 ON bt1.parent_batch_row_id = bt2.parent_batch_row_id\n      WHERE bt1.status = 'in_process' AND bt2.status = 'finished' AND\n            bt1.stage = 'log_filtering.prefilter' AND bt2.stage = 'log_filtering.prefilter' AND\n            bt1.instance_name = bt2.instance_name AND\n            bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\n)\n",
+          "rawSql": "SELECT\n    min(latency_us) AS \"Minimum\",\n    if(isFinite(avg(latency_us)), avg(latency_us), 0) AS \"Average\",\n    max(latency_us) AS \"Maximum\"\nFROM batch_stage_latency_values\nWHERE stage = 'log_filtering.prefilter'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime;",
           "refId": "A"
         }
       ],
@@ -1410,7 +1410,7 @@
               }
             ]
           },
-          "unit": "µs"
+          "unit": "\u00b5s"
         },
         "overrides": [
           {
@@ -1505,7 +1505,7 @@
           },
           "pluginVersion": "4.5.1",
           "queryType": "timeseries",
-          "rawSql": "SELECT lt2.timestamp as time, dateDiff('microsecond', lt1.timestamp, lt2.timestamp) as value\nFROM logline_timestamps lt1\nINNER JOIN logline_timestamps lt2 ON lt1.logline_id = lt2.logline_id\nWHERE lt1.status = 'in_process' AND lt2.status = 'finished' AND\n      lt1.stage = 'log_collection.collector' AND lt2.stage = 'log_collection.collector' AND\n      lt1.timestamp >= $__fromTime AND lt2.timestamp <= $__toTime\nORDER BY time ASC;",
+          "rawSql": "SELECT\n    end_timestamp AS time,\n    latency_us AS value\nFROM logline_stage_latency_values\nWHERE stage = 'log_collection.collector'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\nORDER BY time ASC;",
           "refId": "Latency"
         },
         {
@@ -1528,7 +1528,7 @@
           },
           "pluginVersion": "4.5.1",
           "queryType": "table",
-          "rawSql": "SELECT\n    toStartOfMinute(time) AS time_bucket,\n    median(latency) AS value\nFROM (\n      SELECT lt2.timestamp AS time, dateDiff('microsecond', lt1.timestamp, lt2.timestamp) AS latency\n      FROM logline_timestamps lt1\n      INNER JOIN logline_timestamps lt2 ON lt1.logline_id = lt2.logline_id\n      WHERE lt1.status = 'in_process' AND lt2.status = 'finished' AND\n            lt1.stage = 'log_collection.collector' AND lt2.stage = 'log_collection.collector' AND\n            lt1.timestamp >= $__fromTime AND lt2.timestamp <= $__toTime\n)\nGROUP BY time_bucket\nORDER BY time_bucket;",
+          "rawSql": "SELECT\n    toStartOfMinute(end_timestamp) AS time_bucket,\n    if(isFinite(median(latency_us)), median(latency_us), 0) AS value\nFROM logline_stage_latency_values\nWHERE stage = 'log_collection.collector'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\nGROUP BY time_bucket\nORDER BY time_bucket;",
           "refId": "Median"
         }
       ],
@@ -1560,7 +1560,7 @@
               }
             ]
           },
-          "unit": "µs"
+          "unit": "\u00b5s"
         },
         "overrides": []
       },
@@ -1609,7 +1609,7 @@
           },
           "pluginVersion": "4.5.1",
           "queryType": "table",
-          "rawSql": "SELECT median(value) AS \"Median\"\nFROM (\n      SELECT lt2.timestamp as time, dateDiff('microsecond', lt1.timestamp, lt2.timestamp) as value\n      FROM logline_timestamps lt1\n      INNER JOIN logline_timestamps lt2 ON lt1.logline_id = lt2.logline_id\n      WHERE lt1.status = 'in_process' AND lt2.status = 'finished' AND\n            lt1.stage = 'log_collection.collector' AND lt2.stage = 'log_collection.collector' AND\n            lt1.timestamp >= $__fromTime AND lt2.timestamp <= $__toTime\n)",
+          "rawSql": "SELECT if(isFinite(median(latency_us)), median(latency_us), 0) AS \"Median\"\nFROM logline_stage_latency_values\nWHERE stage = 'log_collection.collector'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime;",
           "refId": "A"
         }
       ],
@@ -1677,7 +1677,7 @@
               }
             ]
           },
-          "unit": "µs"
+          "unit": "\u00b5s"
         },
         "overrides": [
           {
@@ -1772,7 +1772,7 @@
           },
           "pluginVersion": "4.10.1",
           "queryType": "timeseries",
-          "rawSql": "SELECT bt2.timestamp AS time, dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\nFROM batch_tree bt1\n      INNER JOIN batch_tree bt2 ON bt1.parent_batch_row_id = bt2.parent_batch_row_id\nWHERE bt1.stage = 'data_inspection.inspector' AND bt1.status = 'in_process' AND\n      bt2.stage = 'data_inspection.inspector' AND bt2.status = 'finished' AND\n      bt1.instance_name = bt2.instance_name AND\n      bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\nORDER BY time ASC;",
+          "rawSql": "SELECT\n    end_timestamp AS time,\n    latency_us AS value\nFROM batch_stage_latency_values\nWHERE stage = 'data_inspection.inspector'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\nORDER BY time ASC;",
           "refId": "Latency"
         },
         {
@@ -1795,7 +1795,7 @@
           },
           "pluginVersion": "4.10.1",
           "queryType": "table",
-          "rawSql": "SELECT\n    toStartOfMinute(time) AS time_bucket,\n    median(latency) as value\nFROM (\n    SELECT bt2.timestamp AS time, dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS latency\n      FROM batch_tree bt1\n      INNER JOIN batch_tree bt2 ON bt1.parent_batch_row_id = bt2.parent_batch_row_id\n      WHERE bt1.stage = 'data_inspection.inspector' AND bt1.status = 'in_process' AND\n            bt2.stage = 'data_inspection.inspector' AND bt2.status = 'finished' AND\n            bt1.instance_name = bt2.instance_name AND\n            bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\n    )\nGROUP BY time_bucket\nORDER BY time_bucket;",
+          "rawSql": "SELECT\n    toStartOfMinute(end_timestamp) AS time_bucket,\n    if(isFinite(median(latency_us)), median(latency_us), 0) AS value\nFROM batch_stage_latency_values\nWHERE stage = 'data_inspection.inspector'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\nGROUP BY time_bucket\nORDER BY time_bucket;",
           "refId": "Median"
         }
       ],
@@ -1827,7 +1827,7 @@
               }
             ]
           },
-          "unit": "µs"
+          "unit": "\u00b5s"
         },
         "overrides": []
       },
@@ -1876,7 +1876,7 @@
           },
           "pluginVersion": "4.10.1",
           "queryType": "table",
-          "rawSql": "SELECT median(value) AS \"Median\"\nFROM (\n      SELECT bt2.timestamp AS time, dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\n      FROM batch_tree bt1\n      INNER JOIN batch_tree bt2 ON bt1.parent_batch_row_id = bt2.parent_batch_row_id\n      WHERE bt1.stage = 'data_inspection.inspector' AND bt1.status = 'in_process' AND\n            bt2.stage = 'data_inspection.inspector' AND bt2.status = 'finished' AND\n            bt1.instance_name = bt2.instance_name AND\n            bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime)",
+          "rawSql": "SELECT if(isFinite(median(latency_us)), median(latency_us), 0) AS \"Median\"\nFROM batch_stage_latency_values\nWHERE stage = 'data_inspection.inspector'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime;",
           "refId": "A"
         }
       ],
@@ -1907,7 +1907,7 @@
               }
             ]
           },
-          "unit": "µs"
+          "unit": "\u00b5s"
         },
         "overrides": []
       },
@@ -1956,7 +1956,7 @@
           },
           "pluginVersion": "4.5.1",
           "queryType": "table",
-          "rawSql": "SELECT min(value) AS \"Minimum\", avg(value) AS \"Average\", max(value) AS \"Maximum\"\nFROM (\n      SELECT lt2.timestamp as time, dateDiff('microsecond', lt1.timestamp, lt2.timestamp) as value\n      FROM logline_timestamps lt1\n      INNER JOIN logline_timestamps lt2 ON lt1.logline_id = lt2.logline_id\n      WHERE lt1.status = 'in_process' AND lt2.status = 'finished' AND\n            lt1.stage = 'log_collection.collector' AND lt2.stage = 'log_collection.collector' AND\n            lt1.timestamp >= $__fromTime AND lt2.timestamp <= $__toTime\n)",
+          "rawSql": "SELECT\n    min(latency_us) AS \"Minimum\",\n    if(isFinite(avg(latency_us)), avg(latency_us), 0) AS \"Average\",\n    max(latency_us) AS \"Maximum\"\nFROM logline_stage_latency_values\nWHERE stage = 'log_collection.collector'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime;",
           "refId": "A"
         }
       ],
@@ -1986,7 +1986,7 @@
               }
             ]
           },
-          "unit": "µs"
+          "unit": "\u00b5s"
         },
         "overrides": []
       },
@@ -2035,7 +2035,7 @@
           },
           "pluginVersion": "4.10.1",
           "queryType": "table",
-          "rawSql": "SELECT min(value) AS \"Minimum\", avg(value) AS \"Average\", max(value) AS \"Maximum\"\nFROM (\n      SELECT bt2.timestamp AS time, dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\n      FROM batch_tree bt1\n      INNER JOIN batch_tree bt2 ON bt1.parent_batch_row_id = bt2.parent_batch_row_id\n      WHERE bt1.stage = 'data_inspection.inspector' AND bt1.status = 'in_process' AND\n            bt2.stage = 'data_inspection.inspector' AND bt2.status = 'finished' AND\n            bt1.instance_name = bt2.instance_name AND\n            bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\n)",
+          "rawSql": "SELECT\n    min(latency_us) AS \"Minimum\",\n    if(isFinite(avg(latency_us)), avg(latency_us), 0) AS \"Average\",\n    max(latency_us) AS \"Maximum\"\nFROM batch_stage_latency_values\nWHERE stage = 'data_inspection.inspector'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime;",
           "refId": "A"
         }
       ],
@@ -2102,7 +2102,7 @@
               }
             ]
           },
-          "unit": "µs"
+          "unit": "\u00b5s"
         },
         "overrides": [
           {
@@ -2197,7 +2197,7 @@
           },
           "pluginVersion": "4.5.1",
           "queryType": "timeseries",
-          "rawSql": "SELECT lt2.timestamp AS time, dateDiff('microsecond', lt1.timestamp, lt2.timestamp) AS value\nFROM logline_timestamps lt1\nINNER JOIN logline_timestamps lt2 ON lt1.logline_id = lt2.logline_id\nWHERE lt1.stage = 'log_collection.batch_handler' AND lt1.status = 'in_process' AND\n      lt2.stage = 'log_collection.batch_handler' AND lt2.status = 'batched' AND\n      lt1.timestamp >= $__fromTime AND lt2.timestamp <= $__toTime\nORDER BY time ASC;",
+          "rawSql": "SELECT\n    end_timestamp AS time,\n    latency_us AS value\nFROM logline_stage_latency_values\nWHERE stage = 'log_collection.batch_handler'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\nORDER BY time ASC;",
           "refId": "Latency"
         },
         {
@@ -2220,7 +2220,7 @@
           },
           "pluginVersion": "4.5.1",
           "queryType": "table",
-          "rawSql": "SELECT\n    toStartOfMinute(time) AS time_bucket,\n    median(latency) as value\nFROM (\n    SELECT lt2.timestamp AS time, dateDiff('microsecond', lt1.timestamp, lt2.timestamp) AS latency\n    FROM logline_timestamps lt1\n    INNER JOIN logline_timestamps lt2 ON lt1.logline_id = lt2.logline_id\n    WHERE lt1.stage = 'log_collection.batch_handler' AND lt1.status = 'in_process' AND\n        lt2.stage = 'log_collection.batch_handler' AND lt2.status = 'batched' AND\n        lt1.timestamp >= $__fromTime AND lt2.timestamp <= $__toTime\n)\nGROUP BY time_bucket\nORDER BY time_bucket;",
+          "rawSql": "SELECT\n    toStartOfMinute(end_timestamp) AS time_bucket,\n    if(isFinite(median(latency_us)), median(latency_us), 0) AS value\nFROM logline_stage_latency_values\nWHERE stage = 'log_collection.batch_handler'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\nGROUP BY time_bucket\nORDER BY time_bucket;",
           "refId": "Median"
         }
       ],
@@ -2252,7 +2252,7 @@
               }
             ]
           },
-          "unit": "µs"
+          "unit": "\u00b5s"
         },
         "overrides": []
       },
@@ -2301,7 +2301,7 @@
           },
           "pluginVersion": "4.5.1",
           "queryType": "table",
-          "rawSql": "SELECT median(value) AS \"Median\"\nFROM (\n      SELECT lt2.timestamp AS time, dateDiff('microsecond', lt1.timestamp, lt2.timestamp) AS value\n      FROM logline_timestamps lt1\n      INNER JOIN logline_timestamps lt2 ON lt1.logline_id = lt2.logline_id\n      WHERE lt1.stage = 'log_collection.batch_handler' AND lt1.status = 'in_process' AND\n            lt2.stage = 'log_collection.batch_handler' AND lt2.status = 'batched' AND\n            lt1.timestamp >= $__fromTime AND lt2.timestamp <= $__toTime\n)",
+          "rawSql": "SELECT if(isFinite(median(latency_us)), median(latency_us), 0) AS \"Median\"\nFROM logline_stage_latency_values\nWHERE stage = 'log_collection.batch_handler'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime;",
           "refId": "A"
         }
       ],
@@ -2369,7 +2369,7 @@
               }
             ]
           },
-          "unit": "µs"
+          "unit": "\u00b5s"
         },
         "overrides": [
           {
@@ -2464,7 +2464,7 @@
           },
           "pluginVersion": "4.10.1",
           "queryType": "timeseries",
-          "rawSql": "SELECT bt2.timestamp AS time, dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\nFROM batch_tree bt1\n      INNER JOIN batch_tree bt2 ON bt1.parent_batch_row_id = bt2.parent_batch_row_id\nWHERE bt1.stage = 'data_analysis.detector' AND bt1.status = 'in_process' AND\n      bt2.stage = 'data_analysis.detector' AND bt2.status = 'finished' AND\n      bt1.instance_name = bt2.instance_name AND\n      dateDiff('microsecond', bt1.timestamp, bt2.timestamp) > 0 AND\n      bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\nORDER BY time ASC;",
+          "rawSql": "SELECT\n    end_timestamp AS time,\n    latency_us AS value\nFROM suspicious_batch_stage_latency_values\nWHERE stage = 'data_analysis.detector'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\nORDER BY time ASC;",
           "refId": "Latency"
         },
         {
@@ -2487,7 +2487,7 @@
           },
           "pluginVersion": "4.10.1",
           "queryType": "table",
-          "rawSql": "SELECT\n    toStartOfMinute(time) AS time_bucket,\n    median(latency) AS value\nFROM (\n      SELECT bt2.timestamp AS time, dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS latency\n      FROM batch_tree bt1\n      INNER JOIN batch_tree bt2 ON bt1.parent_batch_row_id = bt2.parent_batch_row_id\n      WHERE bt1.stage = 'data_analysis.detector' AND bt1.status = 'in_process' AND\n            bt2.stage = 'data_analysis.detector' AND bt2.status = 'finished' AND\n            bt1.instance_name = bt2.instance_name AND\n            bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\n)\nGROUP BY time_bucket\nORDER BY time_bucket;",
+          "rawSql": "SELECT\n    toStartOfMinute(end_timestamp) AS time_bucket,\n    if(isFinite(median(latency_us)), median(latency_us), 0) AS value\nFROM suspicious_batch_stage_latency_values\nWHERE stage = 'data_analysis.detector'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\nGROUP BY time_bucket\nORDER BY time_bucket;",
           "refId": "Median"
         }
       ],
@@ -2519,7 +2519,7 @@
               }
             ]
           },
-          "unit": "µs"
+          "unit": "\u00b5s"
         },
         "overrides": []
       },
@@ -2568,7 +2568,7 @@
           },
           "pluginVersion": "4.10.1",
           "queryType": "table",
-          "rawSql": "SELECT median(value) AS \"Median\"\nFROM (\n      SELECT bt2.timestamp AS time, dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\n      FROM batch_tree bt1\n      INNER JOIN batch_tree bt2 ON bt1.parent_batch_row_id = bt2.parent_batch_row_id\n      WHERE bt1.stage = 'data_analysis.detector' AND bt1.status = 'in_process' AND\n            bt2.stage = 'data_analysis.detector' AND bt2.status = 'finished' AND\n            bt1.instance_name = bt2.instance_name AND\n            dateDiff('microsecond', bt1.timestamp, bt2.timestamp) > 0 AND\n            bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\n)",
+          "rawSql": "SELECT if(isFinite(median(latency_us)), median(latency_us), 0) AS \"Median\"\nFROM suspicious_batch_stage_latency_values\nWHERE stage = 'data_analysis.detector'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime;",
           "refId": "A"
         }
       ],
@@ -2599,7 +2599,7 @@
               }
             ]
           },
-          "unit": "µs"
+          "unit": "\u00b5s"
         },
         "overrides": []
       },
@@ -2648,7 +2648,7 @@
           },
           "pluginVersion": "4.5.1",
           "queryType": "table",
-          "rawSql": "SELECT min(value) AS \"Minimum\", avg(value) AS \"Average\", max(value) AS \"Maximum\"\nFROM (\n      SELECT lt2.timestamp AS time, dateDiff('microsecond', lt1.timestamp, lt2.timestamp) AS value\n      FROM logline_timestamps lt1\n      INNER JOIN logline_timestamps lt2 ON lt1.logline_id = lt2.logline_id\n      WHERE lt1.stage = 'log_collection.batch_handler' AND lt1.status = 'in_process' AND\n            lt2.stage = 'log_collection.batch_handler' AND lt2.status = 'batched' AND\n            lt1.timestamp >= $__fromTime AND lt2.timestamp <= $__toTime\n)",
+          "rawSql": "SELECT\n    min(latency_us) AS \"Minimum\",\n    if(isFinite(avg(latency_us)), avg(latency_us), 0) AS \"Average\",\n    max(latency_us) AS \"Maximum\"\nFROM logline_stage_latency_values\nWHERE stage = 'log_collection.batch_handler'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime;",
           "refId": "A"
         }
       ],
@@ -2678,7 +2678,7 @@
               }
             ]
           },
-          "unit": "µs"
+          "unit": "\u00b5s"
         },
         "overrides": []
       },
@@ -2727,7 +2727,7 @@
           },
           "pluginVersion": "4.10.1",
           "queryType": "table",
-          "rawSql": "SELECT min(value) AS \"Minimum\", avg(value) AS \"Average\", max(value) AS \"Maximum\"\nFROM (\n      SELECT bt2.timestamp AS time, dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\n      FROM batch_tree bt1\n      INNER JOIN batch_tree bt2 ON bt1.parent_batch_row_id = bt2.parent_batch_row_id\n      WHERE bt1.stage = 'data_analysis.detector' AND bt1.status = 'in_process' AND\n            bt2.stage = 'data_analysis.detector' AND bt2.status = 'finished' AND\n            bt1.instance_name = bt2.instance_name AND\n            dateDiff('microsecond', bt1.timestamp, bt2.timestamp) > 0 AND\n            bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\n)\n",
+          "rawSql": "SELECT\n    min(latency_us) AS \"Minimum\",\n    if(isFinite(avg(latency_us)), avg(latency_us), 0) AS \"Average\",\n    max(latency_us) AS \"Maximum\"\nFROM suspicious_batch_stage_latency_values\nWHERE stage = 'data_analysis.detector'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime;",
           "refId": "A"
         }
       ],
@@ -2807,7 +2807,7 @@
               }
             ]
           },
-          "unit": "µs"
+          "unit": "\u00b5s"
         },
         "overrides": [
           {
@@ -2904,7 +2904,7 @@
           },
           "pluginVersion": "4.10.1",
           "queryType": "timeseries",
-          "rawSql": "SELECT bt2.timestamp AS time, dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\n  FROM batch_tree bt1\n  INNER JOIN batch_tree bt2\n          ON bt1.batch_row_id = bt2.parent_batch_row_id\n  WHERE bt1.stage = 'log_collection.batch_handler' AND bt1.status = 'completed'\n    AND bt2.stage = 'log_filtering.prefilter' AND bt2.status = 'in_process' AND\n        bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\nORDER BY time ASC;\n\n\n\n\n",
+          "rawSql": "SELECT\n    bt2.timestamp AS time,\n    dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\nFROM batch_tree bt1\nINNER JOIN batch_tree bt2\n        ON bt1.batch_row_id = bt2.parent_batch_row_id\nWHERE bt1.stage = 'log_collection.batch_handler'\n  AND bt1.status = 'completed'\n  AND bt2.stage = 'log_filtering.prefilter'\n  AND bt2.status = 'in_process'\n  AND bt1.timestamp >= $__fromTime\n  AND bt2.timestamp <= $__toTime\nORDER BY time ASC;",
           "refId": "Latency"
         },
         {
@@ -2927,7 +2927,7 @@
           },
           "pluginVersion": "4.10.1",
           "queryType": "table",
-          "rawSql": "SELECT\n    toStartOfMinute(time) AS time_bucket,\n    median(value) AS value\nFROM (\n  SELECT bt2.timestamp AS time, dateDiff('microseconds', bt1.timestamp, bt2.timestamp) as value\n  FROM batch_tree bt1\n  INNER JOIN batch_tree bt2\n          ON bt1.batch_row_id = bt2.parent_batch_row_id\n  WHERE bt1.stage = 'log_collection.batch_handler' AND bt1.status = 'completed'\n    AND bt2.stage = 'log_filtering.prefilter' AND bt2.status = 'in_process' AND\n        bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\n)\nGROUP BY time_bucket\nORDER BY time_bucket;",
+          "rawSql": "SELECT\n    toStartOfMinute(time) AS time_bucket,\n    if(isFinite(median(value)), median(value), 0) AS value\nFROM (\nSELECT\n    bt2.timestamp AS time,\n    dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\nFROM batch_tree bt1\nINNER JOIN batch_tree bt2\n        ON bt1.batch_row_id = bt2.parent_batch_row_id\nWHERE bt1.stage = 'log_collection.batch_handler'\n  AND bt1.status = 'completed'\n  AND bt2.stage = 'log_filtering.prefilter'\n  AND bt2.status = 'in_process'\n  AND bt1.timestamp >= $__fromTime\n  AND bt2.timestamp <= $__toTime\n)\nGROUP BY time_bucket\nORDER BY time_bucket;",
           "refId": "Median"
         }
       ],
@@ -2994,7 +2994,7 @@
               }
             ]
           },
-          "unit": "µs"
+          "unit": "\u00b5s"
         },
         "overrides": [
           {
@@ -3089,7 +3089,7 @@
           },
           "pluginVersion": "4.10.1",
           "queryType": "timeseries",
-          "rawSql": "SELECT bt2.timestamp AS time, dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\n  FROM batch_tree bt1\n  INNER JOIN batch_tree bt2\n          ON bt1.batch_row_id = bt2.parent_batch_row_id\n  WHERE bt1.stage = 'log_filtering.prefilter' AND bt1.status = 'finished'\n    AND bt2.stage = 'data_inspection.inspector' AND bt2.status = 'in_process' AND\n        bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\nORDER BY time ASC;",
+          "rawSql": "SELECT\n    bt2.timestamp AS time,\n    dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\nFROM batch_tree bt1\nINNER JOIN batch_tree bt2\n        ON bt1.batch_row_id = bt2.parent_batch_row_id\nWHERE bt1.stage = 'log_filtering.prefilter'\n  AND bt1.status = 'finished'\n  AND bt2.stage = 'data_inspection.inspector'\n  AND bt2.status = 'in_process'\n  AND bt1.timestamp >= $__fromTime\n  AND bt2.timestamp <= $__toTime\nORDER BY time ASC;",
           "refId": "Latency"
         },
         {
@@ -3112,7 +3112,7 @@
           },
           "pluginVersion": "4.10.1",
           "queryType": "table",
-          "rawSql": "SELECT\n    toStartOfMinute(time) AS time_bucket,\n    median(value) AS value\nFROM (\n  SELECT bt2.timestamp AS time, dateDiff('microseconds', bt1.timestamp, bt2.timestamp) as value\n  FROM batch_tree bt1\n  INNER JOIN batch_tree bt2\n          ON bt1.batch_row_id = bt2.parent_batch_row_id\n  WHERE bt1.stage = 'log_filtering.prefilter' AND bt1.status = 'finished'\n    AND bt2.stage = 'data_inspection.inspector' AND bt2.status = 'in_process' AND\n        bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\n)\nGROUP BY time_bucket\nORDER BY time_bucket;",
+          "rawSql": "SELECT\n    toStartOfMinute(time) AS time_bucket,\n    if(isFinite(median(value)), median(value), 0) AS value\nFROM (\nSELECT\n    bt2.timestamp AS time,\n    dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\nFROM batch_tree bt1\nINNER JOIN batch_tree bt2\n        ON bt1.batch_row_id = bt2.parent_batch_row_id\nWHERE bt1.stage = 'log_filtering.prefilter'\n  AND bt1.status = 'finished'\n  AND bt2.stage = 'data_inspection.inspector'\n  AND bt2.status = 'in_process'\n  AND bt1.timestamp >= $__fromTime\n  AND bt2.timestamp <= $__toTime\n)\nGROUP BY time_bucket\nORDER BY time_bucket;",
           "refId": "Median"
         }
       ],
@@ -3179,7 +3179,7 @@
               }
             ]
           },
-          "unit": "µs"
+          "unit": "\u00b5s"
         },
         "overrides": [
           {
@@ -3274,7 +3274,7 @@
           },
           "pluginVersion": "4.10.1",
           "queryType": "timeseries",
-          "rawSql": "SELECT bt2.timestamp AS time, dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\n  FROM batch_tree bt1\n  INNER JOIN batch_tree bt2\n          ON bt1.batch_row_id = bt2.parent_batch_row_id\n  WHERE bt1.stage = 'data_inspection.inspector' AND bt1.status = 'finished'\n    AND bt2.stage = 'data_analysis.detector' AND bt2.status = 'in_process' AND\n        dateDiff('microsecond', bt1.timestamp, bt2.timestamp) > 0 AND\n        bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\nORDER BY time ASC;\n\n\n",
+          "rawSql": "SELECT\n    bt2.timestamp AS time,\n    dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\nFROM batch_tree bt1\nINNER JOIN batch_tree bt2\n        ON bt1.batch_row_id = bt2.parent_batch_row_id\nWHERE bt1.stage = 'data_inspection.inspector'\n  AND bt1.status = 'finished'\n  AND bt2.stage = 'data_analysis.detector'\n  AND bt2.status = 'in_process'\n  AND bt1.timestamp >= $__fromTime\n  AND bt2.timestamp <= $__toTime\n    AND dateDiff('microsecond', bt1.timestamp, bt2.timestamp) > 0\nORDER BY time ASC;",
           "refId": "Latency"
         },
         {
@@ -3297,7 +3297,7 @@
           },
           "pluginVersion": "4.10.1",
           "queryType": "table",
-          "rawSql": "SELECT\n    toStartOfMinute(time) AS time_bucket,\n    median(value) AS value\nFROM (\n  SELECT bt2.timestamp AS time, dateDiff('microseconds', bt1.timestamp, bt2.timestamp) as value\n  FROM batch_tree bt1\n  INNER JOIN batch_tree bt2\n          ON bt1.batch_row_id = bt2.parent_batch_row_id\n  WHERE bt1.stage = 'data_inspection.inspector' AND bt1.status = 'finished'\n    AND bt2.stage = 'data_analysis.detector' AND bt2.status = 'in_process' AND\n        bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\n)\nGROUP BY time_bucket\nORDER BY time_bucket;",
+          "rawSql": "SELECT\n    toStartOfMinute(time) AS time_bucket,\n    if(isFinite(median(value)), median(value), 0) AS value\nFROM (\nSELECT\n    bt2.timestamp AS time,\n    dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\nFROM batch_tree bt1\nINNER JOIN batch_tree bt2\n        ON bt1.batch_row_id = bt2.parent_batch_row_id\nWHERE bt1.stage = 'data_inspection.inspector'\n  AND bt1.status = 'finished'\n  AND bt2.stage = 'data_analysis.detector'\n  AND bt2.status = 'in_process'\n  AND bt1.timestamp >= $__fromTime\n  AND bt2.timestamp <= $__toTime\n    AND dateDiff('microsecond', bt1.timestamp, bt2.timestamp) > 0\n)\nGROUP BY time_bucket\nORDER BY time_bucket;",
           "refId": "Median"
         }
       ],
@@ -3326,7 +3326,7 @@
               }
             ]
           },
-          "unit": "µs"
+          "unit": "\u00b5s"
         },
         "overrides": [
           {
@@ -3391,7 +3391,7 @@
           },
           "pluginVersion": "4.10.1",
           "queryType": "table",
-          "rawSql": "SELECT min(value) AS \"Minimum\", median(value) AS \"Median\", avg(value) AS \"Average\", max(value) AS \"Maximum\"\nFROM (\n  SELECT dateDiff('microseconds', bt1.timestamp, bt2.timestamp) as value\n  FROM batch_tree bt1\n  INNER JOIN batch_tree bt2\n          ON bt1.batch_row_id = bt2.parent_batch_row_id\n  WHERE bt1.stage = 'log_collection.batch_handler' AND bt1.status = 'completed'\n    AND bt2.stage = 'log_filtering.prefilter' AND bt2.status = 'in_process' AND\n        bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\n)",
+          "rawSql": "SELECT\n    min(value) AS \"Minimum\",\n    if(isFinite(median(value)), median(value), 0) AS \"Median\",\n    if(isFinite(avg(value)), avg(value), 0) AS \"Average\",\n    max(value) AS \"Maximum\"\nFROM (\nSELECT\n    bt2.timestamp AS time,\n    dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\nFROM batch_tree bt1\nINNER JOIN batch_tree bt2\n        ON bt1.batch_row_id = bt2.parent_batch_row_id\nWHERE bt1.stage = 'log_collection.batch_handler'\n  AND bt1.status = 'completed'\n  AND bt2.stage = 'log_filtering.prefilter'\n  AND bt2.status = 'in_process'\n  AND bt1.timestamp >= $__fromTime\n  AND bt2.timestamp <= $__toTime\n);",
           "refId": "A"
         }
       ],
@@ -3419,7 +3419,7 @@
               }
             ]
           },
-          "unit": "µs"
+          "unit": "\u00b5s"
         },
         "overrides": [
           {
@@ -3484,7 +3484,7 @@
           },
           "pluginVersion": "4.10.1",
           "queryType": "table",
-          "rawSql": "SELECT min(value) AS \"Minimum\", median(value) AS \"Median\", avg(value) AS \"Average\", max(value) AS \"Maximum\"\nFROM (\n  SELECT dateDiff('microseconds', bt1.timestamp, bt2.timestamp) as value\n  FROM batch_tree bt1\n  INNER JOIN batch_tree bt2\n          ON bt1.batch_row_id = bt2.parent_batch_row_id\n  WHERE bt1.stage = 'log_filtering.prefilter' AND bt1.status = 'finished'\n    AND bt2.stage = 'data_inspection.inspector' AND bt2.status = 'in_process' AND\n        bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\n)",
+          "rawSql": "SELECT\n    min(value) AS \"Minimum\",\n    if(isFinite(median(value)), median(value), 0) AS \"Median\",\n    if(isFinite(avg(value)), avg(value), 0) AS \"Average\",\n    max(value) AS \"Maximum\"\nFROM (\nSELECT\n    bt2.timestamp AS time,\n    dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\nFROM batch_tree bt1\nINNER JOIN batch_tree bt2\n        ON bt1.batch_row_id = bt2.parent_batch_row_id\nWHERE bt1.stage = 'log_filtering.prefilter'\n  AND bt1.status = 'finished'\n  AND bt2.stage = 'data_inspection.inspector'\n  AND bt2.status = 'in_process'\n  AND bt1.timestamp >= $__fromTime\n  AND bt2.timestamp <= $__toTime\n);",
           "refId": "A"
         }
       ],
@@ -3512,7 +3512,7 @@
               }
             ]
           },
-          "unit": "µs"
+          "unit": "\u00b5s"
         },
         "overrides": [
           {
@@ -3577,7 +3577,7 @@
           },
           "pluginVersion": "4.10.1",
           "queryType": "table",
-          "rawSql": "SELECT min(value) AS \"Minimum\", median(value) AS \"Median\", avg(value) AS \"Average\", max(value) AS \"Maximum\"\nFROM (\n  SELECT dateDiff('microseconds', bt1.timestamp, bt2.timestamp) as value\n  FROM batch_tree bt1\n  INNER JOIN batch_tree bt2\n          ON bt1.batch_row_id = bt2.parent_batch_row_id\n  WHERE bt1.stage = 'data_inspection.inspector' AND bt1.status = 'finished'\n    AND bt2.stage = 'data_analysis.detector' AND bt2.status = 'in_process' AND\n        dateDiff('microsecond', bt1.timestamp, bt2.timestamp) > 0 AND\n        bt1.timestamp >= $__fromTime AND bt2.timestamp <= $__toTime\n)\n\n",
+          "rawSql": "SELECT\n    min(value) AS \"Minimum\",\n    if(isFinite(median(value)), median(value), 0) AS \"Median\",\n    if(isFinite(avg(value)), avg(value), 0) AS \"Average\",\n    max(value) AS \"Maximum\"\nFROM (\nSELECT\n    bt2.timestamp AS time,\n    dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\nFROM batch_tree bt1\nINNER JOIN batch_tree bt2\n        ON bt1.batch_row_id = bt2.parent_batch_row_id\nWHERE bt1.stage = 'data_inspection.inspector'\n  AND bt1.status = 'finished'\n  AND bt2.stage = 'data_analysis.detector'\n  AND bt2.status = 'in_process'\n  AND bt1.timestamp >= $__fromTime\n  AND bt2.timestamp <= $__toTime\n    AND dateDiff('microsecond', bt1.timestamp, bt2.timestamp) > 0\n);",
           "refId": "A"
         }
       ],

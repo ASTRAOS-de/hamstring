@@ -1,4 +1,6 @@
 import unittest
+import uuid
+from datetime import datetime
 from typing import Optional
 from unittest.mock import patch, Mock
 
@@ -160,6 +162,31 @@ class TestAdd(unittest.TestCase):
 
         # Assert
         mock_insert.assert_called_once_with(test_table_name)
+
+    def test_batch_tree_parent_none_is_stored_as_empty_string(self):
+        # Arrange
+        test_data = {
+            "batch_row_id": "root",
+            "batch_id": uuid.UUID("5236b147-5b0d-44a8-981f-bd7da8c54733"),
+            "parent_batch_row_id": None,
+            "instance_name": "collector",
+            "stage": "log_collection.batch_handler",
+            "status": "completed",
+            "timestamp": datetime(2026, 6, 8, 14, 1, 24),
+        }
+
+        # Act
+        with patch(
+            "src.monitoring.clickhouse_batch_sender.ClickHouseBatchSender._start_timer"
+        ):
+            self.sut.add("batch_tree", test_data)
+
+        # Assert
+        self.assertEqual("", test_data["parent_batch_row_id"])
+        self.assertEqual(
+            "",
+            self.sut.batch["batch_tree"][0][2],
+        )
 
 
 class TestInsert(unittest.TestCase):
