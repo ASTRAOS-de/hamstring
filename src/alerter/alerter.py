@@ -8,6 +8,7 @@ import importlib
 sys.path.append(os.getcwd())
 from confluent_kafka.admin import AdminClient, NewTopic
 from src.base.utils import setup_config, ensure_directory
+from src.base.execution import create_pipeline_executor
 from src.base.kafka_handler import (
     ExactlyOnceKafkaConsumeHandler,
     ExactlyOnceKafkaProduceHandler,
@@ -191,7 +192,11 @@ class AlerterBase(AlerterAbstractBase):
 
     async def start(self):
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, self.bootstrap_alerter_instance)
+        executor = create_pipeline_executor(config, module_name, self.name)
+        try:
+            await loop.run_in_executor(executor, self.bootstrap_alerter_instance)
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
 
 
 async def main():

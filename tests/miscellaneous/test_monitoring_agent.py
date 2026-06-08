@@ -99,9 +99,16 @@ class TestStart(unittest.IsolatedAsyncioTestCase):
             "clickhouse_server_logs",
         )
 
-        with patch(
-            "src.monitoring.monitoring_agent.asyncio.get_running_loop"
-        ) as mock_get_running_loop:
+        with (
+            patch(
+                "src.monitoring.monitoring_agent.asyncio.get_running_loop"
+            ) as mock_get_running_loop,
+            patch(
+                "src.monitoring.monitoring_agent.create_pipeline_executor"
+            ) as mock_create_pipeline_executor,
+        ):
+            mock_executor = MagicMock()
+            mock_create_pipeline_executor.return_value = mock_executor
             mock_loop = AsyncMock()
             mock_get_running_loop.return_value = mock_loop
 
@@ -114,6 +121,12 @@ class TestStart(unittest.IsolatedAsyncioTestCase):
             await self.sut.start()
 
         # Assert
+        mock_loop.run_in_executor.assert_any_await(
+            mock_executor, self.sut.kafka_consumer.consume
+        )
+        mock_executor.shutdown.assert_called_once_with(
+            wait=False, cancel_futures=True
+        )
         self.sut.batch_sender.add.assert_called_once_with(
             "server_logs",
             {

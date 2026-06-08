@@ -24,6 +24,7 @@ from src.base.kafka_handler import (
     KafkaMessageFetchException,
 )
 from src.base.log_config import get_logger
+from src.base.execution import create_pipeline_executor
 
 module_name = "data_inspection.inspector"
 logger = get_logger(module_name)
@@ -386,7 +387,11 @@ class InspectorBase(InspectorAbstractBase):
         with other async components in the pipeline.
         """
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, self.bootstrap_inspection_process)
+        executor = create_pipeline_executor(config, module_name, self.name)
+        try:
+            await loop.run_in_executor(executor, self.bootstrap_inspection_process)
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
 
 
 async def main():

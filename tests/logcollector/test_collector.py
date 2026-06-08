@@ -67,17 +67,28 @@ class TestStart(unittest.IsolatedAsyncioTestCase):
             validation_config={},
         )
 
+    @patch("src.logcollector.collector.create_pipeline_executor")
     @patch("src.logcollector.collector.asyncio.get_event_loop")
-    async def test_start_successful_execution(self, mock_get_event_loop):
+    async def test_start_successful_execution(
+        self, mock_get_event_loop, mock_create_pipeline_executor
+    ):
         # Arrange
         self.sut.fetch = MagicMock()
+        mock_executor = MagicMock()
+        mock_create_pipeline_executor.return_value = mock_executor
         mock_loop = MagicMock()
         mock_loop.run_in_executor = AsyncMock(return_value=None)
         mock_get_event_loop.return_value = mock_loop
 
         await self.sut.start()
 
-        mock_loop.run_in_executor.assert_awaited_once_with(None, self.sut.fetch)
+        mock_create_pipeline_executor.assert_called_once()
+        mock_loop.run_in_executor.assert_awaited_once_with(
+            mock_executor, self.sut.fetch
+        )
+        mock_executor.shutdown.assert_called_once_with(
+            wait=False, cancel_futures=True
+        )
 
 
 class _StopFetching(RuntimeError):

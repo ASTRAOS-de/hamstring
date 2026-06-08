@@ -23,6 +23,7 @@ from src.base.kafka_handler import (
     KafkaMessageFetchException,
 )
 from src.base.log_config import get_logger
+from src.base.execution import create_pipeline_executor
 
 module_name = "data_analysis.detector"
 logger = get_logger(module_name)
@@ -62,9 +63,6 @@ def build_alerter_topics(detector_config: dict) -> list[str]:
         return []
 
     topic_suffixes = detector_config.get("produce_topics", "")
-    if topic_suffixes is None or topic_suffixes == []:
-        return []
-
     topic_suffixes = _normalize_topic_suffixes(topic_suffixes)
     if not topic_suffixes:
         topic_suffixes = ["generic"]
@@ -658,7 +656,11 @@ class DetectorBase(DetectorAbstractBase):
         allowing it to operate concurrently with other components in the system.
         """
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, self.bootstrap_detector_instance)
+        executor = create_pipeline_executor(config, module_name, self.name)
+        try:
+            await loop.run_in_executor(executor, self.bootstrap_detector_instance)
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
 
 
 async def main():  # pragma: no cover
@@ -679,6 +681,12 @@ async def main():  # pragma: no cover
         consume_topic = build_detector_consume_topic(detector_config)
         produce_topics = build_alerter_topics(detector_config)
         downstream_detector_topics = build_downstream_detector_topics(detector_config)
+        logger.info(
+            "Detector %s configured with alerter topics %s and downstream detector topics %s",
+            detector_config["name"],
+            produce_topics,
+            downstream_detector_topics,
+        )
 
         class_name = detector_config["detector_class_name"]
         module_name = f"{PLUGIN_PATH}.{detector_config['detector_module_name']}"

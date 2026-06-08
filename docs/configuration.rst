@@ -116,6 +116,35 @@ Pipeline Configuration
 The following parameters control the behavior of each stage of the HAMSTRING pipeline, including the
 functionality of the modules.
 
+``pipeline.scaling``
+^^^^^^^^^^^^^^^^^^^^
+
+Controls the executor used by each pipeline module when it runs blocking work from the asyncio event loop.
+Values from ``defaults`` apply to every module and can be overridden per module under ``modules``. Modules
+that run several configured instances can also override an individual instance under ``instances``.
+
+.. code-block:: yaml
+
+   pipeline:
+     scaling:
+       defaults:
+         executor: thread
+         max_workers: 1
+       modules:
+         log_collection.collector:
+           executor: thread
+           max_workers: 2
+           instances:
+             dga_collector:
+               threads: 4
+         data_analysis.detector:
+           executor: process
+           processes: 2
+
+``executor`` may be ``thread`` or ``process``. Worker counts can be configured with ``max_workers`` or
+``workers``. The aliases ``threads`` and ``processes`` also set the worker count and infer the executor
+type when ``executor`` is omitted.
+
 ``pipeline.log_storage``
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
