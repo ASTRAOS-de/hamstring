@@ -246,7 +246,7 @@ services:
     profiles: ["prod"]
 
   zeek:
-    image: ghcr.io/hamstring-ndr/hamstring-zeek:2.0.0
+    image: ghcr.io/astraos-de/hamstring-zeek:2.0.1
     cap_add:
       - NET_ADMIN
     network_mode: host
