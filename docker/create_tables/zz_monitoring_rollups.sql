@@ -151,15 +151,15 @@ GROUP BY event_date, stage, instance_name, suspicious_batch_id;
 
 CREATE VIEW IF NOT EXISTS server_log_latency_values AS
 SELECT
-    message_id,
-    min(event_date) AS event_date,
-    minMerge(start_timestamp) AS start_timestamp,
-    maxMerge(end_timestamp) AS end_timestamp,
-    dateDiff('microsecond', start_timestamp, end_timestamp) AS latency_us
-FROM server_log_latencies
-GROUP BY message_id
-HAVING start_timestamp > toDateTime64(0, 6)
-   AND end_timestamp > start_timestamp;
+    sl.message_id AS message_id,
+    toDate(slt.event_timestamp) AS event_date,
+    sl.timestamp_in AS start_timestamp,
+    slt.event_timestamp AS end_timestamp,
+    dateDiff('microsecond', sl.timestamp_in, slt.event_timestamp) AS latency_us
+FROM server_logs sl
+INNER JOIN server_logs_timestamps slt ON sl.message_id = slt.message_id
+WHERE slt.event = 'timestamp_out'
+  AND slt.event_timestamp > sl.timestamp_in;
 
 CREATE VIEW IF NOT EXISTS logline_stage_latency_values AS
 SELECT

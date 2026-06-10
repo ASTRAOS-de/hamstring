@@ -432,7 +432,7 @@
           },
           "pluginVersion": "4.6.0",
           "queryType": "table",
-          "rawSql": "SELECT\n    alert_day AS time,\n    sumIf(alert_count, hour = 0) AS `0`,\n    sumIf(alert_count, hour = 1) AS `1`,\n    sumIf(alert_count, hour = 2) AS `2`,\n    sumIf(alert_count, hour = 3) AS `3`,\n    sumIf(alert_count, hour = 4) AS `4`,\n    sumIf(alert_count, hour = 5) AS `5`,\n    sumIf(alert_count, hour = 6) AS `6`,\n    sumIf(alert_count, hour = 7) AS `7`,\n    sumIf(alert_count, hour = 8) AS `8`,\n    sumIf(alert_count, hour = 9) AS `9`,\n    sumIf(alert_count, hour = 10) AS `10`,\n    sumIf(alert_count, hour = 11) AS `11`,\n    sumIf(alert_count, hour = 12) AS `12`,\n    sumIf(alert_count, hour = 13) AS `13`,\n    sumIf(alert_count, hour = 14) AS `14`,\n    sumIf(alert_count, hour = 15) AS `15`,\n    sumIf(alert_count, hour = 16) AS `16`,\n    sumIf(alert_count, hour = 17) AS `17`,\n    sumIf(alert_count, hour = 18) AS `18`,\n    sumIf(alert_count, hour = 19) AS `19`,\n    sumIf(alert_count, hour = 20) AS `20`,\n    sumIf(alert_count, hour = 21) AS `21`,\n    sumIf(alert_count, hour = 22) AS `22`,\n    sumIf(alert_count, hour = 23) AS `23`\nFROM (\n    SELECT\n        toStartOfDay(time_bucket) AS alert_day,\n        toHour(time_bucket) AS hour,\n        sum(alert_count) AS alert_count\n    FROM alerts_1m\n    WHERE time_bucket >= toStartOfMonth(now() - INTERVAL 1 MONTH)\n      AND time_bucket < toStartOfMonth(now())\n    GROUP BY alert_day, hour\n) AS subquery\nGROUP BY alert_day\nORDER BY alert_day\nWITH FILL\nFROM toStartOfMonth(now() - INTERVAL 1 MONTH)\nTO toStartOfMonth(now())\nSTEP toIntervalDay(1);",
+          "rawSql": "SELECT\n    alert_day AS time,\n    sumIf(alert_count, hour = 0) AS `0`,\n    sumIf(alert_count, hour = 1) AS `1`,\n    sumIf(alert_count, hour = 2) AS `2`,\n    sumIf(alert_count, hour = 3) AS `3`,\n    sumIf(alert_count, hour = 4) AS `4`,\n    sumIf(alert_count, hour = 5) AS `5`,\n    sumIf(alert_count, hour = 6) AS `6`,\n    sumIf(alert_count, hour = 7) AS `7`,\n    sumIf(alert_count, hour = 8) AS `8`,\n    sumIf(alert_count, hour = 9) AS `9`,\n    sumIf(alert_count, hour = 10) AS `10`,\n    sumIf(alert_count, hour = 11) AS `11`,\n    sumIf(alert_count, hour = 12) AS `12`,\n    sumIf(alert_count, hour = 13) AS `13`,\n    sumIf(alert_count, hour = 14) AS `14`,\n    sumIf(alert_count, hour = 15) AS `15`,\n    sumIf(alert_count, hour = 16) AS `16`,\n    sumIf(alert_count, hour = 17) AS `17`,\n    sumIf(alert_count, hour = 18) AS `18`,\n    sumIf(alert_count, hour = 19) AS `19`,\n    sumIf(alert_count, hour = 20) AS `20`,\n    sumIf(alert_count, hour = 21) AS `21`,\n    sumIf(alert_count, hour = 22) AS `22`,\n    sumIf(alert_count, hour = 23) AS `23`\nFROM (\n    SELECT\n        toStartOfDay(time_bucket) AS alert_day,\n        toHour(time_bucket) AS hour,\n        sum(alert_count) AS alert_count\n    FROM alerts_1m\n    WHERE time_bucket >= toStartOfMonth(now() - INTERVAL 1 MONTH)\n      AND time_bucket < toStartOfMonth(now())\n    GROUP BY alert_day, hour\n) AS subquery\nGROUP BY alert_day\nORDER BY alert_day\nWITH FILL\nFROM toDateTime(toStartOfMonth(now() - INTERVAL 1 MONTH))\nTO toDateTime(toStartOfMonth(now()))\nSTEP toIntervalDay(1);",
           "refId": "A"
         }
       ],
@@ -629,7 +629,7 @@
           },
           "pluginVersion": "4.6.0",
           "queryType": "table",
-          "rawSql": "SELECT DISTINCT src_ip AS \"Client IP address\", arrayStringConcat(JSONExtract(domain_names, 'Array(String)'), ', ') AS \"Domains used\"\nFROM alerts\nORDER BY alert_timestamp DESC\nLIMIT 20",
+          "rawSql": "WITH\n    JSONExtractArrayRaw(domain_names) AS top_items,\n    arrayFlatten(arrayMap(item -> if(substring(item, 1, 1) = '[', JSONExtractArrayRaw(item), [item]), top_items)) AS entries,\n    arrayFilter(x -> x != '', arrayMap(entry -> JSONExtractString(entry, 'domain_name'), entries)) AS domains\nSELECT\n    src_ip AS \"Client IP address\",\n    arrayStringConcat(arrayDistinct(domains), ', ') AS \"Domains used\"\nFROM alerts\nORDER BY alert_timestamp DESC\nLIMIT 20;",
           "refId": "A"
         }
       ],
@@ -714,7 +714,7 @@
           },
           "pluginVersion": "4.6.0",
           "queryType": "table",
-          "rawSql": "SELECT\n    concat(rowNumberInAllBlocks() + 1, '.') AS \"Rank\",\n    src_ip AS \"Client IP address\",\n    count(logline_id) AS \"# Total Requests\"\nFROM loglines\nWHERE timestamp >= $__fromTime AND timestamp <= $__toTime\n  AND src_ip IN (\n      SELECT DISTINCT src_ip\n      FROM alerts\n      WHERE alert_timestamp >= $__fromTime AND alert_timestamp <= $__toTime\n  )\nGROUP BY src_ip\nORDER BY \"# Total Requests\" DESC\nLIMIT 5;",
+          "rawSql": "SELECT\n    concat(toString(row_number() OVER (ORDER BY alert_count DESC, src_ip ASC)), '.') AS \"Rank\",\n    src_ip AS \"Client IP address\",\n    alert_count AS \"# Alerts\",\n    ifNull(total_requests, 0) AS \"# Total Requests\"\nFROM (\n    SELECT src_ip, count() AS alert_count\n    FROM alerts\n    WHERE alert_timestamp >= $__fromTime AND alert_timestamp <= $__toTime\n    GROUP BY src_ip\n) AS alert_counts\nLEFT JOIN (\n    SELECT src_ip, count() AS total_requests\n    FROM loglines\n    GROUP BY src_ip\n) AS request_counts USING src_ip\nORDER BY alert_count DESC, src_ip ASC\nLIMIT 5;",
           "refId": "A"
         }
       ],
