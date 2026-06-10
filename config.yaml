@@ -16,6 +16,57 @@ logging:
       debug: false
 
 pipeline:
+  scaling:
+    defaults:
+      executor: thread
+      max_workers: 1
+    modules:
+      log_storage.logserver:
+        executor: thread
+        max_workers: 1
+      log_collection.collector:
+        executor: thread
+        max_workers: 1
+        instances:
+          dga_collector:
+            max_workers: 1
+          domainator_collector:
+            max_workers: 1
+      log_filtering.prefilter:
+        executor: thread
+        max_workers: 1
+        instances:
+          dga_filter:
+            max_workers: 1
+          no_filter:
+            max_workers: 1
+      data_inspection.inspector:
+        executor: thread
+        max_workers: 1
+        instances:
+          dga_inspector:
+            max_workers: 1
+          no_inspector:
+            max_workers: 1
+      data_analysis.detector:
+        executor: thread
+        max_workers: 1
+        instances:
+          RF-dga_detector:
+            max_workers: 1
+          domainator:
+            max_workers: 1
+      pipeline.alerter:
+        executor: thread
+        max_workers: 1
+        instances:
+          generic:
+            max_workers: 1
+          attributor:
+            max_workers: 1
+      monitoring.agent:
+        executor: thread
+        max_workers: 1
   log_storage:
     logserver:
       input_file: "/opt/file.txt"
@@ -59,7 +110,7 @@ pipeline:
       # method to apply for rule based prefiltering according to the needs
       relevance_method: check_dga_relevance
       collector_name: dga_collector
-    - name: "no_filter"
+    - name: "domainator_filter"
       relevance_method: no_relevance_check
       collector_name: domainator_collector
 
@@ -83,10 +134,10 @@ pipeline:
       score_threshold: 0.5
       time_type: ms
       time_range: 20
-    - name: no_inspector
+    - name: domainator_inspector
       inspector_module_name: "no_inspector"
       inspector_class_name: "NoInspector"
-      prefilter_name: dga_filter
+      prefilter_name: domainator_filter
 
   data_analysis:
     - name: "RF-dga_detector"
@@ -108,8 +159,20 @@ pipeline:
       checksum: 9d86d66b4976c9b325bed0934a9a9eb3a20960b08be9afe491454624cc0aaa6c
       base_url: https://heibox.uni-heidelberg.de/d/0d5cbcbe16cd46a58021/
       threshold: 0.5
+      consume_from: inspector
+      inspector_name: "domainator_inspector"
+      next_detectors: "domainator_attributor"
+      send_to_alerter: true
+      produce_topics: ""
+    - name: "domainator_attributor"
+      detector_module_name: "domainator_attributor"
+      detector_class_name: "DomainatorAttributor"
+      model: domainator
+      checksum: 9d86d66b4976c9b325bed0934a9a9eb3a20960b08be9afe491454624cc0aaa6c
+      base_url: https://heibox.uni-heidelberg.de/d/0d5cbcbe16cd46a58021/
+      threshold: 0.5
       consume_from: detector
-      inspector_name: ""
+      detector_name: "domainator"
       next_detectors: ""
       send_to_alerter: true
       produce_topics: ""
@@ -119,10 +182,7 @@ pipeline:
     log_file_path: "/opt/logs/alerts.txt"
     log_to_kafka: true
     external_kafka_topic: "hamstring_alerts"
-    plugins:
-      - name: attributor
-        alerter_class_name: AttributorAlerter
-        alerter_module_name: attributor_alerter
+    plugins: []
   monitoring:
     clickhouse_connector:
       batch_size: 50  # do not set higher

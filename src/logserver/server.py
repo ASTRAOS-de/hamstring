@@ -13,6 +13,7 @@ from src.base.kafka_handler import (
 )
 from src.base.clickhouse_kafka_sender import ClickHouseKafkaSender
 from src.base.utils import setup_config, get_zeek_sensor_topic_base_names
+from src.base.execution import create_pipeline_executor
 from src.base.log_config import get_logger
 
 module_name = "log_storage.logserver"
@@ -63,7 +64,11 @@ class LogServer:
         )
 
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, self.fetch_from_kafka)
+        executor = create_pipeline_executor(config, module_name, self.consume_topic)
+        try:
+            await loop.run_in_executor(executor, self.fetch_from_kafka)
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
         # if awaited completely then the while True has come to an end
         logger.info("LogServer stopped.")
 

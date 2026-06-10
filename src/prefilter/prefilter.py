@@ -16,6 +16,7 @@ from src.base.kafka_handler import (
     KafkaMessageFetchException,
 )
 from src.base.log_config import get_logger
+from src.base.execution import create_pipeline_executor
 from src.base.utils import (
     setup_config,
     get_zeek_sensor_topic_base_names,
@@ -323,7 +324,11 @@ class Prefilter:
             "Prefilter started:\n"
             f"    ⤷  receiving on Kafka topic '{self.consume_topic}'"
         )
-        await loop.run_in_executor(None, self.bootstrap_prefiltering_process)
+        executor = create_pipeline_executor(config, module_name, self.name)
+        try:
+            await loop.run_in_executor(executor, self.bootstrap_prefiltering_process)
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
         logger.info("Closing down Prefilter...")
         self.clear_data()
 

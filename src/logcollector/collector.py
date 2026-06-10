@@ -11,6 +11,7 @@ from src.base.clickhouse_kafka_sender import ClickHouseKafkaSender
 from src.base.kafka_handler import ExactlyOnceKafkaConsumeHandler
 from src.base.logline_handler import LoglineHandler
 from src.base import utils
+from src.base.execution import create_pipeline_executor
 from src.logcollector.batch_handler import BufferedBatchSender
 from src.base.log_config import get_logger
 from collections import defaultdict
@@ -58,6 +59,7 @@ class LogCollector:
             produce_topics (list[str]): List of Kafka topics to produce validated log lines to
             validation_config (list): Configuration for validating log line fields
         """
+        self.collector_name = collector_name
         self.protocol = protocol
         self.consume_topic = consume_topic
         self.kafka_consume_handler = ExactlyOnceKafkaConsumeHandler(consume_topic)
@@ -96,7 +98,11 @@ class LogCollector:
             f"    ⤷  receiving on Kafka topic '{self.consume_topic}'"
         )
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, self.fetch)
+        executor = create_pipeline_executor(config, module_name, self.collector_name)
+        try:
+            await loop.run_in_executor(executor, self.fetch)
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
 
         logger.info("LogCollector stopped.")
 

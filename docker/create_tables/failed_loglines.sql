@@ -5,4 +5,5 @@ CREATE TABLE IF NOT EXISTS failed_loglines (
     reason_for_failure Nullable(String)
 )
 ENGINE = MergeTree
-PRIMARY KEY(message_text, timestamp_in);
+PARTITION BY toYYYYMM(timestamp_failed)
+ORDER BY (timestamp_failed, timestamp_in);

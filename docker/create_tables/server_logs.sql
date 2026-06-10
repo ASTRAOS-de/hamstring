@@ -4,4 +4,5 @@ CREATE TABLE IF NOT EXISTS server_logs (
     message_text String NOT NULL
 )
 ENGINE = MergeTree
-PRIMARY KEY(message_id);
+PARTITION BY toYYYYMM(timestamp_in)
+ORDER BY (timestamp_in, message_id);

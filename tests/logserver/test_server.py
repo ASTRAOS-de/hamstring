@@ -48,6 +48,7 @@ class TestStart(unittest.IsolatedAsyncioTestCase):
             consume_topic="consume-topic", produce_topics=["topic1", "topic2"]
         )
 
+    @patch("src.logserver.server.create_pipeline_executor")
     @patch("src.logserver.server.LogServer.fetch_from_kafka")
     @patch("src.logserver.server.asyncio.get_running_loop")
     @patch("src.logserver.server.ClickHouseKafkaSender")
@@ -56,7 +57,10 @@ class TestStart(unittest.IsolatedAsyncioTestCase):
         mock_clickhouse,
         mock_get_running_loop,
         mock_fetch_from_kafka,
+        mock_create_pipeline_executor,
     ):
+        mock_executor = MagicMock()
+        mock_create_pipeline_executor.return_value = mock_executor
         mock_loop = MagicMock()
         mock_loop.run_in_executor = AsyncMock(return_value=None)
         mock_get_running_loop.return_value = mock_loop
@@ -66,7 +70,10 @@ class TestStart(unittest.IsolatedAsyncioTestCase):
 
         # Assert
         mock_loop.run_in_executor.assert_awaited_once_with(
-            None, self.sut.fetch_from_kafka
+            mock_executor, self.sut.fetch_from_kafka
+        )
+        mock_executor.shutdown.assert_called_once_with(
+            wait=False, cancel_futures=True
         )
 
 

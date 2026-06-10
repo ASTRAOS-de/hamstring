@@ -191,7 +191,7 @@ class ClickHouseBatchSender:
                 {
                     "batch_row_id": str,
                     "batch_id": uuid.UUID,
-                    "parent_batch_row_id": Optional[str],
+                    "parent_batch_row_id": str,
                     "instance_name": str,
                     "stage": str,
                     "status": str,
@@ -227,6 +227,9 @@ class ClickHouseBatchSender:
             ValueError: If table name is invalid or data format is incorrect.
             TypeError: If data types don't match table schema.
         """
+        if table_name == "batch_tree" and data.get("parent_batch_row_id") is None:
+            data["parent_batch_row_id"] = ""
+
         self.tables.get(table_name).verify(data)
         self.batch.get(table_name).append(list(data.values()))
 

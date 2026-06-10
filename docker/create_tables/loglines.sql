@@ -6,4 +6,5 @@ CREATE TABLE IF NOT EXISTS loglines (
     additional_fields String
 )
 ENGINE = MergeTree
-PRIMARY KEY (logline_id);
+PARTITION BY toYYYYMM(timestamp)
+ORDER BY (timestamp, src_ip, subnet_id, logline_id);
