@@ -91,6 +91,45 @@ class TestDomainatorAttributor(unittest.TestCase):
             sut.detect()
             self.assertNotEqual([], sut.warnings)
 
+    def test_detect_emits_for_attribution_class_other_than_index_one(self):
+        mock_kafka = MagicMock()
+        mock_ch = MagicMock()
+        sut = self._create_detector(mock_kafka, mock_ch)
+        sut.threshold = 0.5
+        sut.labels = ["benign", "tool-A", "tool-B"]
+        for _ in range(0, 4, 1):
+            sut.messages.append(DEFAULT_DATA)
+
+        with patch(
+            "src.detector.plugins.domainator_attributor.DomainatorAttributor.predict",
+            return_value=np.array([[0.01, 0.02, 0.97]]),
+        ):
+            sut.detect()
+
+        self.assertNotEqual([], sut.warnings)
+        self.assertEqual(0.97, sut.warnings[0]["probability"])
+        self.assertEqual(
+            [{"attribute": "tool-B", "probability": 0.97}],
+            sut.warnings[0]["attributes"],
+        )
+
+    def test_detect_warning_probability_is_numeric(self):
+        mock_kafka = MagicMock()
+        mock_ch = MagicMock()
+        sut = self._create_detector(mock_kafka, mock_ch)
+        sut.threshold = 0.5
+        sut.labels = ["tool-A", "tool-B"]
+        for _ in range(0, 4, 1):
+            sut.messages.append(DEFAULT_DATA)
+
+        with patch(
+            "src.detector.plugins.domainator_attributor.DomainatorAttributor.predict",
+            return_value=np.array([[0.01, 0.99]]),
+        ):
+            sut.detect()
+
+        self.assertIsInstance(sut.warnings[0]["probability"], float)
+
     def test_detect_message_list(self):
         mock_kafka = MagicMock()
         mock_ch = MagicMock()

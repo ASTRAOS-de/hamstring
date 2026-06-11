@@ -59,13 +59,13 @@ napoleon_use_param = True
 napoleon_use_rtype = False
 
 intersphinx_mapping = {
-    "python": ("https://docs.python.org/3/", None),
-    "sphinx": ("https://www.sphinx-doc.org/en/master/", None),
+    "python": ("https://docs.python.org/3", None),
+    "sphinx": ("https://www.sphinx-doc.org/en/master", None),
 }
 intersphinx_disabled_domains = ["std"]
 
 templates_path = ["_templates"]
-exclude_patterns = ['_build, "Thumbs.db', ".DS_Store"]
+exclude_patterns = ["_build", "output", "Thumbs.db", ".DS_Store"]
 
 # -- Options for HTML output
 html_theme = "sphinx_book_theme"
@@ -73,7 +73,7 @@ html_theme_options = {
     "use_repository_button": True,
     "repository_url": "https://github.com/stefanDeveloper/HAMSTRING",
 }
-html_logo = "../assets/hamstring_logo_readthedocs.png"
+html_logo = "../assets/hamstring.svg"
 # -- Options for EPUB output
 epub_show_urls = "footnote"
 

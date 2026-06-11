@@ -38,6 +38,29 @@ config = setup_config()
 KAFKA_BROKERS = config["environment"]["kafka_brokers"]
 
 
+def _normalize_topics(topics: str | list[str]) -> list[str]:
+    if isinstance(topics, str):
+        return [topics]
+    return topics
+
+
+def _sanitize_consumer_group_part(value: str) -> str:
+    return "".join(
+        character if character.isalnum() or character in "._-" else "_"
+        for character in value
+    )
+
+
+def build_consumer_group_id(topics: str | list[str]) -> str:
+    normalized_topics = sorted(_normalize_topics(topics))
+    topic_suffix = "__".join(
+        _sanitize_consumer_group_part(topic) for topic in normalized_topics
+    )
+    if not topic_suffix:
+        return CONSUMER_GROUP_ID
+    return f"{CONSUMER_GROUP_ID}.{topic_suffix}"
+
+
 class TooManyFailedAttemptsError(Exception):
     """Exception raised when operations exceed the maximum number of retry attempts
 
@@ -326,6 +349,9 @@ class KafkaConsumeHandler(KafkaHandler):
         """
         super().__init__()
 
+        if isinstance(topics, str):
+            topics = [topics]
+
         # get brokers
         self.brokers = ",".join(
             [
@@ -337,15 +363,12 @@ class KafkaConsumeHandler(KafkaHandler):
         # create consumer
         conf = {
             "bootstrap.servers": self.brokers,
-            "group.id": f"{CONSUMER_GROUP_ID}",
+            "group.id": build_consumer_group_id(topics),
             "enable.auto.commit": False,
             "auto.offset.reset": "earliest",
             "enable.partition.eof": True,
         }
         self.consumer = Consumer(conf)
-
-        if isinstance(topics, str):
-            topics = [topics]
 
         # create topics
         admin_client = AdminClient(
@@ -456,6 +479,23 @@ class KafkaConsumeHandler(KafkaHandler):
     def _is_dicts(obj):
         return isinstance(obj, list) and all(isinstance(item, dict) for item in obj)
 
+    @staticmethod
+    def _decode_batch_data(data):
+        if data is None:
+            return []
+        if not isinstance(data, list):
+            raise ValueError("Batch data must be a list.")
+
+        decoded_data = []
+        for item in data:
+            if isinstance(item, str):
+                decoded_data.append(json.loads(item))
+            elif isinstance(item, (dict, list)):
+                decoded_data.append(item)
+            else:
+                raise ValueError("Batch data contains unsupported item type.")
+        return decoded_data
+
     def consume_as_object(self) -> tuple[None | str, Batch]:
         """
         Consumes available messages on the specified topic. Decodes the data and converts it to a Batch
@@ -472,10 +512,7 @@ class KafkaConsumeHandler(KafkaHandler):
             # TODO: Change return value to fit the type, maybe switch to raise
             return None, {}
         eval_data: dict = json.loads(value)
-        if self._is_dicts(eval_data.get("data")):
-            eval_data["data"] = eval_data.get("data")
-        else:
-            eval_data["data"] = [json.loads(item) for item in eval_data.get("data")]
+        eval_data["data"] = self._decode_batch_data(eval_data.get("data"))
         batch_schema = marshmallow_dataclass.class_schema(Batch)()
         eval_data: Batch = batch_schema.load(eval_data)
         if isinstance(eval_data, Batch):

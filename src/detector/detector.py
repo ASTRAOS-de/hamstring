@@ -396,15 +396,12 @@ class DetectorBase(DetectorAbstractBase):
         """
         Process messages to detect malicious requests.
 
-        This method applies the detection model to each message in the current batch,
-        identifies potential threats based on the model's predictions, and collects
-        warnings for further processing.
-
-        The detection uses a threshold to determine if a prediction indicates
-        malicious activity, and only warnings exceeding this threshold are retained.
+        This method has to be overwritten in the child classes for detectors.
+        The implementation below is tried to be generic. If a detector needs a different approach (e.g. predict on more than one message, buffer messages, etc.)
+        then just overwrite the method and append to `self.warnings` a warning if a given messag is to be regarded malicious.
 
         Note:
-            This method relies on the implementation of ``predict``of the rspective subclass
+        
         """
         logger.info("Start detecting malicious requests.")
         for message in self.messages:
@@ -418,13 +415,11 @@ class DetectorBase(DetectorAbstractBase):
                 warning = {
                     "request": message,
                     "probability": float(y_pred[0][1]),
-                    # TODO: what is the use of this? not even json serializabel ?
-                    # "model": self.model,
                     "name": self.name,
                     "sha256": self.checksum,
                 }
                 self.warnings.append(warning)
-
+                
     def clear_data(self):
         """Clears the data in the internal data structures."""
         self.messages = []
@@ -445,10 +440,10 @@ class DetectorBase(DetectorAbstractBase):
         The method updates multiple database tables to maintain the pipeline's
         state tracking and provides detailed information about detected threats.
         """
-        logger.info("Store alert.")
         row_id = generate_collisions_resistant_uuid()
         downstream_messages = []
         if len(self.warnings) > 0:
+            logger.info("Begin warning computation...")
             overall_score = median(
                 [warning["probability"] for warning in self.warnings]
             )
@@ -463,7 +458,8 @@ class DetectorBase(DetectorAbstractBase):
             }
 
             if self.produce_topics:
-                logger.info(f"Producing alert to Kafka: {alert}")
+                kafka_alert = self._build_kafka_alert(alert)
+                logger.debug(f"Producing compact alert to Kafka: {kafka_alert}")
 
                 if self.kafka_produce_handler is None:
                     self.kafka_produce_handler = ExactlyOnceKafkaProduceHandler()
@@ -471,7 +467,7 @@ class DetectorBase(DetectorAbstractBase):
                 for topic in self.produce_topics:
                     self.kafka_produce_handler.produce(
                         topic=topic,
-                        data=json.dumps(alert),
+                        data=json.dumps(kafka_alert),
                         key=self.key,
                     )
             else:
@@ -501,11 +497,7 @@ class DetectorBase(DetectorAbstractBase):
                 )
             )
 
-            logline_ids = set()
-            for message in self.messages:
-                logline_ids.add(message["logline_id"])
-
-            for logline_id in logline_ids:
+            for logline_id in self._get_message_logline_ids():
                 self.logline_timestamps.insert(
                     dict(
                         logline_id=logline_id,
@@ -531,11 +523,7 @@ class DetectorBase(DetectorAbstractBase):
                 )
             )
 
-            logline_ids = set()
-            for message in self.messages:
-                logline_ids.add(message["logline_id"])
-
-            for logline_id in logline_ids:
+            for logline_id in self._get_message_logline_ids():
                 self.logline_timestamps.insert(
                     dict(
                         logline_id=logline_id,
@@ -574,7 +562,7 @@ class DetectorBase(DetectorAbstractBase):
         if not self.downstream_detector_topics:
             return
 
-        logger.info(
+        logger.debug(
             f"Producing detector output to Kafka topics: {self.downstream_detector_topics}"
         )
         data_to_send = {
@@ -601,6 +589,58 @@ class DetectorBase(DetectorAbstractBase):
             warning.get("request", warning.get("request_domain", warning))
             for warning in self.warnings
         ]
+
+    def _build_kafka_alert(self, alert: dict) -> dict:
+        compact_alert = dict(alert)
+        compact_alert["result"] = [
+            self._compact_warning_for_kafka(warning)
+            for warning in alert.get("result", [])
+        ]
+        return compact_alert
+
+    def _compact_warning_for_kafka(self, warning: dict) -> dict:
+        compact_warning = {
+            key: value for key, value in warning.items() if key != "request"
+        }
+        request = warning.get("request")
+        if request is None:
+            return compact_warning
+
+        request_messages = self._flatten_messages(request)
+        compact_warning["request_count"] = len(request_messages)
+        compact_warning["domain_names"] = sorted(
+            {
+                message["domain_name"]
+                for message in request_messages
+                if isinstance(message, dict) and "domain_name" in message
+            }
+        )[:50]
+        compact_warning["logline_ids"] = sorted(
+            {
+                message["logline_id"]
+                for message in request_messages
+                if isinstance(message, dict) and "logline_id" in message
+            }
+        )[:100]
+        return compact_warning
+
+    def _flatten_messages(self, messages) -> list:
+        flattened_messages = []
+        pending_messages = [messages]
+        while pending_messages:
+            message = pending_messages.pop()
+            if isinstance(message, list):
+                pending_messages.extend(message)
+            else:
+                flattened_messages.append(message)
+        return flattened_messages
+
+    def _get_message_logline_ids(self) -> set:
+        return {
+            message["logline_id"]
+            for message in self._flatten_messages(self.messages)
+            if isinstance(message, dict) and "logline_id" in message
+        }
 
     def _get_downstream_messages(self) -> list:
         messages = [
@@ -682,8 +722,9 @@ async def main():  # pragma: no cover
         produce_topics = build_alerter_topics(detector_config)
         downstream_detector_topics = build_downstream_detector_topics(detector_config)
         logger.info(
-            "Detector %s configured with alerter topics %s and downstream detector topics %s",
+            "Detector %s configured with consume topic %s, alerter topics %s and downstream detector topics %s",
             detector_config["name"],
+            consume_topic,
             produce_topics,
             downstream_detector_topics,
         )

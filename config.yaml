@@ -56,6 +56,8 @@ pipeline:
             max_workers: 1
           domainator:
             max_workers: 1
+          domainator_attributor:
+            max_workers: 1
       pipeline.alerter:
         executor: thread
         max_workers: 1
@@ -149,7 +151,7 @@ pipeline:
       threshold: 0.5
       consume_from: inspector
       inspector_name: dga_inspector
-      next_detectors: domainator
+      next_detectors: ""
       send_to_alerter: true
       produce_topics: ""
     - name: "domainator"
@@ -161,10 +163,37 @@ pipeline:
       threshold: 0.5
       consume_from: inspector
       inspector_name: "domainator_inspector"
-      next_detectors: "domainator_attributor"
+      next_detectors: 
+        - "domainator_attributor_behaviour"
+        - "domainator_attributor_identification_behaviour"
+        - "domainator_attributor_identification"
       send_to_alerter: true
       produce_topics: ""
-    - name: "domainator_attributor"
+    - name: "domainator_attributor_behaviour"
+      detector_module_name: "domainator_attributor"
+      detector_class_name: "DomainatorAttributor"
+      model: domainator
+      checksum: 9d86d66b4976c9b325bed0934a9a9eb3a20960b08be9afe491454624cc0aaa6c
+      base_url: https://heibox.uni-heidelberg.de/d/0d5cbcbe16cd46a58021/
+      threshold: 0.5
+      consume_from: detector
+      detector_name: "domainator"
+      next_detectors: ""
+      send_to_alerter: true
+      produce_topics: ""
+    - name: "domainator_attributor_identification_behaviour"
+      detector_module_name: "domainator_attributor"
+      detector_class_name: "DomainatorAttributor"
+      model: domainator
+      checksum: 9d86d66b4976c9b325bed0934a9a9eb3a20960b08be9afe491454624cc0aaa6c
+      base_url: https://heibox.uni-heidelberg.de/d/0d5cbcbe16cd46a58021/
+      threshold: 0.5
+      consume_from: detector
+      detector_name: "domainator"
+      next_detectors: ""
+      send_to_alerter: true
+      produce_topics: ""
+    - name: "domainator_attributor_identification"
       detector_module_name: "domainator_attributor"
       detector_class_name: "DomainatorAttributor"
       model: domainator

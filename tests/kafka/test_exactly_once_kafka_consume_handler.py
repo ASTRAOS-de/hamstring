@@ -10,7 +10,7 @@ from confluent_kafka import KafkaException, KafkaError
 from src.base.data_classes.batch import Batch
 from src.base.kafka_handler import ExactlyOnceKafkaConsumeHandler
 
-CONSUMER_GROUP_ID = "default_gid"
+CONSUMER_GROUP_ID = "default_gid.test_topic"
 
 
 class TestInit(unittest.TestCase):
@@ -406,6 +406,36 @@ class TestConsumeAsObject(unittest.TestCase):
 
         self.assertEqual(result[0], key)
         self.assertIsInstance(result[1], Batch)
+
+    def test_consume_as_object_valid_data_with_nested_request_windows(self):
+        key = "valid_key"
+        batch_schema = marshmallow_dataclass.class_schema(Batch)()
+        value = batch_schema.dumps(
+            {
+                "batch_id": uuid.uuid4(),
+                "batch_tree_row_id": uuid.uuid4(),
+                "begin_timestamp": datetime.datetime.now(),
+                "end_timestamp": datetime.datetime.now(),
+                "data": [
+                    [
+                        {"domain_name": "one.example.org"},
+                        {"domain_name": "two.example.org"},
+                    ]
+                ],
+            }
+        )
+        topic = "test_topic"
+
+        with patch(
+            "src.base.kafka_handler.ExactlyOnceKafkaConsumeHandler.consume"
+        ) as mock_consume:
+            mock_consume.return_value = [key, value, topic]
+
+            result = self.sut.consume_as_object()
+
+        self.assertEqual(result[0], key)
+        self.assertIsInstance(result[1], Batch)
+        self.assertEqual("one.example.org", result[1].data[0][0]["domain_name"])
 
     def test_consume_as_object_invalid_data(self):
         key = "invalid_key"

@@ -180,3 +180,35 @@ class DGADetector(DetectorBase):
         logger.debug("Finished data transformation")
 
         return all_features.reshape(1, -1)
+
+
+    def detect(self) -> None:
+        """
+        Process messages to detect malicious requests.
+
+        This method applies the detection model to each message in the current batch,
+        identifies potential threats based on the model's predictions, and collects
+        warnings for further processing.
+
+        The detection uses a threshold to determine if a prediction indicates
+        malicious activity, and only warnings exceeding this threshold are retained.
+
+        Note:
+            This method relies on the implementation of ``predict``of the rspective subclass
+        """
+        logger.info("Start detecting malicious requests.")
+        for message in self.messages:
+            y_pred = self.predict(message)
+            logger.info(f"Prediction: {y_pred}")
+            # TODO: DO NOT USE if TRUE for prod!!!
+            if (
+                True
+            ):  # np.argmax(y_pred, axis=1) == 1 and y_pred[0][1] > self.threshold:
+                logger.info("Append malicious request to warning.")
+                warning = {
+                    "request": message,
+                    "probability": float(y_pred[0][1]),
+                    "name": self.name,
+                    "sha256": self.checksum,
+                }
+                self.warnings.append(warning)

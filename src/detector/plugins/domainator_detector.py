@@ -109,16 +109,16 @@ class DomainatorDetector(DetectorBase):
         return y_pred
 
     def detect(self):
-        logger.info("Start detecting malicious requests.")
+        #logger.info("Start detecting malicious requests.")
         for message in self.messages:
             message_domain = strip_domain(message["domain_name"])
             self.message_queues[message_domain].append(message)
 
             if len(self.message_queues[message_domain]) >= 3:
                 y_pred = self.predict(self.message_queues[message_domain])
-                logger.info(f"Prediction: {y_pred}")
+                # logger.info(f"Prediction: {y_pred}")
                 if np.argmax(y_pred, axis=1) == 1 and y_pred[0][1] > self.threshold:
-                    logger.info("Append malicious request domain to warning.")
+                    # logger.info("Append malicious request domain to warning.")
                     warning = {
                         "request": self.message_queues[message_domain],
                         "probability": float(y_pred[0][1]),

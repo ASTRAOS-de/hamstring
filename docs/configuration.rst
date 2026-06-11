@@ -171,11 +171,11 @@ type when ``executor`` is omitted.
    * - Parameter
      - Description
    * - name
-     - A unique name amongst the ``collectors``configurations top identify the collector instance.
+     - A unique name amongst the ``collectors`` configurations top identify the collector instance.
    * - protocol_base
      - The lowercase protocol name to ingest data from. Currently supported: ``dns`` and ``http``.
    * - required_log_information
-     - Defines the expected format for incoming log lines. See the :ref:`Logline format configuration` section for more
+     - Defines the expected format for incoming log lines. See the :doc:`configuration` page for more
        details.
 
 Each log_collector has a BatchHandler instance. Default confgurations for all Batch handlers are defined in ``pipeline.log_collection.default_batch_handler_config``.
@@ -230,6 +230,7 @@ The following list shows the available configuration options.
 .. list-table:: ``inspector`` Parameters
    :header-rows: 1
    :widths: 30 70
+
    * - Parameter
      - Description
    * - name

@@ -3,10 +3,27 @@ import unittest
 from unittest.mock import patch, MagicMock
 
 from src.base.kafka_handler import (
+    build_consumer_group_id,
     KafkaConsumeHandler,
     KafkaMessageFetchException,
     TooManyFailedAttemptsError,
 )
+
+
+class TestConsumerGroupId(unittest.TestCase):
+    @patch("src.base.kafka_handler.CONSUMER_GROUP_ID", "test_group_id")
+    def test_build_consumer_group_id_for_single_topic(self):
+        self.assertEqual(
+            "test_group_id.test_topic",
+            build_consumer_group_id("test_topic"),
+        )
+
+    @patch("src.base.kafka_handler.CONSUMER_GROUP_ID", "test_group_id")
+    def test_build_consumer_group_id_for_multiple_topics(self):
+        self.assertEqual(
+            "test_group_id.test_topic_1__test_topic_2",
+            build_consumer_group_id(["test_topic_2", "test_topic_1"]),
+        )
 
 
 class TestInit(unittest.TestCase):
@@ -43,7 +60,7 @@ class TestInit(unittest.TestCase):
 
         expected_conf = {
             "bootstrap.servers": "127.0.0.1:9999,127.0.0.2:9998,127.0.0.3:9997",
-            "group.id": "test_group_id",
+            "group.id": "test_group_id.test_topic",
             "enable.auto.commit": False,
             "auto.offset.reset": "earliest",
             "enable.partition.eof": True,
@@ -91,7 +108,7 @@ class TestInit(unittest.TestCase):
 
         expected_conf = {
             "bootstrap.servers": "127.0.0.1:9999,127.0.0.2:9998,127.0.0.3:9997",
-            "group.id": "test_group_id",
+            "group.id": "test_group_id.test_topic",
             "enable.auto.commit": False,
             "auto.offset.reset": "earliest",
             "enable.partition.eof": True,
@@ -138,7 +155,7 @@ class TestInit(unittest.TestCase):
 
         expected_conf = {
             "bootstrap.servers": "127.0.0.1:9999,127.0.0.2:9998,127.0.0.3:9997",
-            "group.id": "test_group_id",
+            "group.id": "test_group_id.test_topic_1__test_topic_2",
             "enable.auto.commit": False,
             "auto.offset.reset": "earliest",
             "enable.partition.eof": True,
