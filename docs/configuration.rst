@@ -365,6 +365,15 @@ The following parameters control the infrastructure of the software.
      - Not given here
      - Kafka topic name prefixes given as strings. These prefix name are used to construct the actual topic names based on the instance name (e.g. a collector instance name) that produces for the given stage.
        (e.g. a prefilter instance name is added as suffix to the prefilter_to_inspector prefix for the inspector to know where to consume.)
+   * - kafka_consumer.max_poll_interval_ms
+     - ``1800000``
+     - Maximum time in milliseconds between Kafka consumer polls before Kafka removes the consumer from its group. Increase this for long-running detector batches.
+   * - kafka_topics.replication_factor
+     - ``3``
+     - Replication factor used when creating new Kafka topics. At runtime this is capped to the number of configured Kafka brokers.
+   * - kafka_topics.auto_expand_partitions
+     - ``true``
+     - If enabled, existing HAMSTRING topics with fewer than the desired partition count are automatically expanded on consumer startup. Kafka does not support shrinking partition counts, so topics that are already larger are left unchanged.
    * - monitoring.clickhouse_server.hostname
      - ``clickhouse-server``
      - Hostname of the ClickHouse server. Used by Grafana.

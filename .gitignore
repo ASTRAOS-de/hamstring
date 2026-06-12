@@ -8,7 +8,6 @@ results/*
 *.so
 *.html
 *.csv
-*.json
 *.txt
 *.parquet
 .DS_Store
@@ -77,6 +76,7 @@ instance/
 
 # Sphinx documentation
 docs/_build/
+docs/output/
 
 # PyBuilder
 .pybuilder/
@@ -324,7 +324,9 @@ cython_debug/
 
 # Others
 docs/api/
+!/docs/api/
 !/docs/api/index.rst
+!/docs/api/*.rst
 
 # requirements.txt
 !*/requirements.*.txt

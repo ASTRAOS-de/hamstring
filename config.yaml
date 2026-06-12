@@ -146,6 +146,7 @@ pipeline:
       detector_module_name: "dga_detector"
       detector_class_name: "DGADetector"
       model: rf
+      use_scaler: false
       checksum: 5db8bfb617e80361362c33b1d1afc6d762c28e9fa9275fb11514a3bdef76bb88
       base_url: https://heibox.uni-heidelberg.de/d/0d5cbcbe16cd46a58021/
       threshold: 0.5
@@ -158,7 +159,8 @@ pipeline:
       detector_module_name: "domainator_detector"
       detector_class_name: "DomainatorDetector"
       model: domainator
-      checksum: 9d86d66b4976c9b325bed0934a9a9eb3a20960b08be9afe491454624cc0aaa6c
+      use_scaler: false
+      checksum: a4aac4c585f1e614c3cf0d737e80b960c5de6e87b253f7cdd07125d9ce486476
       base_url: https://heibox.uni-heidelberg.de/d/0d5cbcbe16cd46a58021/
       threshold: 0.5
       consume_from: inspector
@@ -172,8 +174,9 @@ pipeline:
     - name: "domainator_attributor_behaviour"
       detector_module_name: "domainator_attributor"
       detector_class_name: "DomainatorAttributor"
-      model: domainator
-      checksum: 9d86d66b4976c9b325bed0934a9a9eb3a20960b08be9afe491454624cc0aaa6c
+      model: domainator_attributor_behaviour
+      use_scaler: false
+      checksum: d8f302edc166ecc80985838a30b5dff16ccc83480ea3c2480652f49c8f6b5e9b
       base_url: https://heibox.uni-heidelberg.de/d/0d5cbcbe16cd46a58021/
       threshold: 0.5
       consume_from: detector
@@ -184,8 +187,9 @@ pipeline:
     - name: "domainator_attributor_identification_behaviour"
       detector_module_name: "domainator_attributor"
       detector_class_name: "DomainatorAttributor"
-      model: domainator
-      checksum: 9d86d66b4976c9b325bed0934a9a9eb3a20960b08be9afe491454624cc0aaa6c
+      model: domainator_attributor_identification_behaviour
+      use_scaler: false
+      checksum: 9a0970b4160b22f4c3c5ac99760f0ace5500dd25c5a195ff13254ad3c11d5dcd
       base_url: https://heibox.uni-heidelberg.de/d/0d5cbcbe16cd46a58021/
       threshold: 0.5
       consume_from: detector
@@ -196,8 +200,9 @@ pipeline:
     - name: "domainator_attributor_identification"
       detector_module_name: "domainator_attributor"
       detector_class_name: "DomainatorAttributor"
-      model: domainator
-      checksum: 9d86d66b4976c9b325bed0934a9a9eb3a20960b08be9afe491454624cc0aaa6c
+      model: domainator_attributor_identification
+      use_scaler: false
+      checksum: 360bd26881beabce7e7581963240915de807c48b5e4a3501a657139f2ecb8a8b
       base_url: https://heibox.uni-heidelberg.de/d/0d5cbcbe16cd46a58021/
       threshold: 0.5
       consume_from: detector
@@ -241,6 +246,14 @@ environment:
       internal_port: 19094
       external_port: 8099
       node_ip: 127.0.0.1
+  kafka_consumer:
+    # Allow long-running detector batches without Kafka forcing a group rebalance.
+    # Default librdkafka value is 300000 ms (5 minutes), which can be too short
+    # for model inference plus downstream alert/monitoring writes.
+    max_poll_interval_ms: 1800000
+  kafka_topics:
+    replication_factor: 3
+    auto_expand_partitions: true
   kafka_topics_prefix:
     pipeline:
       logserver_in: "hamstring_input"

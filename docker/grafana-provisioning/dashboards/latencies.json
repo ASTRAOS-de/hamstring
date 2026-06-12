@@ -19,7 +19,22 @@
   "fiscalYearStartMonth": 0,
   "graphTooltip": 0,
   "id": 2,
-  "links": [],
+  "links": [
+    {
+      "asDropdown": true,
+      "icon": "external link",
+      "includeVars": true,
+      "keepTime": true,
+      "tags": [
+        "HAMSTRING"
+      ],
+      "targetBlank": false,
+      "title": "Dashboards",
+      "tooltip": "Open another HAMSTRING dashboard",
+      "type": "dashboards",
+      "url": ""
+    }
+  ],
   "liveNow": false,
   "panels": [
     {
@@ -3586,7 +3601,9 @@
   ],
   "refresh": "5s",
   "schemaVersion": 39,
-  "tags": [],
+  "tags": [
+    "HAMSTRING"
+  ],
   "templating": {
     "list": [
       {
