@@ -374,6 +374,12 @@ The following parameters control the infrastructure of the software.
    * - kafka_topics.auto_expand_partitions
      - ``true``
      - If enabled, existing HAMSTRING topics with fewer than the desired partition count are automatically expanded on consumer startup. Kafka does not support shrinking partition counts, so topics that are already larger are left unchanged.
+   * - kafka_topics.stages
+     - See ``config.yaml``
+     - Per-pipeline-stage topic settings. Keys match ``environment.kafka_topics_prefix.pipeline`` keys. Each stage can set ``partitions`` and ``replication_factor`` for topics whose names use that stage prefix.
+   * - kafka_topics.topics
+     - See ``config.yaml``
+     - Exact per-topic settings for topics that are not represented by a pipeline prefix, for example external alert topics. Topics without a stage or exact entry use 12 partitions and the default replication factor.
    * - monitoring.clickhouse_server.hostname
      - ``clickhouse-server``
      - Hostname of the ClickHouse server. Used by Grafana.

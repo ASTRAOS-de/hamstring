@@ -8,11 +8,13 @@ import Levenshtein
 from src.base.log_config import get_logger
 from src.detector.plugins.domainator_utils import (
     strip_domain,
-    get_domainator_features
+    get_domainator_features,
 )
 
 module_name = "data_analysis.detector"
 logger = get_logger(module_name)
+
+LEGITIMATE_ATTRIBUTE_LABELS = {"benign", "legit", "legitimate", "legitimate_legitimate"}
 
 
 class DomainatorAttributor(DetectorBase):
@@ -50,46 +52,12 @@ class DomainatorAttributor(DetectorBase):
         """
         self.model_base_url = detector_config["base_url"]
         self.message_queues = defaultdict(list)
-        
+
         super().__init__(
             detector_config, consume_topic, produce_topics, downstream_detector_topics
         )
-        
+
         self.labels = self.model.classes_
-
-    def get_model_download_url(self):
-        """
-        Generate the complete URL for downloading the Domainator detection model.
-
-        Constructs the URL using the base URL from configuration and appends the
-        specific model filename with checksum for verification.
-
-        Returns:
-            str: Fully qualified URL where the model can be downloaded.
-        """
-        self.model_base_url = (
-            self.model_base_url[:-1]
-            if self.model_base_url[-1] == "/"
-            else self.model_base_url
-        )
-        return f"{self.model_base_url}/files/?p=%2F{self.model_name}%2F{self.checksum}%2F{self.model_name}.pickle&dl=1"
-
-    def get_scaler_download_url(self):
-        """
-        Generate the complete URL for downloading the Domainator identification models scaler.
-
-        Constructs the URL using the base URL from configuration and appends the
-        specific model filename with checksum for verification.
-
-        Returns:
-            str: Fully qualified URL where the model can be downloaded.
-        """
-        self.model_base_url = (
-            self.model_base_url[:-1]
-            if self.model_base_url[-1] == "/"
-            else self.model_base_url
-        )
-        return f"{self.model_base_url}/files/?p=%2F{self.model_name}%2F{self.checksum}%2Fscaler.pickle&dl=1"
 
     def predict(self, messages):
         """
@@ -109,7 +77,7 @@ class DomainatorAttributor(DetectorBase):
         """
         queries = [message["domain_name"] for message in messages]
 
-        y_pred = self.model.predict_proba(get_domainator_features(queries))        
+        y_pred = self.model.predict_proba(get_domainator_features(queries))
         return y_pred
 
     def detect(self):
@@ -131,18 +99,24 @@ class DomainatorAttributor(DetectorBase):
                 y_pred = self.predict(self.message_queues[message_domain])
                 logger.info(f"Prediction: {y_pred}")
 
+                winning_index = int(np.argmax(y_pred, axis=1)[0])
+                winning_label = self.labels[winning_index]
+                winning_probability = float(y_pred[0][winning_index])
                 y_pred_labelled = [
                     {"attribute": label, "probability": float(score)}
                     for label, score in zip(self.labels, y_pred[0])
                     if score >= self.threshold
                 ]
-                logger.info(f"Prediction with labels: {y_pred_labelled}")
+                logger.debug(f"Prediction with labels: {y_pred_labelled}")
 
-                if np.argmax(y_pred, axis=1) == 1 and len(y_pred_labelled) > 0:
-                    logger.info("Append malicious request domain to warning.")
+                is_legitimate = winning_label in LEGITIMATE_ATTRIBUTE_LABELS
+                if not is_legitimate and winning_probability >= self.threshold:
+                    logger.debug("Append malicious request domain to warning.")
                     warning = {
                         "request": self.message_queues[message_domain],
-                        "probability": y_pred_labelled,
+                        "probability": winning_probability,
+                        "predicted_class": winning_label,
+                        "attributes": y_pred_labelled,
                         "name": self.name,
                         "sha256": self.checksum,
                     }
@@ -150,4 +124,3 @@ class DomainatorAttributor(DetectorBase):
 
                 if len(self.message_queues[message_domain]) >= 10:
                     del self.message_queues[message_domain][0]
-

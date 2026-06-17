@@ -42,6 +42,7 @@ class TestInit(unittest.TestCase):
             "enable.auto.commit": False,
             "auto.offset.reset": "earliest",
             "enable.partition.eof": True,
+            "max.poll.interval.ms": 1800000,
         }
 
         # Act

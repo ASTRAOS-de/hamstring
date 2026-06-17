@@ -6,13 +6,14 @@ from abc import ABC, abstractmethod
 import importlib
 
 sys.path.append(os.getcwd())
-from confluent_kafka.admin import AdminClient, NewTopic
+from confluent_kafka.admin import AdminClient
 from src.base.utils import setup_config, ensure_directory
 from src.base.execution import create_pipeline_executor
 from src.base.kafka_handler import (
     ExactlyOnceKafkaConsumeHandler,
     ExactlyOnceKafkaProduceHandler,
     KafkaMessageFetchException,
+    ensure_topics,
 )
 from src.base.log_config import get_logger
 
@@ -94,9 +95,8 @@ class AlerterBase(AlerterAbstractBase):
             ]
         )
         admin_client = AdminClient({"bootstrap.servers": brokers})
-        # Attempt to create topic (will do nothing if it already exists)
         try:
-            admin_client.create_topics([NewTopic(self.external_kafka_topic, 1, 1)])
+            ensure_topics(admin_client, [self.external_kafka_topic])
         except Exception as e:
             logger.warning(
                 f"Could not auto-create topic {self.external_kafka_topic}: {e}"

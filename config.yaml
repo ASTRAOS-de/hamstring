@@ -13,7 +13,7 @@ logging:
     data_inspection.inspector:
       debug: false
     data_analysis.detector:
-      debug: false
+      debug: true
 
 pipeline:
   scaling:
@@ -23,49 +23,55 @@ pipeline:
     modules:
       log_storage.logserver:
         executor: thread
-        max_workers: 1
+        max_workers: 3
       log_collection.collector:
         executor: thread
-        max_workers: 1
+        max_workers: 3
         instances:
           dga_collector:
-            max_workers: 1
+            max_workers: 2
           domainator_collector:
-            max_workers: 1
+            max_workers: 2
       log_filtering.prefilter:
         executor: thread
-        max_workers: 1
+        max_workers: 3
         instances:
           dga_filter:
-            max_workers: 1
+            max_workers: 2
           no_filter:
-            max_workers: 1
+            max_workers: 2
       data_inspection.inspector:
         executor: thread
-        max_workers: 1
+        max_workers: 3
         instances:
           dga_inspector:
-            max_workers: 1
+            max_workers: 2
           no_inspector:
-            max_workers: 1
+            max_workers: 2
       data_analysis.detector:
         executor: thread
-        max_workers: 1
+        max_workers: 3
         instances:
           RF-dga_detector:
-            max_workers: 1
+            max_workers: 2
           domainator:
-            max_workers: 1
+            max_workers: 2
           domainator_attributor:
-            max_workers: 1
+            max_workers: 2
+          domainator_attributor_behaviour:
+            max_workers: 2
+          domainator_attributor_identification_behaviour:
+            max_workers: 2
+          domainator_attributor_identification:
+            max_workers: 2
       pipeline.alerter:
         executor: thread
-        max_workers: 1
+        max_workers: 2
         instances:
           generic:
-            max_workers: 1
+            max_workers: 2
           attributor:
-            max_workers: 1
+            max_workers: 2
       monitoring.agent:
         executor: thread
         max_workers: 1
@@ -162,7 +168,7 @@ pipeline:
       use_scaler: false
       checksum: a4aac4c585f1e614c3cf0d737e80b960c5de6e87b253f7cdd07125d9ce486476
       base_url: https://heibox.uni-heidelberg.de/d/0d5cbcbe16cd46a58021/
-      threshold: 0.5
+      threshold: 0.05
       consume_from: inspector
       inspector_name: "domainator_inspector"
       next_detectors: 
@@ -178,7 +184,7 @@ pipeline:
       use_scaler: false
       checksum: d8f302edc166ecc80985838a30b5dff16ccc83480ea3c2480652f49c8f6b5e9b
       base_url: https://heibox.uni-heidelberg.de/d/0d5cbcbe16cd46a58021/
-      threshold: 0.5
+      threshold: 0.05
       consume_from: detector
       detector_name: "domainator"
       next_detectors: ""
@@ -191,7 +197,7 @@ pipeline:
       use_scaler: false
       checksum: 9a0970b4160b22f4c3c5ac99760f0ace5500dd25c5a195ff13254ad3c11d5dcd
       base_url: https://heibox.uni-heidelberg.de/d/0d5cbcbe16cd46a58021/
-      threshold: 0.5
+      threshold: 0.05
       consume_from: detector
       detector_name: "domainator"
       next_detectors: ""
@@ -204,7 +210,7 @@ pipeline:
       use_scaler: false
       checksum: 360bd26881beabce7e7581963240915de807c48b5e4a3501a657139f2ecb8a8b
       base_url: https://heibox.uni-heidelberg.de/d/0d5cbcbe16cd46a58021/
-      threshold: 0.5
+      threshold: 0.05
       consume_from: detector
       detector_name: "domainator"
       next_detectors: ""
@@ -254,6 +260,32 @@ environment:
   kafka_topics:
     replication_factor: 3
     auto_expand_partitions: true
+    stages:
+      logserver_in:
+        partitions: 12
+        replication_factor: 3
+      logserver_to_collector:
+        partitions: 12
+        replication_factor: 3
+      batch_sender_to_prefilter:
+        partitions: 12
+        replication_factor: 3
+      prefilter_to_inspector:
+        partitions: 12
+        replication_factor: 3
+      inspector_to_detector:
+        partitions: 12
+        replication_factor: 3
+      detector_to_alerter:
+        partitions: 12
+        replication_factor: 3
+      detector_to_detector:
+        partitions: 12
+        replication_factor: 3
+    topics:
+      hamstring_alerts:
+        partitions: 12
+        replication_factor: 3
   kafka_topics_prefix:
     pipeline:
       logserver_in: "hamstring_input"

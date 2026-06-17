@@ -183,6 +183,7 @@ class DetectorBase(DetectorAbstractBase):
         self.model = self.model_name
         self.checksum = detector_config["checksum"]
         self.threshold = detector_config["threshold"]
+        self.use_scaler = detector_config["use_scaler"] if "use_scaler" in detector_config.keys() else False
 
         self.consume_topic = consume_topic
         if produce_topics is None:
@@ -332,6 +333,43 @@ class DetectorBase(DetectorAbstractBase):
 
         return h.hexdigest()
 
+
+    def get_model_download_url(self):
+        """
+        Generate the complete URL for downloading the Domainator detection model.
+
+        Constructs the URL using the base URL from configuration and appends the
+        specific model filename with checksum for verification.
+
+        Returns:
+            str: Fully qualified URL where the model can be downloaded.
+        """
+        self.model_base_url = (
+            self.model_base_url[:-1]
+            if self.model_base_url[-1] == "/"
+            else self.model_base_url
+        )
+        return f"{self.model_base_url}/files/?p=%2F{self.model_name}%2F{self.checksum}%2F{self.model_name}.pickle&dl=1"
+
+    def get_scaler_download_url(self):
+        """
+        Generate the complete URL for downloading the Domainator detection models scaler.
+
+        Constructs the URL using the base URL from configuration and appends the
+        specific model filename with checksum for verification.
+
+        Returns:
+            str: Fully qualified URL where the model can be downloaded.
+        """
+        self.model_base_url = (
+            self.model_base_url[:-1]
+            if self.model_base_url[-1] == "/"
+            else self.model_base_url
+        )
+        return f"{self.model_base_url}/files/?p=%2F{self.model_name}%2F{self.checksum}%2Fscaler.pickle&dl=1"
+
+
+
     def _get_model(self):
         """
         Download and validate the detection model.
@@ -353,7 +391,7 @@ class DetectorBase(DetectorAbstractBase):
             requests.HTTPError: If there's an error downloading the model.
         """
         logger.info(f"Get model: {self.model_name} with checksum {self.checksum}")
-        scaler_download_url = self.get_scaler_download_url()
+        scaler_download_url = self.get_scaler_download_url() if self.use_scaler else None
 
         if not os.path.isfile(self.model_path):
             model_download_url = self.get_model_download_url()
@@ -403,6 +441,7 @@ class DetectorBase(DetectorAbstractBase):
         Note:
         
         """
+        logger.info("general")
         logger.info("Start detecting malicious requests.")
         for message in self.messages:
             y_pred = self.predict(message)
