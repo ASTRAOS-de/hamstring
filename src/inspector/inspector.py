@@ -24,7 +24,11 @@ from src.base.kafka_handler import (
     KafkaMessageFetchException,
 )
 from src.base.log_config import get_logger
-from src.base.execution import create_pipeline_executor
+from src.base.execution import (
+    create_pipeline_executor,
+    run_thread_worker_pool,
+    start_pipeline_worker_replicas,
+)
 
 module_name = "data_inspection.inspector"
 logger = get_logger(module_name)
@@ -365,6 +369,7 @@ class InspectorBase(InspectorAbstractBase):
                 self.get_and_fill_data()
                 self.inspect()
                 self.send_data()
+                self.kafka_consume_handler.commit()
             except KafkaMessageFetchException as e:  # pragma: no cover
                 logger.debug(e)
             except IOError as e:
@@ -394,6 +399,50 @@ class InspectorBase(InspectorAbstractBase):
             executor.shutdown(wait=False, cancel_futures=True)
 
 
+def build_inspector_worker(
+    inspector_config,
+    consume_topic,
+    produce_topics,
+    worker_id=None,
+):
+    class_name = inspector_config["inspector_class_name"]
+    plugin_module_name = f"{PLUGIN_PATH}.{inspector_config['inspector_module_name']}"
+    plugin_module = importlib.import_module(plugin_module_name)
+    inspector_class = getattr(plugin_module, class_name)
+    worker = inspector_class(
+        consume_topic=consume_topic,
+        produce_topics=produce_topics,
+        config=inspector_config,
+    )
+    worker.worker_id = worker_id
+    return worker
+
+
+def run_inspector_worker_process(
+    process_index,
+    threads_per_process,
+    inspector_config,
+    consume_topic,
+    produce_topics,
+):
+    def worker_factory(worker_id):
+        return build_inspector_worker(
+            inspector_config=inspector_config,
+            consume_topic=consume_topic,
+            produce_topics=produce_topics,
+            worker_id=worker_id,
+        )
+
+    run_thread_worker_pool(
+        worker_factory=worker_factory,
+        target_name="bootstrap_inspection_process",
+        module_name=module_name,
+        instance_name=inspector_config["name"],
+        process_index=process_index,
+        threads_per_process=threads_per_process,
+    )
+
+
 async def main():
     """
     Entry point for the Inspector module.
@@ -420,14 +469,35 @@ async def main():
             and str(detector.get("consume_from", "")).strip().lower() != "detector"
         ]
         class_name = inspector["inspector_class_name"]
-        module_name = f"{PLUGIN_PATH}.{inspector['inspector_module_name']}"
-        module = importlib.import_module(module_name)
-        InspectorClass = getattr(module, class_name)
-        logger.info(f"using {class_name} and {module_name}")
-        inspector_instance = InspectorClass(
-            consume_topic=consume_topic, produce_topics=produce_topics, config=inspector
+        plugin_module_name = f"{PLUGIN_PATH}.{inspector['inspector_module_name']}"
+        logger.info(f"using {class_name} and {plugin_module_name}")
+
+        def worker_factory(
+            worker_id,
+            inspector=inspector,
+            consume_topic=consume_topic,
+            produce_topics=produce_topics,
+        ):
+            return build_inspector_worker(
+                inspector_config=inspector,
+                consume_topic=consume_topic,
+                produce_topics=produce_topics,
+                worker_id=worker_id,
+            )
+
+        tasks.append(
+            asyncio.create_task(
+                start_pipeline_worker_replicas(
+                    config=config,
+                    module_name=module_name,
+                    instance_name=inspector["name"],
+                    worker_factory=worker_factory,
+                    target_name="bootstrap_inspection_process",
+                    process_entrypoint=run_inspector_worker_process,
+                    process_args=(inspector, consume_topic, produce_topics),
+                )
+            )
         )
-        tasks.append(asyncio.create_task(inspector_instance.start()))
     await asyncio.gather(*tasks)
 
 

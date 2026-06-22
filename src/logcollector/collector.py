@@ -11,7 +11,11 @@ from src.base.clickhouse_kafka_sender import ClickHouseKafkaSender
 from src.base.kafka_handler import ExactlyOnceKafkaConsumeHandler
 from src.base.logline_handler import LoglineHandler
 from src.base import utils
-from src.base.execution import create_pipeline_executor
+from src.base.execution import (
+    create_pipeline_executor,
+    run_thread_worker_pool,
+    start_pipeline_worker_replicas,
+)
 from src.logcollector.batch_handler import BufferedBatchSender
 from src.base.log_config import get_logger
 from collections import defaultdict
@@ -122,6 +126,7 @@ class LogCollector:
             key, value, topic = self.kafka_consume_handler.consume()
             logger.debug(f"From Kafka: '{value}'")
             self.send(datetime.datetime.now(), value)
+            self.kafka_consume_handler.commit()
 
     def send(self, timestamp_in: datetime.datetime, message: str) -> None:
         """Processes and sends a log line to the batch handler after validation.
@@ -221,6 +226,54 @@ class LogCollector:
         return f"{normalized_ip_address}_{prefix_length}"
 
 
+def build_logcollector_worker(
+    collector_name,
+    protocol,
+    consume_topic,
+    produce_topics,
+    validation_config,
+    worker_id=None,
+):
+    worker = LogCollector(
+        collector_name=collector_name,
+        protocol=protocol,
+        consume_topic=consume_topic,
+        produce_topics=produce_topics,
+        validation_config=validation_config,
+    )
+    worker.worker_id = worker_id
+    return worker
+
+
+def run_logcollector_worker_process(
+    process_index,
+    threads_per_process,
+    collector_name,
+    protocol,
+    consume_topic,
+    produce_topics,
+    validation_config,
+):
+    def worker_factory(worker_id):
+        return build_logcollector_worker(
+            collector_name=collector_name,
+            protocol=protocol,
+            consume_topic=consume_topic,
+            produce_topics=produce_topics,
+            validation_config=validation_config,
+            worker_id=worker_id,
+        )
+
+    run_thread_worker_pool(
+        worker_factory=worker_factory,
+        target_name="fetch",
+        module_name=module_name,
+        instance_name=collector_name,
+        process_index=process_index,
+        threads_per_process=threads_per_process,
+    )
+
+
 async def main() -> None:
     """Creates and starts all configured LogCollector instances.
 
@@ -242,14 +295,43 @@ async def main() -> None:
             if collector["name"] == prefilter["collector_name"]
         ]
         validation_config = collector["required_log_information"]
-        collector_instance = LogCollector(
-            collector_name=collector["name"],
+
+        def worker_factory(
+            worker_id,
+            collector=collector,
             protocol=protocol,
             consume_topic=consume_topic,
             produce_topics=produce_topics,
             validation_config=validation_config,
+        ):
+            return build_logcollector_worker(
+                collector_name=collector["name"],
+                protocol=protocol,
+                consume_topic=consume_topic,
+                produce_topics=produce_topics,
+                validation_config=validation_config,
+                worker_id=worker_id,
+            )
+
+        tasks.append(
+            asyncio.create_task(
+                start_pipeline_worker_replicas(
+                    config=config,
+                    module_name=module_name,
+                    instance_name=collector["name"],
+                    worker_factory=worker_factory,
+                    target_name="fetch",
+                    process_entrypoint=run_logcollector_worker_process,
+                    process_args=(
+                        collector["name"],
+                        protocol,
+                        consume_topic,
+                        produce_topics,
+                        validation_config,
+                    ),
+                )
+            )
         )
-        tasks.append(asyncio.create_task(collector_instance.start()))
     await asyncio.gather(*tasks)
 
 

@@ -23,7 +23,11 @@ from src.base.kafka_handler import (
     KafkaMessageFetchException,
 )
 from src.base.log_config import get_logger
-from src.base.execution import create_pipeline_executor
+from src.base.execution import (
+    create_pipeline_executor,
+    run_thread_worker_pool,
+    start_pipeline_worker_replicas,
+)
 
 module_name = "data_analysis.detector"
 logger = get_logger(module_name)
@@ -714,6 +718,7 @@ class DetectorBase(DetectorAbstractBase):
                 self.detect()
                 logger.debug("Send warnings")
                 self.send_warning()
+                self.kafka_consume_handler.commit()
             except KafkaMessageFetchException as e:  # pragma: no cover
                 logger.debug(e)
             except IOError as e:
@@ -742,6 +747,54 @@ class DetectorBase(DetectorAbstractBase):
             executor.shutdown(wait=False, cancel_futures=True)
 
 
+def build_detector_worker(
+    detector_config,
+    consume_topic,
+    produce_topics,
+    downstream_detector_topics,
+    worker_id=None,
+):
+    class_name = detector_config["detector_class_name"]
+    plugin_module_name = f"{PLUGIN_PATH}.{detector_config['detector_module_name']}"
+    plugin_module = importlib.import_module(plugin_module_name)
+    detector_class = getattr(plugin_module, class_name)
+    worker = detector_class(
+        detector_config=detector_config,
+        consume_topic=consume_topic,
+        produce_topics=produce_topics,
+        downstream_detector_topics=downstream_detector_topics,
+    )
+    worker.worker_id = worker_id
+    return worker
+
+
+def run_detector_worker_process(
+    process_index,
+    threads_per_process,
+    detector_config,
+    consume_topic,
+    produce_topics,
+    downstream_detector_topics,
+):
+    def worker_factory(worker_id):
+        return build_detector_worker(
+            detector_config=detector_config,
+            consume_topic=consume_topic,
+            produce_topics=produce_topics,
+            downstream_detector_topics=downstream_detector_topics,
+            worker_id=worker_id,
+        )
+
+    run_thread_worker_pool(
+        worker_factory=worker_factory,
+        target_name="bootstrap_detector_instance",
+        module_name=module_name,
+        instance_name=detector_config["name"],
+        process_index=process_index,
+        threads_per_process=threads_per_process,
+    )
+
+
 async def main():  # pragma: no cover
     """
     Initialize and start all detector instances defined in the configuration.
@@ -768,17 +821,39 @@ async def main():  # pragma: no cover
             downstream_detector_topics,
         )
 
-        class_name = detector_config["detector_class_name"]
-        module_name = f"{PLUGIN_PATH}.{detector_config['detector_module_name']}"
-        module = importlib.import_module(module_name)
-        DetectorClass = getattr(module, class_name)
-        detector = DetectorClass(
+        def worker_factory(
+            worker_id,
             detector_config=detector_config,
             consume_topic=consume_topic,
             produce_topics=produce_topics,
             downstream_detector_topics=downstream_detector_topics,
+        ):
+            return build_detector_worker(
+                detector_config=detector_config,
+                consume_topic=consume_topic,
+                produce_topics=produce_topics,
+                downstream_detector_topics=downstream_detector_topics,
+                worker_id=worker_id,
+            )
+
+        tasks.append(
+            asyncio.create_task(
+                start_pipeline_worker_replicas(
+                    config=config,
+                    module_name=module_name,
+                    instance_name=detector_config["name"],
+                    worker_factory=worker_factory,
+                    target_name="bootstrap_detector_instance",
+                    process_entrypoint=run_detector_worker_process,
+                    process_args=(
+                        detector_config,
+                        consume_topic,
+                        produce_topics,
+                        downstream_detector_topics,
+                    ),
+                )
+            )
         )
-        tasks.append(asyncio.create_task(detector.start()))
     await asyncio.gather(*tasks)
 
 

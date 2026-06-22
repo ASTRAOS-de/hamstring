@@ -138,6 +138,7 @@ class TestFetch(unittest.TestCase):
             self.sut.fetch()
 
         mock_send.assert_called_once()
+        mock_consume_handler.commit.assert_called_once()
 
 
 class TestSend(unittest.TestCase):
@@ -474,23 +475,27 @@ class TestMain(unittest.IsolatedAsyncioTestCase):
         ]
 
     @patch("src.logcollector.collector.logger")
-    @patch("src.logcollector.collector.LogCollector")
+    @patch(
+        "src.logcollector.collector.start_pipeline_worker_replicas",
+        new_callable=AsyncMock,
+    )
     @patch("asyncio.create_task")
     @patch("asyncio.run")
     async def test_main(
-        self, mock_asyncio_run, mock_asyncio_create_task, mock_instance, mock_logger
+        self,
+        mock_asyncio_run,
+        mock_asyncio_create_task,
+        mock_start_workers,
+        mock_logger,
     ):
         # Arrange
 
-        mock_instance_obj = MagicMock()
-        mock_instance.return_value = mock_instance_obj
-        mock_instance_obj.start = AsyncMock()
         mock_asyncio_create_task.side_effect = lambda coro: coro
 
         with patch("src.logcollector.collector.COLLECTORS", self.cs):
             await main()
 
-        mock_instance_obj.start.assert_called_once()
+        mock_start_workers.assert_awaited_once()
         args, kwargs = mock_asyncio_create_task.call_args_list[0]
         expected_call = args[0]
         mock_asyncio_create_task.assert_called_once_with(expected_call)

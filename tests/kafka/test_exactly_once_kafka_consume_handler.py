@@ -194,8 +194,12 @@ class TestConsume(unittest.TestCase):
         except StopIteration:
             pass
 
-        self.sut.consumer.commit.assert_called_once()
+        self.sut.consumer.commit.assert_not_called()
         self.assertEqual((key, value, topic), result)
+
+        self.sut.commit()
+
+        self.sut.consumer.commit.assert_called_once_with(msg)
 
     def test_consumer_raises_keyboard_interrupt(self):
         self.sut.consumer.poll.side_effect = [KeyboardInterrupt]

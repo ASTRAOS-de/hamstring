@@ -8,7 +8,11 @@ import importlib
 sys.path.append(os.getcwd())
 from confluent_kafka.admin import AdminClient
 from src.base.utils import setup_config, ensure_directory
-from src.base.execution import create_pipeline_executor
+from src.base.execution import (
+    create_pipeline_executor,
+    run_thread_worker_pool,
+    start_pipeline_worker_replicas,
+)
 from src.base.kafka_handler import (
     ExactlyOnceKafkaConsumeHandler,
     ExactlyOnceKafkaProduceHandler,
@@ -174,6 +178,7 @@ class AlerterBase(AlerterAbstractBase):
                     # 2. Executing Base Logging Actions
                     self._log_to_file_action()
                     self._log_to_kafka_action()
+                    self.kafka_consume_handler.commit()
 
             except KafkaMessageFetchException as e:
                 logger.debug(e)
@@ -199,36 +204,106 @@ class AlerterBase(AlerterAbstractBase):
             executor.shutdown(wait=False, cancel_futures=True)
 
 
+def build_alerter_worker(alerter_config, consume_topic, worker_id=None):
+    class_name = alerter_config.get("alerter_class_name", "GenericAlerter")
+    alerter_module_name = alerter_config.get(
+        "alerter_module_name", "generic_alerter"
+    )
+    plugin_module_name = f"{PLUGIN_PATH}.{alerter_module_name}"
+    plugin_module = importlib.import_module(plugin_module_name)
+    alerter_class = getattr(plugin_module, class_name)
+    worker = alerter_class(alerter_config=alerter_config, consume_topic=consume_topic)
+    worker.worker_id = worker_id
+    return worker
+
+
+def run_alerter_worker_process(
+    process_index,
+    threads_per_process,
+    alerter_config,
+    consume_topic,
+):
+    def worker_factory(worker_id):
+        return build_alerter_worker(
+            alerter_config=alerter_config,
+            consume_topic=consume_topic,
+            worker_id=worker_id,
+        )
+
+    run_thread_worker_pool(
+        worker_factory=worker_factory,
+        target_name="bootstrap_alerter_instance",
+        module_name=module_name,
+        instance_name=alerter_config.get("name", "generic"),
+        process_index=process_index,
+        threads_per_process=threads_per_process,
+    )
+
+
 async def main():
     tasks = []
 
     # Setup Generic Alerter Task
     generic_topic = f"{CONSUME_TOPIC_PREFIX}-generic"
     logger.info("Initializing Generic Alerter")
-    class_name = "GenericAlerter"
-    mod_name = f"{PLUGIN_PATH}.generic_alerter"
-    module = importlib.import_module(mod_name)
-    AlerterClass = getattr(module, class_name)
 
-    generic_alerter = AlerterClass(
-        alerter_config={"name": "generic"}, consume_topic=generic_topic
+    generic_config = {"name": "generic"}
+
+    def generic_worker_factory(
+        worker_id,
+        generic_config=generic_config,
+        generic_topic=generic_topic,
+    ):
+        return build_alerter_worker(
+            alerter_config=generic_config,
+            consume_topic=generic_topic,
+            worker_id=worker_id,
+        )
+
+    tasks.append(
+        asyncio.create_task(
+            start_pipeline_worker_replicas(
+                config=config,
+                module_name=module_name,
+                instance_name="generic",
+                worker_factory=generic_worker_factory,
+                target_name="bootstrap_alerter_instance",
+                process_entrypoint=run_alerter_worker_process,
+                process_args=(generic_config, generic_topic),
+            )
+        )
     )
-    tasks.append(asyncio.create_task(generic_alerter.start()))
 
     # Setup Specific Custom Alerter Tasks
     if ALTERTERS:
         for alerter_config in ALTERTERS:
             logger.info(f"Initializing Custom Alerter: {alerter_config['name']}")
             consume_topic = f"{CONSUME_TOPIC_PREFIX}-{alerter_config['name']}"
-            class_name = alerter_config["alerter_class_name"]
-            mod_name = f"{PLUGIN_PATH}.{alerter_config['alerter_module_name']}"
-            module = importlib.import_module(mod_name)
-            AlerterClass = getattr(module, class_name)
 
-            alerter_instance = AlerterClass(
-                alerter_config=alerter_config, consume_topic=consume_topic
+            def worker_factory(
+                worker_id,
+                alerter_config=alerter_config,
+                consume_topic=consume_topic,
+            ):
+                return build_alerter_worker(
+                    alerter_config=alerter_config,
+                    consume_topic=consume_topic,
+                    worker_id=worker_id,
+                )
+
+            tasks.append(
+                asyncio.create_task(
+                    start_pipeline_worker_replicas(
+                        config=config,
+                        module_name=module_name,
+                        instance_name=alerter_config["name"],
+                        worker_factory=worker_factory,
+                        target_name="bootstrap_alerter_instance",
+                        process_entrypoint=run_alerter_worker_process,
+                        process_args=(alerter_config, consume_topic),
+                    )
+                )
             )
-            tasks.append(asyncio.create_task(alerter_instance.start()))
 
     await asyncio.gather(*tasks)
 

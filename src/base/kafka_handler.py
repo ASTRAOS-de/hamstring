@@ -105,7 +105,19 @@ def _desired_topic_partitions(
         configured_partitions = topic_config.get(
             "partitions", KAFKA_TOPIC_DEFAULT_PARTITIONS
         )
-    return max(1, NUMBER_OF_INSTANCES, int(configured_partitions))
+    return max(
+        1,
+        NUMBER_OF_INSTANCES,
+        _runtime_min_topic_partitions(),
+        int(configured_partitions),
+    )
+
+
+def _runtime_min_topic_partitions() -> int:
+    try:
+        return int(os.getenv("KAFKA_TOPIC_MIN_PARTITIONS", "1"))
+    except ValueError:
+        return 1
 
 
 def _topic_replication_factor(
@@ -556,6 +568,7 @@ class KafkaConsumeHandler(KafkaHandler):
             KafkaException: If consumer creation or subscription fails.
         """
         super().__init__()
+        self._last_consumed_message = None
 
         if isinstance(topics, str):
             topics = [topics]
@@ -593,6 +606,12 @@ class KafkaConsumeHandler(KafkaHandler):
 
         # subscribe to the topics
         self.consumer.subscribe(topics)
+
+    def commit(self) -> None:
+        """Commit the last message returned by ``consume``."""
+        if self.consumer and self._last_consumed_message is not None:
+            self.consumer.commit(self._last_consumed_message)
+            self._last_consumed_message = None
 
     @abstractmethod
     def consume(self, *args, **kwargs):
@@ -795,6 +814,7 @@ class SimpleKafkaConsumeHandler(KafkaConsumeHandler):
                 key = msg.key().decode("utf-8") if msg.key() else None
                 value = msg.value().decode("utf-8") if msg.value() else None
                 topic = msg.topic() if msg.topic() else None
+                self._last_consumed_message = msg
                 return key, value, topic
         except KeyboardInterrupt:
             logger.info("Stopping KafkaConsumeHandler...")
@@ -860,8 +880,7 @@ class ExactlyOnceKafkaConsumeHandler(KafkaConsumeHandler):
                 key = msg.key().decode("utf-8") if msg.key() else None
                 value = msg.value().decode("utf-8") if msg.value() else None
                 topic = msg.topic() if msg.topic() else None
-
-                self.consumer.commit(msg)
+                self._last_consumed_message = msg
 
                 return key, value, topic
         except KeyboardInterrupt:

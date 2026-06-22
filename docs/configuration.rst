@@ -119,9 +119,11 @@ functionality of the modules.
 ``pipeline.scaling``
 ^^^^^^^^^^^^^^^^^^^^
 
-Controls the executor used by each pipeline module when it runs blocking work from the asyncio event loop.
-Values from ``defaults`` apply to every module and can be overridden per module under ``modules``. Modules
-that run several configured instances can also override an individual instance under ``instances``.
+Controls how many independent workers each pipeline module starts. Each worker owns its own Kafka
+consumer and producer, so workers consuming the same topic join the same Kafka consumer group and can
+process different partitions in parallel. Values from ``defaults`` apply to every module and can be
+overridden per module under ``modules``. Modules that run several configured instances can also override
+an individual instance under ``instances``.
 
 .. code-block:: yaml
 
@@ -140,10 +142,18 @@ that run several configured instances can also override an individual instance u
          data_analysis.detector:
            executor: process
            processes: 2
+         pipeline.alerter:
+           executor: hybrid
+           processes: 2
+           threads_per_process: 4
 
-``executor`` may be ``thread`` or ``process``. Worker counts can be configured with ``max_workers`` or
-``workers``. The aliases ``threads`` and ``processes`` also set the worker count and infer the executor
-type when ``executor`` is omitted.
+``executor`` may be ``thread``, ``process``, or ``hybrid``. ``thread`` starts ``threads`` workers in the
+service process. ``process`` starts ``processes`` worker processes with one worker each. ``hybrid`` starts
+``processes`` processes with ``threads_per_process`` worker threads inside each process. ``max_workers`` and
+``workers`` remain supported as aliases for the single-axis modes; ``threads`` is also accepted as an alias
+for ``threads_per_process`` in hybrid mode. The total number of Kafka consumers for one configured instance
+is ``docker replicas * processes * threads_per_process``. The consumed Kafka topic needs at least that many
+partitions to keep every worker busy.
 
 ``pipeline.log_storage``
 ^^^^^^^^^^^^^^^^^^^^^^^^
