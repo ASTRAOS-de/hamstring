@@ -665,6 +665,13 @@ class DetectorBase(DetectorAbstractBase):
                 if isinstance(message, dict) and "logline_id" in message
             }
         )[:100]
+        compact_warning["server_message_ids"] = sorted(
+            {
+                message["server_message_id"]
+                for message in request_messages
+                if isinstance(message, dict) and "server_message_id" in message
+            }
+        )[:100]
         return compact_warning
 
     def _flatten_messages(self, messages) -> list:

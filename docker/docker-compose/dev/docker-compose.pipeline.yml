@@ -10,7 +10,7 @@ services:
       - GROUP_ID=log_storage
     deploy:
       mode: "replicated"
-      replicas: 3
+      replicas: 1
     networks:
       hamstring:
 
@@ -21,7 +21,7 @@ services:
     restart: "unless-stopped"
     deploy:
       mode: "replicated"
-      replicas: 3
+      replicas: 1
     volumes:
       - ../../../config.yaml:/app/config.yaml
     networks:

@@ -175,6 +175,29 @@ class TestSend(unittest.TestCase):
         # Assert
         self.sut.batch_handler.add_message.assert_not_called()
 
+    def test_invalid_logline_records_failed_terminal_event_for_logserver_message(self):
+        timestamp = datetime.datetime(2026, 2, 14, 16, 38, 6, 184006)
+        message = "test_message"
+        server_message_id = uuid.UUID("bd72ccb4-0ef2-4100-aa22-e787122d6875")
+
+        self.sut.failed_protocol_loglines = MagicMock()
+        self.sut.server_log_terminal_events = MagicMock()
+        self.sut.logline_handler.validate_logline_and_get_fields_as_json.side_effect = [
+            ValueError
+        ]
+
+        self.sut.send(
+            timestamp_in=timestamp,
+            message=message,
+            server_message_id=str(server_message_id),
+        )
+
+        self.sut.server_log_terminal_events.insert.assert_called_once()
+        terminal_event = self.sut.server_log_terminal_events.insert.call_args.args[0]
+        self.assertEqual(server_message_id, terminal_event["message_id"])
+        self.assertEqual("log_collection.collector", terminal_event["stage"])
+        self.assertEqual("failed", terminal_event["status"])
+
     def test_invalid_logline(self):
         timestamp = datetime.datetime(2026, 2, 14, 16, 38, 6, 184006)
         message = "test_message"
@@ -182,6 +205,7 @@ class TestSend(unittest.TestCase):
         # Arrange
         mock_logline_handler = Mock()
         self.sut.logline_handler = mock_logline_handler.return_value
+        self.sut.server_log_to_logline = MagicMock()
         self.sut.logline_handler.validate_logline_and_get_fields_as_json.return_value = {
             "ts": str(timestamp),
             "status_code": "test_status",
@@ -196,12 +220,22 @@ class TestSend(unittest.TestCase):
                 return_value=uuid.UUID("da3aec7f-b355-4a2c-a2f4-2066d49431a5"),
             ),
         ):
-            self.sut.send(timestamp_in=timestamp, message=message)
+            self.sut.send(
+                timestamp_in=timestamp,
+                message=message,
+                server_message_id="bd72ccb4-0ef2-4100-aa22-e787122d6875",
+            )
 
         # Assert
         self.sut.batch_handler.add_message.assert_called_once_with(
             "192.168.3.0_24",
-            '{"ts": "2026-02-14 16:38:06.184006", "status_code": "test_status", "src_ip": "192.168.3.141", "record_type": "test_record_type", "logline_id": "da3aec7f-b355-4a2c-a2f4-2066d49431a5"}',
+            '{"ts": "2026-02-14 16:38:06.184006", "status_code": "test_status", "src_ip": "192.168.3.141", "record_type": "test_record_type", "logline_id": "da3aec7f-b355-4a2c-a2f4-2066d49431a5", "server_message_id": "bd72ccb4-0ef2-4100-aa22-e787122d6875"}',
+        )
+        self.sut.server_log_to_logline.insert.assert_called_once_with(
+            {
+                "message_id": uuid.UUID("bd72ccb4-0ef2-4100-aa22-e787122d6875"),
+                "logline_id": uuid.UUID("da3aec7f-b355-4a2c-a2f4-2066d49431a5"),
+            }
         )
 
 

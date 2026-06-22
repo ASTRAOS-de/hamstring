@@ -73,6 +73,8 @@ class MonitoringAgent:
         self.table_names = [
             "server_logs",
             "server_logs_timestamps",
+            "server_log_to_logline",
+            "server_log_terminal_events",
             "failed_loglines",
             "logline_to_batches",
             "loglines",

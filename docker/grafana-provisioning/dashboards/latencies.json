@@ -659,12 +659,191 @@
       "type": "bargauge"
     },
     {
+      "datasource": {
+        "default": false,
+        "type": "grafana-clickhouse-datasource",
+        "uid": "PDEE91DDB90597936"
+      },
+      "description": "Average time for alert-producing requests. Uses exact LogServer intake to alerter processed timestamps when mapping data exists; otherwise falls back to historical collector-to-alert latency plus average LogServer latency.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "thresholds"
+          },
+          "mappings": [],
+          "min": 0,
+          "noValue": "-",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1000000
+              },
+              {
+                "color": "red",
+                "value": 5000000
+              }
+            ]
+          },
+          "unit": "\u00b5s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 19,
+        "x": 0,
+        "y": 14
+      },
+      "id": 81,
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "justifyMode": "auto",
+        "orientation": "auto",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showPercentChange": false,
+        "textMode": "auto",
+        "wideLayout": true,
+        "percentChangeColorMode": "inverted"
+      },
+      "pluginVersion": "11.2.2+security-01",
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "PDEE91DDB90597936"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "meta": {
+            "builderOptions": {
+              "columns": [],
+              "database": "",
+              "limit": 1000,
+              "mode": "list",
+              "queryType": "table",
+              "table": ""
+            }
+          },
+          "pluginVersion": "4.10.1",
+          "queryType": "table",
+          "rawSql": "SELECT if(isFinite(mapped.average_latency_us), mapped.average_latency_us, if(isFinite(fallback.average_latency_us), fallback.average_latency_us, 0)) AS \"Average alerting request roundtrip latency\"\nFROM (\n    SELECT avg(latency_us) AS average_latency_us\n    FROM (\n        SELECT\n            sl.message_id AS message_id,\n            sltl.logline_id AS logline_id,\n            a.suspicious_batch_id AS suspicious_batch_id,\n            dateDiff('microsecond', min(sl.timestamp_in), max(ste.timestamp)) AS latency_us\n        FROM alerts a\n        INNER JOIN suspicious_batches_to_batch sbtb\n                ON a.suspicious_batch_id = sbtb.suspicious_batch_id\n        INNER JOIN logline_to_batches ltb\n                ON sbtb.batch_id = ltb.batch_id\n        INNER JOIN loglines ll\n                ON ltb.logline_id = ll.logline_id\n               AND ll.src_ip = a.src_ip\n        INNER JOIN server_log_to_logline sltl\n                ON ltb.logline_id = sltl.logline_id\n        INNER JOIN server_logs sl\n                ON sltl.message_id = sl.message_id\n        INNER JOIN server_log_terminal_events ste\n                ON sl.message_id = ste.message_id\n               AND ste.stage = 'pipeline.alerter'\n               AND ste.status = 'processed'\n        WHERE toDate(ste.timestamp) >= toDate($__fromTime)\n          AND toDate(ste.timestamp) <= toDate($__toTime)\n          AND ste.timestamp >= $__fromTime\n          AND ste.timestamp <= $__toTime\n          AND sl.timestamp_in <= ste.timestamp\n        GROUP BY sl.message_id, sltl.logline_id, a.suspicious_batch_id\n    )\n    WHERE latency_us > 0\n) mapped\nCROSS JOIN (\n    SELECT avg(latency_us) AS average_latency_us\n    FROM (\n        SELECT\n            ltb.logline_id AS logline_id,\n            a.suspicious_batch_id AS suspicious_batch_id,\n            dateDiff('microsecond', min(lt.timestamp), min(a.alert_timestamp)) + any(server_latency_us) AS latency_us\n        FROM alerts a\n        INNER JOIN suspicious_batches_to_batch sbtb\n                ON a.suspicious_batch_id = sbtb.suspicious_batch_id\n        INNER JOIN logline_to_batches ltb\n                ON sbtb.batch_id = ltb.batch_id\n        INNER JOIN loglines ll\n                ON ltb.logline_id = ll.logline_id\n               AND ll.src_ip = a.src_ip\n        INNER JOIN logline_timestamps lt\n                ON ltb.logline_id = lt.logline_id\n        CROSS JOIN (\n            SELECT if(isFinite(avg(latency_us)), avg(latency_us), 0) AS server_latency_us\n            FROM server_log_latency_values\n            WHERE event_date >= toDate($__fromTime)\n              AND event_date <= toDate($__toTime)\n              AND end_timestamp >= $__fromTime\n              AND end_timestamp <= $__toTime\n        ) server_latency\n        WHERE lt.stage = 'log_collection.collector'\n          AND lt.status = 'in_process'\n          AND toDate(a.alert_timestamp) >= toDate($__fromTime)\n          AND toDate(a.alert_timestamp) <= toDate($__toTime)\n          AND a.alert_timestamp >= $__fromTime\n          AND a.alert_timestamp <= $__toTime\n          AND lt.timestamp <= a.alert_timestamp\n        GROUP BY ltb.logline_id, a.suspicious_batch_id\n    )\n    WHERE latency_us > 0\n) fallback;\n",
+          "refId": "alerting_request_roundtrip_latency"
+        }
+      ],
+      "title": "Average alerting request roundtrip latency",
+      "type": "stat"
+    },
+    {
+      "datasource": {
+        "default": false,
+        "type": "grafana-clickhouse-datasource",
+        "uid": "PDEE91DDB90597936"
+      },
+      "description": "Average LogServer-to-terminal-stage latency for all completed logevents. Uses exact mapped terminal events when available; otherwise falls back to historical collector-terminal latency plus average LogServer latency.",
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "fixedColor": "text",
+            "mode": "continuous-GrYlRd"
+          },
+          "fieldMinMax": false,
+          "mappings": [],
+          "min": 0,
+          "noValue": "-",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 1000000
+              },
+              {
+                "color": "red",
+                "value": 5000000
+              }
+            ]
+          },
+          "unit": "\u00b5s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 3,
+        "w": 19,
+        "x": 0,
+        "y": 17
+      },
+      "id": 82,
+      "options": {
+        "displayMode": "gradient",
+        "maxVizHeight": 300,
+        "minVizHeight": 16,
+        "minVizWidth": 8,
+        "namePlacement": "top",
+        "orientation": "horizontal",
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showUnfilled": true,
+        "sizing": "auto",
+        "valueMode": "text"
+      },
+      "pluginVersion": "11.2.2+security-01",
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "PDEE91DDB90597936"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "meta": {
+            "builderOptions": {
+              "columns": [],
+              "database": "",
+              "limit": 1000,
+              "mode": "list",
+              "queryType": "table",
+              "table": ""
+            }
+          },
+          "pluginVersion": "4.10.1",
+          "queryType": "table",
+          "rawSql": "SELECT if(isFinite(mapped.average_latency_us), mapped.average_latency_us, if(isFinite(fallback.average_latency_us), fallback.average_latency_us, 0)) AS \"Average all logevents roundtrip latency\"\nFROM (\n    SELECT avg(latency_us) AS average_latency_us\n    FROM (\n        SELECT\n            message_id,\n            dateDiff('microsecond', start_timestamp, terminal_timestamp) AS latency_us\n        FROM (\n            SELECT\n                sl.message_id AS message_id,\n                min(sl.timestamp_in) AS start_timestamp,\n                max(terminal.terminal_timestamp) AS terminal_timestamp\n            FROM server_logs sl\n            INNER JOIN (\n                SELECT\n                    sltl.message_id AS message_id,\n                    max(lt.timestamp) AS terminal_timestamp\n                FROM server_log_to_logline sltl\n                INNER JOIN logline_timestamps lt\n                        ON sltl.logline_id = lt.logline_id\n                WHERE lt.is_active = false\n                GROUP BY sltl.message_id\n\n                UNION ALL\n\n                SELECT\n                    message_id,\n                    max(timestamp) AS terminal_timestamp\n                FROM server_log_terminal_events\n                GROUP BY message_id\n            ) terminal\n                    ON sl.message_id = terminal.message_id\n            GROUP BY sl.message_id\n        )\n        WHERE terminal_timestamp >= start_timestamp\n          AND toDate(terminal_timestamp) >= toDate($__fromTime)\n          AND toDate(terminal_timestamp) <= toDate($__toTime)\n          AND terminal_timestamp >= $__fromTime\n          AND terminal_timestamp <= $__toTime\n    )\n    WHERE latency_us > 0\n) mapped\nCROSS JOIN (\n    SELECT avg(latency_us) AS average_latency_us\n    FROM (\n        SELECT\n            dateDiff('microsecond', collector_started_at, terminal_timestamp) + server_latency_us AS latency_us\n        FROM (\n            SELECT\n                lt.logline_id AS logline_id,\n                minIf(lt.timestamp, lt.stage = 'log_collection.collector' AND lt.status = 'in_process') AS collector_started_at,\n                maxIf(lt.timestamp, lt.is_active = false) AS terminal_timestamp,\n                any(server_latency_us) AS server_latency_us\n            FROM logline_timestamps lt\n            CROSS JOIN (\n                SELECT if(isFinite(avg(latency_us)), avg(latency_us), 0) AS server_latency_us\n                FROM server_log_latency_values\n                WHERE event_date >= toDate($__fromTime)\n                  AND event_date <= toDate($__toTime)\n                  AND end_timestamp >= $__fromTime\n                  AND end_timestamp <= $__toTime\n            ) server_latency\n            GROUP BY lt.logline_id\n        )\n        WHERE collector_started_at > toDateTime64(0, 6)\n          AND terminal_timestamp >= collector_started_at\n          AND toDate(terminal_timestamp) >= toDate($__fromTime)\n          AND toDate(terminal_timestamp) <= toDate($__toTime)\n          AND terminal_timestamp >= $__fromTime\n          AND terminal_timestamp <= $__toTime\n\n        UNION ALL\n\n        SELECT\n            dateDiff('microsecond', timestamp_in, timestamp_failed) + server_latency_us AS latency_us\n        FROM failed_loglines\n        CROSS JOIN (\n            SELECT if(isFinite(avg(latency_us)), avg(latency_us), 0) AS server_latency_us\n            FROM server_log_latency_values\n            WHERE event_date >= toDate($__fromTime)\n              AND event_date <= toDate($__toTime)\n              AND end_timestamp >= $__fromTime\n              AND end_timestamp <= $__toTime\n        ) server_latency\n        WHERE timestamp_failed >= timestamp_in\n          AND toDate(timestamp_failed) >= toDate($__fromTime)\n          AND toDate(timestamp_failed) <= toDate($__toTime)\n          AND timestamp_failed >= $__fromTime\n          AND timestamp_failed <= $__toTime\n    )\n    WHERE latency_us > 0\n) fallback;\n",
+          "refId": "all_logevents_roundtrip_latency"
+        }
+      ],
+      "title": "Average all logevents roundtrip latency",
+      "type": "bargauge"
+    },
+    {
       "collapsed": false,
       "gridPos": {
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 14
+        "y": 20
       },
       "id": 33,
       "panels": [],
@@ -790,7 +969,7 @@
         "h": 6,
         "w": 6,
         "x": 0,
-        "y": 15
+        "y": 21
       },
       "id": 22,
       "options": {
@@ -890,7 +1069,7 @@
         "h": 3,
         "w": 5,
         "x": 6,
-        "y": 15
+        "y": 21
       },
       "id": 29,
       "options": {
@@ -1057,7 +1236,7 @@
         "h": 6,
         "w": 6,
         "x": 12,
-        "y": 15
+        "y": 21
       },
       "id": 25,
       "options": {
@@ -1157,7 +1336,7 @@
         "h": 3,
         "w": 5,
         "x": 18,
-        "y": 15
+        "y": 21
       },
       "id": 35,
       "options": {
@@ -1237,7 +1416,7 @@
         "h": 3,
         "w": 5,
         "x": 6,
-        "y": 18
+        "y": 24
       },
       "id": 28,
       "options": {
@@ -1316,7 +1495,7 @@
         "h": 3,
         "w": 5,
         "x": 18,
-        "y": 18
+        "y": 24
       },
       "id": 36,
       "options": {
@@ -1483,7 +1662,7 @@
         "h": 6,
         "w": 6,
         "x": 0,
-        "y": 21
+        "y": 27
       },
       "id": 23,
       "options": {
@@ -1583,7 +1762,7 @@
         "h": 3,
         "w": 5,
         "x": 6,
-        "y": 21
+        "y": 27
       },
       "id": 30,
       "options": {
@@ -1750,7 +1929,7 @@
         "h": 6,
         "w": 6,
         "x": 12,
-        "y": 21
+        "y": 27
       },
       "id": 26,
       "options": {
@@ -1850,7 +2029,7 @@
         "h": 3,
         "w": 5,
         "x": 18,
-        "y": 21
+        "y": 27
       },
       "id": 37,
       "options": {
@@ -1930,7 +2109,7 @@
         "h": 3,
         "w": 5,
         "x": 6,
-        "y": 24
+        "y": 30
       },
       "id": 31,
       "options": {
@@ -2009,7 +2188,7 @@
         "h": 3,
         "w": 5,
         "x": 18,
-        "y": 24
+        "y": 30
       },
       "id": 38,
       "options": {
@@ -2175,7 +2354,7 @@
         "h": 6,
         "w": 6,
         "x": 0,
-        "y": 27
+        "y": 33
       },
       "id": 24,
       "options": {
@@ -2275,7 +2454,7 @@
         "h": 3,
         "w": 5,
         "x": 6,
-        "y": 27
+        "y": 33
       },
       "id": 32,
       "options": {
@@ -2442,7 +2621,7 @@
         "h": 6,
         "w": 6,
         "x": 12,
-        "y": 27
+        "y": 33
       },
       "id": 27,
       "options": {
@@ -2542,7 +2721,7 @@
         "h": 3,
         "w": 5,
         "x": 18,
-        "y": 27
+        "y": 33
       },
       "id": 39,
       "options": {
@@ -2622,7 +2801,7 @@
         "h": 3,
         "w": 5,
         "x": 6,
-        "y": 30
+        "y": 36
       },
       "id": 34,
       "options": {
@@ -2701,7 +2880,7 @@
         "h": 3,
         "w": 5,
         "x": 18,
-        "y": 30
+        "y": 36
       },
       "id": 40,
       "options": {
@@ -2755,7 +2934,7 @@
         "h": 1,
         "w": 24,
         "x": 0,
-        "y": 33
+        "y": 39
       },
       "id": 71,
       "panels": [],
@@ -2880,7 +3059,7 @@
         "h": 6,
         "w": 8,
         "x": 0,
-        "y": 34
+        "y": 40
       },
       "id": 74,
       "options": {
@@ -3067,7 +3246,7 @@
         "h": 6,
         "w": 8,
         "x": 8,
-        "y": 34
+        "y": 40
       },
       "id": 75,
       "options": {
@@ -3252,7 +3431,7 @@
         "h": 6,
         "w": 8,
         "x": 16,
-        "y": 34
+        "y": 40
       },
       "id": 76,
       "options": {
@@ -3365,7 +3544,7 @@
         "h": 3,
         "w": 8,
         "x": 0,
-        "y": 40
+        "y": 46
       },
       "id": 57,
       "options": {
@@ -3458,7 +3637,7 @@
         "h": 3,
         "w": 8,
         "x": 8,
-        "y": 40
+        "y": 46
       },
       "id": 48,
       "options": {
@@ -3551,7 +3730,7 @@
         "h": 3,
         "w": 8,
         "x": 16,
-        "y": 40
+        "y": 46
       },
       "id": 49,
       "options": {

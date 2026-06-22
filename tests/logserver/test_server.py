@@ -96,13 +96,16 @@ class TestSend(unittest.TestCase):
         message = "test_message"
         sut = LogServer(consume_topic="consume_topic1", produce_topics=["test_topic"])
 
+        message_id = uuid.UUID("bd72ccb4-0ef2-4100-aa22-e787122d6875")
+
         # Act
-        sut.send(uuid.uuid4(), message)
+        sut.send(message_id, message)
 
         # Assert
         mock_kafka_produce_handler_instance.produce.assert_called_once_with(
             topic="test_topic",
             data=message,
+            key=str(message_id),
         )
 
 

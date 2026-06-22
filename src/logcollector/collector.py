@@ -78,6 +78,10 @@ class LogCollector:
         self.failed_protocol_loglines = ClickHouseKafkaSender("failed_loglines")
         self.protocol_loglines = ClickHouseKafkaSender("loglines")
         self.logline_timestamps = ClickHouseKafkaSender("logline_timestamps")
+        self.server_log_to_logline = ClickHouseKafkaSender("server_log_to_logline")
+        self.server_log_terminal_events = ClickHouseKafkaSender(
+            "server_log_terminal_events"
+        )
         self.fill_levels = ClickHouseKafkaSender("fill_levels")
 
         self.fill_levels.insert(
@@ -125,10 +129,15 @@ class LogCollector:
         while True:
             key, value, topic = self.kafka_consume_handler.consume()
             logger.debug(f"From Kafka: '{value}'")
-            self.send(datetime.datetime.now(), value)
+            self.send(datetime.datetime.now(), value, server_message_id=key)
             self.kafka_consume_handler.commit()
 
-    def send(self, timestamp_in: datetime.datetime, message: str) -> None:
+    def send(
+        self,
+        timestamp_in: datetime.datetime,
+        message: str,
+        server_message_id: str | uuid.UUID | None = None,
+    ) -> None:
         """Processes and sends a log line to the batch handler after validation.
 
         This method:
@@ -140,20 +149,33 @@ class LogCollector:
         Args:
             timestamp_in (datetime.datetime): Timestamp when the log line entered the pipeline
             message (str): Raw log line message in JSON format
+            server_message_id (str | uuid.UUID | None): Optional LogServer message id
+                received as the Kafka key.
         """
+        server_message_uuid = self._parse_server_message_id(server_message_id)
         try:
             fields = self.logline_handler.validate_logline_and_get_fields_as_json(
                 message
             )
         except ValueError:
+            timestamp_failed = datetime.datetime.now()
             self.failed_protocol_loglines.insert(
                 dict(
                     message_text=message,
                     timestamp_in=timestamp_in,
-                    timestamp_failed=datetime.datetime.now(),
+                    timestamp_failed=timestamp_failed,
                     reason_for_failure=None,  # TODO: Add actual reason
                 )
             )
+            if server_message_uuid:
+                self.server_log_terminal_events.insert(
+                    dict(
+                        message_id=server_message_uuid,
+                        stage=module_name,
+                        status="failed",
+                        timestamp=timestamp_failed,
+                    )
+                )
             return
         additional_fields = fields.copy()
         for field in REQUIRED_FIELDS:
@@ -169,6 +191,13 @@ class LogCollector:
                 additional_fields=json.dumps(additional_fields),
             )
         )
+        if server_message_uuid:
+            self.server_log_to_logline.insert(
+                dict(
+                    message_id=server_message_uuid,
+                    logline_id=logline_id,
+                )
+            )
         self.logline_timestamps.insert(
             dict(
                 logline_id=logline_id,
@@ -180,6 +209,8 @@ class LogCollector:
         )
         message_fields = fields.copy()
         message_fields["logline_id"] = str(logline_id)
+        if server_message_uuid:
+            message_fields["server_message_id"] = str(server_message_uuid)
 
         self.logline_timestamps.insert(
             dict(
@@ -192,6 +223,22 @@ class LogCollector:
         )
         self.batch_handler.add_message(subnet_id, json.dumps(message_fields))
         logger.debug(f"Sent: {message}")
+
+    @staticmethod
+    def _parse_server_message_id(
+        server_message_id: str | uuid.UUID | None,
+    ) -> uuid.UUID | None:
+        if not server_message_id:
+            return None
+        if isinstance(server_message_id, uuid.UUID):
+            return server_message_id
+        try:
+            return uuid.UUID(str(server_message_id))
+        except (TypeError, ValueError):
+            logger.warning(
+                "Ignoring non-UUID LogServer message id '%s'.", server_message_id
+            )
+            return None
 
     def _get_subnet_id(
         self, address: ipaddress.IPv4Address | ipaddress.IPv6Address

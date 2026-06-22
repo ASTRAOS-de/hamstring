@@ -86,7 +86,11 @@ class LogServer:
             message (str): Message to be sent.
         """
         for topic in self.produce_topics:
-            self.kafka_produce_handler.produce(topic=topic, data=message)
+            self.kafka_produce_handler.produce(
+                topic=topic,
+                data=message,
+                key=str(message_id),
+            )
             logger.debug(f"Sent: '{message}' to topic {topic}")
 
         self.server_logs_timestamps.insert(

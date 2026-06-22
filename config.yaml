@@ -23,10 +23,10 @@ pipeline:
     modules:
       log_storage.logserver:
         executor: thread
-        max_workers: 3
+        max_workers: 4
       log_collection.collector:
         executor: thread
-        max_workers: 3
+        max_workers: 1
         instances:
           dga_collector:
             max_workers: 2
@@ -34,7 +34,7 @@ pipeline:
             max_workers: 2
       log_filtering.prefilter:
         executor: thread
-        max_workers: 3
+        max_workers: 2
         instances:
           dga_filter:
             max_workers: 2
@@ -42,7 +42,7 @@ pipeline:
             max_workers: 2
       data_inspection.inspector:
         executor: thread
-        max_workers: 3
+        max_workers: 2
         instances:
           dga_inspector:
             max_workers: 2
@@ -50,20 +50,20 @@ pipeline:
             max_workers: 2
       data_analysis.detector:
         executor: thread
-        max_workers: 3
+        max_workers: 2
         instances:
           RF-dga_detector:
             max_workers: 2
           domainator:
-            max_workers: 2
+            max_workers: 3
           domainator_attributor:
-            max_workers: 2
+            max_workers: 1
           domainator_attributor_behaviour:
-            max_workers: 2
+            max_workers: 1
           domainator_attributor_identification_behaviour:
-            max_workers: 2
+            max_workers: 1
           domainator_attributor_identification:
-            max_workers: 2
+            max_workers: 1
       pipeline.alerter:
         executor: thread
         max_workers: 2
@@ -74,7 +74,7 @@ pipeline:
             max_workers: 2
       monitoring.agent:
         executor: thread
-        max_workers: 1
+        max_workers: 2
   log_storage:
     logserver:
       input_file: "/opt/file.txt"

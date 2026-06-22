@@ -2,11 +2,14 @@ import json
 import os
 import sys
 import asyncio
+import datetime
+import uuid
 from abc import ABC, abstractmethod
 import importlib
 
 sys.path.append(os.getcwd())
 from confluent_kafka.admin import AdminClient
+from src.base.clickhouse_kafka_sender import ClickHouseKafkaSender
 from src.base.utils import setup_config, ensure_directory
 from src.base.execution import (
     create_pipeline_executor,
@@ -67,6 +70,9 @@ class AlerterBase(AlerterAbstractBase):
         self.key = None
 
         self.kafka_consume_handler = ExactlyOnceKafkaConsumeHandler(self.consume_topic)
+        self.server_log_terminal_events = ClickHouseKafkaSender(
+            "server_log_terminal_events"
+        )
 
         # Base actions config
         self.log_to_file = ALERTING_CONFIG.get("log_to_file", False)
@@ -163,6 +169,57 @@ class AlerterBase(AlerterAbstractBase):
             logger.error(f"{self.name}: Error forwarding alert: {e}")
             raise
 
+    def _extract_server_message_ids(self) -> set[uuid.UUID]:
+        server_message_ids = set()
+
+        def visit(value):
+            if isinstance(value, dict):
+                if value.get("server_message_id"):
+                    self._add_server_message_id(
+                        server_message_ids, value["server_message_id"]
+                    )
+                if isinstance(value.get("server_message_ids"), list):
+                    for server_message_id in value["server_message_ids"]:
+                        self._add_server_message_id(
+                            server_message_ids, server_message_id
+                        )
+                for nested_value in value.values():
+                    visit(nested_value)
+            elif isinstance(value, list):
+                for item in value:
+                    visit(item)
+
+        visit(self.alert_data)
+        return server_message_ids
+
+    @staticmethod
+    def _add_server_message_id(
+        server_message_ids: set[uuid.UUID],
+        server_message_id,
+    ) -> None:
+        try:
+            server_message_ids.add(uuid.UUID(str(server_message_id)))
+        except (TypeError, ValueError):
+            logger.warning(
+                "Ignoring non-UUID LogServer message id '%s'.", server_message_id
+            )
+
+    def _record_alerter_terminal_events(
+        self, server_message_ids: set[uuid.UUID]
+    ) -> None:
+        if not server_message_ids:
+            return
+        timestamp = datetime.datetime.now()
+        for server_message_id in server_message_ids:
+            self.server_log_terminal_events.insert(
+                dict(
+                    message_id=server_message_id,
+                    stage=module_name,
+                    status="processed",
+                    timestamp=timestamp,
+                )
+            )
+
     def bootstrap_alerter_instance(self):
         """
         Main loop for the alerter instance.
@@ -173,11 +230,13 @@ class AlerterBase(AlerterAbstractBase):
             try:
                 self.get_and_fill_data()
                 if self.alert_data:
+                    server_message_ids = self._extract_server_message_ids()
                     # 1. Process specific action
                     self.process_alert()
                     # 2. Executing Base Logging Actions
                     self._log_to_file_action()
                     self._log_to_kafka_action()
+                    self._record_alerter_terminal_events(server_message_ids)
                     self.kafka_consume_handler.commit()
 
             except KafkaMessageFetchException as e:
