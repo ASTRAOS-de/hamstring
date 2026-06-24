@@ -5,7 +5,9 @@ CREATE TABLE IF NOT EXISTS alerts_1m (
 )
 ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMM(time_bucket)
-ORDER BY (time_bucket, src_ip);
+ORDER BY (time_bucket, src_ip)
+TTL toDateTime(time_bucket) + INTERVAL 1 DAY;
+
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS alerts_1m_mv
 TO alerts_1m
@@ -28,7 +30,8 @@ CREATE TABLE IF NOT EXISTS fill_levels_1m (
 )
 ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMM(time_bucket)
-ORDER BY (stage, entry_type, time_bucket);
+ORDER BY (stage, entry_type, time_bucket)
+TTL toDateTime(time_bucket) + INTERVAL 1 DAY;
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS fill_levels_1m_mv
 TO fill_levels_1m
@@ -52,7 +55,8 @@ CREATE TABLE IF NOT EXISTS server_log_latencies (
 )
 ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMM(event_date)
-ORDER BY (event_date, message_id);
+ORDER BY (event_date, message_id)
+TTL toDateTime(event_date) + INTERVAL 1 DAY;
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS server_log_start_latency_mv
 TO server_log_latencies
@@ -85,7 +89,8 @@ CREATE TABLE IF NOT EXISTS logline_stage_latencies (
 )
 ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMM(event_date)
-ORDER BY (stage, event_date, logline_id);
+ORDER BY (stage, event_date, logline_id)
+TTL toDateTime(event_date) + INTERVAL 1 DAY;
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS logline_stage_latencies_mv
 TO logline_stage_latencies
@@ -109,7 +114,8 @@ CREATE TABLE IF NOT EXISTS batch_stage_latencies (
 )
 ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMM(event_date)
-ORDER BY (stage, event_date, instance_name, batch_id);
+ORDER BY (stage, event_date, instance_name, batch_id)
+TTL toDateTime(event_date) + INTERVAL 1 DAY;
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS batch_stage_latencies_mv
 TO batch_stage_latencies
@@ -134,7 +140,8 @@ CREATE TABLE IF NOT EXISTS suspicious_batch_stage_latencies (
 )
 ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMM(event_date)
-ORDER BY (stage, event_date, instance_name, suspicious_batch_id);
+ORDER BY (stage, event_date, instance_name, suspicious_batch_id)
+TTL toDateTime(event_date) + INTERVAL 1 DAY;
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS suspicious_batch_stage_latencies_mv
 TO suspicious_batch_stage_latencies

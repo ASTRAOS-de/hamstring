@@ -194,6 +194,7 @@ class LogCollector:
         if server_message_uuid:
             self.server_log_to_logline.insert(
                 dict(
+                    timestamp=datetime.datetime.now(),
                     message_id=server_message_uuid,
                     logline_id=logline_id,
                 )

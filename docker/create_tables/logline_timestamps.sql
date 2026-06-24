@@ -7,4 +7,5 @@ CREATE TABLE IF NOT EXISTS logline_timestamps (
 )
 ENGINE = MergeTree
 PARTITION BY toYYYYMM(timestamp)
-ORDER BY (stage, status, timestamp, logline_id);
+ORDER BY (stage, status, timestamp, logline_id)
+TTL toDateTime(timestamp) + INTERVAL 1 DAY;

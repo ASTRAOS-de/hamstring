@@ -7,4 +7,5 @@ CREATE TABLE IF NOT EXISTS loglines (
 )
 ENGINE = MergeTree
 PARTITION BY toYYYYMM(timestamp)
-ORDER BY (timestamp, src_ip, subnet_id, logline_id);
+ORDER BY (timestamp, src_ip, subnet_id, logline_id)
+TTL toDateTime(timestamp) + INTERVAL 1 DAY;

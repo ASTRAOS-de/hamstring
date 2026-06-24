@@ -8,4 +8,5 @@ CREATE TABLE IF NOT EXISTS alerts (
 )
 ENGINE = MergeTree
 PARTITION BY toYYYYMM(alert_timestamp)
-ORDER BY (alert_timestamp, src_ip, suspicious_batch_id);
+ORDER BY (alert_timestamp, src_ip, suspicious_batch_id)
+TTL toDateTime(alert_timestamp) + INTERVAL 60 DAY;

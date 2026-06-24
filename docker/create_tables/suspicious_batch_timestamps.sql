@@ -10,4 +10,5 @@ CREATE TABLE IF NOT EXISTS suspicious_batch_timestamps (
 )
 ENGINE = MergeTree
 PARTITION BY toYYYYMM(timestamp)
-ORDER BY (stage, status, timestamp, instance_name, suspicious_batch_id, src_ip);
+ORDER BY (stage, status, timestamp, instance_name, suspicious_batch_id, src_ip)
+TTL toDateTime(timestamp) + INTERVAL 1 DAY;

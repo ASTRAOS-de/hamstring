@@ -236,6 +236,7 @@ class InspectorBase(InspectorAbstractBase):
 
                 self.suspicious_batches_to_batch.insert(
                     dict(
+                        timestamp=datetime.now(),
                         suspicious_batch_id=suspicious_batch_id,
                         batch_id=self.batch_id,
                     )
