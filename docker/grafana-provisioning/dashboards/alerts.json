@@ -644,7 +644,7 @@
           },
           "pluginVersion": "4.6.0",
           "queryType": "table",
-          "rawSql": "WITH\n    JSONExtractArrayRaw(domain_names) AS top_items,\n    arrayFlatten(arrayMap(item -> if(substring(item, 1, 1) = '[', JSONExtractArrayRaw(item), [item]), top_items)) AS entries,\n    arrayFilter(x -> x != '', arrayMap(entry -> JSONExtractString(entry, 'domain_name'), entries)) AS domains\nSELECT\n    src_ip AS \"Client IP address\",\n    arrayStringConcat(arrayDistinct(domains), ', ') AS \"Domains used\"\nFROM alerts\nORDER BY alert_timestamp DESC\nLIMIT 20;",
+          "rawSql": "WITH\n    JSONExtractArrayRaw(domain_names) AS top_items,\n    arrayFlatten(arrayMap(item -> if(substring(item, 1, 1) = '[', JSONExtractArrayRaw(item), [item]), top_items)) AS entries,\n    arrayFilter(x -> x != '', arrayMap(entry -> multiIf(\n        substring(entry, 1, 1) = '\"', replaceRegexpAll(entry, '^\"|\"$', ''),\n        JSONHas(entry, 'domain_name'), JSONExtractString(entry, 'domain_name'),\n        entry\n    ), entries)) AS domains\nSELECT\n    src_ip AS \"Client IP address\",\n    arrayStringConcat(arrayDistinct(domains), ', ') AS \"Domains used\"\nFROM alerts\nORDER BY alert_timestamp DESC\nLIMIT 20;",
           "refId": "A"
         }
       ],

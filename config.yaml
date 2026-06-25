@@ -220,6 +220,9 @@ pipeline:
   alerting:
     log_to_file: true
     log_file_path: "/opt/logs/alerts.txt"
+    log_rotation:
+      enabled: true
+      retention_days: 7
     log_to_kafka: true
     external_kafka_topic: "hamstring_alerts"
     plugins: []

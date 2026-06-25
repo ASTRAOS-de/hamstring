@@ -425,6 +425,86 @@ class TestSendWarning(unittest.TestCase):
     @patch("src.detector.detector.ExactlyOnceKafkaConsumeHandler")
     @patch("src.detector.detector.ClickHouseKafkaSender")
     @patch("src.detector.detector.DetectorBase._get_model")
+    def test_normalize_warning_for_storage_keeps_detector_output_separate(
+        self, mock_get_model, mock_clickhouse, mock_kafka_consume_handler
+    ):
+        mock_get_model.return_value = (MagicMock(), MagicMock())
+        mock_kafka_consume_handler.return_value = MagicMock()
+
+        sut = TestDetector(
+            consume_topic="test_topic", detector_config=MINIMAL_DETECTOR_CONFIG
+        )
+        warning = {
+            "request": [
+                {
+                    "logline_id": "logline-1",
+                    "server_message_id": "server-message-1",
+                    "domain_name": "one.example",
+                },
+                {
+                    "logline_id": "logline-2",
+                    "server_message_id": "server-message-2",
+                    "domain_name": "two.example",
+                },
+            ],
+            "probability": 0.8765,
+            "predicted_class": "cobaltstrike",
+            "attributes": [
+                {"attribute": "cobaltstrike", "probability": 0.8765},
+            ],
+            "name": "domainator_attributor",
+            "sha256": "021af76b2385ddbc76f6e3ad10feb0bb081f9cf05cff2e52333e31040bbf36cc",
+        }
+
+        normalized = sut._normalize_warning_for_storage(warning)
+
+        self.assertEqual("domainator_attributor", normalized["detector_name"])
+        self.assertEqual(0.8765, normalized["score"])
+        self.assertEqual("cobaltstrike", normalized["predicted_class"])
+        self.assertEqual(["one.example", "two.example"], normalized["domains"])
+        self.assertEqual(["logline-1", "logline-2"], normalized["logline_ids"])
+        self.assertEqual(
+            ["server-message-1", "server-message-2"],
+            normalized["server_message_ids"],
+        )
+        self.assertEqual(warning["request"], normalized["request"])
+        self.assertNotIn("request", normalized["raw_detector_output"])
+        self.assertEqual(
+            "cobaltstrike",
+            normalized["raw_detector_output"]["predicted_class"],
+        )
+
+    @patch("src.detector.detector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.detector.detector.ClickHouseKafkaSender")
+    @patch("src.detector.detector.DetectorBase._get_model")
+    def test_normalize_warning_for_storage_handles_sparse_detector_output(
+        self, mock_get_model, mock_clickhouse, mock_kafka_consume_handler
+    ):
+        mock_get_model.return_value = (MagicMock(), MagicMock())
+        mock_kafka_consume_handler.return_value = MagicMock()
+
+        sut = TestDetector(
+            consume_topic="test_topic", detector_config=MINIMAL_DETECTOR_CONFIG
+        )
+        normalized = sut._normalize_warning_for_storage(
+            {
+                "request_domain": "malicious.example",
+                "probability": 0.7,
+                "name": "sparse_detector",
+            }
+        )
+
+        self.assertEqual("sparse_detector", normalized["detector_name"])
+        self.assertEqual(0.7, normalized["score"])
+        self.assertEqual("", normalized["predicted_class"])
+        self.assertEqual([], normalized["attributes"])
+        self.assertEqual(["malicious.example"], normalized["domains"])
+        self.assertEqual([], normalized["logline_ids"])
+        self.assertIn("request_domain", normalized["raw_detector_output"])
+
+    @patch("src.detector.detector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.detector.detector.ClickHouseKafkaSender")
+    @patch("src.detector.detector.DetectorBase._get_model")
     def test_save_empty_warning(
         self, mock_get_model, mock_clickhouse, mock_kafka_consume_handler
     ):

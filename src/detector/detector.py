@@ -12,6 +12,7 @@ import marshmallow_dataclass
 from numpy import median
 from abc import ABC, abstractmethod
 import importlib
+from typing import Any
 
 sys.path.append(os.getcwd())
 from src.base.clickhouse_kafka_sender import ClickHouseKafkaSender
@@ -523,7 +524,7 @@ class DetectorBase(DetectorAbstractBase):
                     suspicious_batch_id=self.suspicious_batch_id,
                     overall_score=overall_score,
                     domain_names=json.dumps(self._get_warning_requests()),
-                    result=json.dumps(self.warnings),
+                    result=json.dumps(self._build_persisted_warnings()),
                 )
             )
 
@@ -627,11 +628,121 @@ class DetectorBase(DetectorAbstractBase):
                 key=self.key,
             )
 
-    def _get_warning_requests(self) -> list:
+    def _build_persisted_warnings(self) -> list[dict]:
         return [
-            warning.get("request", warning.get("request_domain", warning))
+            self._normalize_warning_for_storage(warning)
             for warning in self.warnings
         ]
+
+    def _normalize_warning_for_storage(self, warning: dict) -> dict:
+        raw_detector_output = {
+            key: value for key, value in warning.items() if key != "request"
+        }
+        request = warning.get("request")
+        request_messages = (
+            self._flatten_messages(request) if request is not None else []
+        )
+        detector_name = (
+            warning.get("detector_name")
+            or warning.get("name")
+            or self.name
+        )
+        score = warning.get("score", warning.get("probability"))
+        domains = self._extract_warning_domains(warning)
+        logline_ids = self._extract_message_values(request_messages, "logline_id")
+        server_message_ids = self._extract_message_values(
+            request_messages, "server_message_id"
+        )
+
+        normalized_warning = {
+            "detector_name": detector_name,
+            "name": detector_name,
+            "score": score,
+            "probability": score,
+            "predicted_class": warning.get("predicted_class", ""),
+            "attributes": warning.get("attributes", []),
+            "domains": domains,
+            "domain_names": domains,
+            "logline_ids": logline_ids,
+            "server_message_ids": server_message_ids,
+            "request_count": len(request_messages),
+            "raw_detector_output": raw_detector_output,
+            "request": request,
+        }
+
+        for optional_field in ("model", "sha256", "class_probabilities"):
+            if optional_field in warning:
+                normalized_warning[optional_field] = warning[optional_field]
+
+        return normalized_warning
+
+    @staticmethod
+    def _extract_message_values(messages: list, field_name: str) -> list[str]:
+        return sorted(
+            {
+                str(message[field_name])
+                for message in messages
+                if isinstance(message, dict) and field_name in message
+            }
+        )
+
+    def _get_warning_requests(self) -> list[str]:
+        domains = []
+        for warning in self.warnings:
+            domains.extend(self._extract_warning_domains(warning))
+        return sorted(set(domains))
+
+    def _extract_warning_domains(self, warning) -> list[str]:
+        warnings = self.warnings
+
+        if warning is not None:
+            warnings = warning
+
+        if isinstance(warnings, str):
+            try:
+                warnings = json.loads(warnings)
+            except json.JSONDecodeError:
+                return [warnings]
+
+        domains: list[str] = []
+        stack: list[Any] = [warnings]
+
+        while stack:
+            item = stack.pop()
+
+            if isinstance(item, str):
+                try:
+                    stack.append(json.loads(item))
+                except json.JSONDecodeError:
+                    domains.append(item)
+
+            elif isinstance(item, list):
+                stack.extend(reversed(item))
+
+            elif isinstance(item, dict):
+                # If request/request_domain contains nested objects, descend into it
+                if "request" in item:
+                    stack.append(item["request"])
+                    continue
+
+                if "request_domain" in item:
+                    stack.append(item["request_domain"])
+                    continue
+
+                # Actual DNS warning object
+                if "domain_name" in item:
+                    domains.append(item["domain_name"])
+
+                for field_name in ("domains", "domain_names"):
+                    field_value = item.get(field_name)
+                    if isinstance(field_value, list):
+                        domains.extend(
+                            domain
+                            for domain in field_value
+                            if isinstance(domain, str)
+                        )
+
+        return sorted(set(domains))
 
     def _build_kafka_alert(self, alert: dict) -> dict:
         compact_alert = dict(alert)

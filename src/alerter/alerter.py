@@ -6,6 +6,7 @@ import datetime
 import uuid
 from abc import ABC, abstractmethod
 import importlib
+from pathlib import Path
 
 sys.path.append(os.getcwd())
 from confluent_kafka.admin import AdminClient
@@ -79,6 +80,12 @@ class AlerterBase(AlerterAbstractBase):
         self.log_file_path = ALERTING_CONFIG.get(
             "log_file_path", "/opt/logs/alerts.txt"
         )
+        self.log_rotation_config = ALERTING_CONFIG.get("log_rotation", {})
+        self.log_rotation_enabled = self.log_rotation_config.get("enabled", False)
+        self.log_retention_days = self._parse_log_retention_days(
+            self.log_rotation_config.get("retention_days", 7)
+        )
+        self._last_log_cleanup_date = None
         self.log_to_kafka = ALERTING_CONFIG.get("log_to_kafka", False)
         self.external_kafka_topic = ALERTING_CONFIG.get(
             "external_kafka_topic", "external_alerts_topic"
@@ -114,6 +121,78 @@ class AlerterBase(AlerterAbstractBase):
 
         self.kafka_produce_handler = ExactlyOnceKafkaProduceHandler()
 
+    @staticmethod
+    def _parse_log_retention_days(retention_days) -> int | None:
+        """
+        Parse the configured rotated log retention period.
+        """
+        if retention_days is None:
+            return None
+        try:
+            retention_days = int(retention_days)
+        except (TypeError, ValueError):
+            logger.warning(
+                "Invalid alert log retention_days '%s'. Keeping rotated logs for 7 days.",
+                retention_days,
+            )
+            return 7
+        if retention_days < 1:
+            logger.warning(
+                "Invalid alert log retention_days '%s'. Keeping rotated logs for 1 day.",
+                retention_days,
+            )
+            return 1
+        return retention_days
+
+    def _get_active_log_file_path(
+        self, timestamp: datetime.datetime | None = None
+    ) -> str:
+        if not self.log_rotation_enabled:
+            return self.log_file_path
+
+        timestamp = timestamp or datetime.datetime.now()
+        log_path = Path(self.log_file_path)
+        rotated_name = f"{log_path.stem}-{timestamp:%Y-%m-%d}{log_path.suffix}"
+        return str(log_path.with_name(rotated_name))
+
+    def _cleanup_rotated_logs(self, today: datetime.date | None = None) -> None:
+        if not self.log_rotation_enabled or self.log_retention_days is None:
+            return
+
+        today = today or datetime.date.today()
+        if self._last_log_cleanup_date == today:
+            return
+
+        log_path = Path(self.log_file_path)
+        cutoff_date = today - datetime.timedelta(days=self.log_retention_days - 1)
+        for candidate in log_path.parent.glob(f"{log_path.stem}-*{log_path.suffix}"):
+            log_date = self._extract_rotated_log_date(candidate)
+            if log_date is None or log_date >= cutoff_date:
+                continue
+            try:
+                candidate.unlink()
+                logger.info("%s: Removed expired alert log %s", self.name, candidate)
+            except OSError as e:
+                logger.warning(
+                    "%s: Could not remove expired alert log %s: %s",
+                    self.name,
+                    candidate,
+                    e,
+                )
+
+        self._last_log_cleanup_date = today
+
+    def _extract_rotated_log_date(self, log_path: Path) -> datetime.date | None:
+        stem_prefix = f"{Path(self.log_file_path).stem}-"
+        if not log_path.stem.startswith(stem_prefix):
+            return None
+
+        date_value = log_path.stem[len(stem_prefix) :]
+        try:
+            return datetime.datetime.strptime(date_value, "%Y-%m-%d").date()
+        except ValueError:
+            return None
+
     def get_and_fill_data(self) -> None:
         if self.alert_data:
             logger.warning(
@@ -140,9 +219,13 @@ class AlerterBase(AlerterAbstractBase):
         if not self.log_to_file:
             return
 
-        logger.info(f"{self.name}: Logging alert to file {self.log_file_path}")
+        active_log_file_path = self._get_active_log_file_path()
+        ensure_directory(active_log_file_path)
+        self._cleanup_rotated_logs()
+
+        logger.info(f"{self.name}: Logging alert to file {active_log_file_path}")
         try:
-            with open(self.log_file_path, "a+") as f:
+            with open(active_log_file_path, "a+") as f:
                 json.dump(self.alert_data, f)
                 f.write("\n")
         except IOError as e:

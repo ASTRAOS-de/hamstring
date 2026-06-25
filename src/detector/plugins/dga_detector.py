@@ -167,16 +167,11 @@ class DGADetector(DetectorBase):
         Note:
             This method relies on the implementation of ``predict``of the rspective subclass
         """
-        logger.info("dga detection")
-        logger.info("Start detecting malicious requests.")
         for message in self.messages:
             y_pred = self.predict(message)
             logger.info(f"Prediction: {y_pred}")
-            # TODO: DO NOT USE if TRUE for prod!!!
-            if (
-                True
-            ):  # np.argmax(y_pred, axis=1) == 1 and y_pred[0][1] > self.threshold:
-                logger.info("Append malicious request to warning.")
+            if np.argmax(y_pred, axis=1) == 1 and y_pred[0][1] > self.threshold:
+                logger.debug("Append malicious request to warning.")
                 warning = {
                     "request": message,
                     "probability": float(y_pred[0][1]),
