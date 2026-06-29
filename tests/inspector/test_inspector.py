@@ -660,7 +660,9 @@ class TestMainFunction(unittest.IsolatedAsyncioTestCase):
         mock_asyncio_create_task.side_effect = lambda coro: coro
 
         # Act
-        with patch("src.inspector.inspector.INSPECTORS", self.inspectors):
+        with patch("src.inspector.inspector.INSPECTORS", self.inspectors), patch(
+            "src.inspector.inspector.config", {}, create=True
+        ):
             await main()
 
         # Assert

@@ -808,7 +808,7 @@ class TestGetModelMethod(unittest.TestCase):
             # Verify download was attempted
             mock_requests_get.assert_called()
             # Verify model was loaded
-            self.assertEqual(model, ("mock_model_or_scaler", "mock_model_or_scaler"))
+            self.assertEqual(model, ("mock_model_or_scaler", None))
             # Verify logger messages
             self.mock_logger.info.assert_any_call(
                 f"Get model: {sut.model_name} with checksum {sut.checksum}"
@@ -850,9 +850,7 @@ class TestGetModelMethod(unittest.TestCase):
             # Verify no download was attempted
             mock_requests_get.assert_not_called()
             # Verify model was loaded
-            self.assertEqual(
-                model_and_scaler, ("mock_model_or_scaler", "mock_model_or_scaler")
-            )
+            self.assertEqual(model_and_scaler, ("mock_model_or_scaler", None))
             # Verify logger messages
             self.mock_logger.info.assert_any_call(
                 f"Get model: {sut.model_name} with checksum {sut.checksum}"

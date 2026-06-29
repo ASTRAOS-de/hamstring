@@ -117,8 +117,8 @@ class TestDomainatorDetector(unittest.TestCase):
         # Verify prediction result
         np.testing.assert_array_equal(result, mock_prediction)
 
-    def test_predict_aligns_features_to_model_order(self):
-        """Test that predict reorders features to match sklearn fit-time order."""
+    def test_predict_uses_domainator_feature_order(self):
+        """Test that predict passes features in Domainator's generated order."""
         mock_kafka = MagicMock()
         mock_ch = MagicMock()
         detector = self._create_detector(mock_kafka, mock_ch)
@@ -139,7 +139,7 @@ class TestDomainatorDetector(unittest.TestCase):
         called_features = detector.model.predict_proba.call_args[0][0]
         self.assertEqual(
             called_features.columns.tolist(),
-            list(reversed(DOMAINATOR_FEATURE_COLUMNS)),
+            DOMAINATOR_FEATURE_COLUMNS,
         )
         np.testing.assert_array_equal(result, mock_prediction)
 

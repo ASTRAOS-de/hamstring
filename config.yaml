@@ -16,6 +16,15 @@ logging:
       debug: true
 
 pipeline:
+  acceleration:
+    enabled: true
+    fallback_to_cpu: true
+    log_device: true
+    default:
+      device: auto
+      backend: auto
+      batch_size: auto
+
   scaling:
     defaults:
       executor: thread
@@ -142,10 +151,17 @@ pipeline:
       score_threshold: 0.5
       time_type: ms
       time_range: 20
+      acceleration:
+        enabled: true
+        device: auto
+        backend: auto
+        fallback_to_cpu: true
     - name: domainator_inspector
       inspector_module_name: "no_inspector"
       inspector_class_name: "NoInspector"
       prefilter_name: domainator_filter
+      acceleration:
+        enabled: false
 
   data_analysis:
     - name: "RF-dga_detector"
@@ -161,6 +177,11 @@ pipeline:
       next_detectors: ""
       send_to_alerter: true
       produce_topics: ""
+      acceleration:
+        enabled: true
+        device: auto
+        backend: sklearn
+        fallback_to_cpu: true
     - name: "domainator"
       detector_module_name: "domainator_detector"
       detector_class_name: "DomainatorDetector"
@@ -177,6 +198,11 @@ pipeline:
         - "domainator_attributor_identification"
       send_to_alerter: true
       produce_topics: ""
+      acceleration:
+        enabled: true
+        device: auto
+        backend: auto
+        fallback_to_cpu: true
     - name: "domainator_attributor_behaviour"
       detector_module_name: "domainator_attributor"
       detector_class_name: "DomainatorAttributor"
@@ -190,6 +216,11 @@ pipeline:
       next_detectors: ""
       send_to_alerter: true
       produce_topics: ""
+      acceleration:
+        enabled: true
+        device: auto
+        backend: auto
+        fallback_to_cpu: true
     - name: "domainator_attributor_identification_behaviour"
       detector_module_name: "domainator_attributor"
       detector_class_name: "DomainatorAttributor"
@@ -203,6 +234,11 @@ pipeline:
       next_detectors: ""
       send_to_alerter: true
       produce_topics: ""
+      acceleration:
+        enabled: true
+        device: auto
+        backend: auto
+        fallback_to_cpu: true
     - name: "domainator_attributor_identification"
       detector_module_name: "domainator_attributor"
       detector_class_name: "DomainatorAttributor"
@@ -216,6 +252,11 @@ pipeline:
       next_detectors: ""
       send_to_alerter: true
       produce_topics: ""
+      acceleration:
+        enabled: true
+        device: auto
+        backend: auto
+        fallback_to_cpu: true
 
   alerting:
     log_to_file: true

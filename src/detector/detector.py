@@ -18,6 +18,10 @@ sys.path.append(os.getcwd())
 from src.base.clickhouse_kafka_sender import ClickHouseKafkaSender
 from src.base.data_classes.batch import Batch
 from src.base.utils import setup_config, generate_collisions_resistant_uuid
+from src.base.acceleration import (
+    apply_model_acceleration,
+    resolve_acceleration_config,
+)
 from src.base.kafka_handler import (
     ExactlyOnceKafkaConsumeHandler,
     ExactlyOnceKafkaProduceHandler,
@@ -188,7 +192,17 @@ class DetectorBase(DetectorAbstractBase):
         self.model = self.model_name
         self.checksum = detector_config["checksum"]
         self.threshold = detector_config["threshold"]
-        self.use_scaler = detector_config["use_scaler"] if "use_scaler" in detector_config.keys() else False
+        self.use_scaler = (
+            detector_config["use_scaler"]
+            if "use_scaler" in detector_config.keys()
+            else False
+        )
+        self.acceleration = resolve_acceleration_config(
+            config["pipeline"],
+            detector_config,
+            component_name=f"{module_name}.{self.name}",
+            logger=logger,
+        )
 
         self.consume_topic = consume_topic
         if produce_topics is None:
@@ -432,6 +446,8 @@ class DetectorBase(DetectorAbstractBase):
 
         with open(self.model_path, "rb") as input_file:
             clf = pickle.load(input_file)
+
+        clf = apply_model_acceleration(clf, self.acceleration, logger=logger)
 
         return clf, scaler
 

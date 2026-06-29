@@ -231,12 +231,17 @@ class TestSend(unittest.TestCase):
             "192.168.3.0_24",
             '{"ts": "2026-02-14 16:38:06.184006", "status_code": "test_status", "src_ip": "192.168.3.141", "record_type": "test_record_type", "logline_id": "da3aec7f-b355-4a2c-a2f4-2066d49431a5", "server_message_id": "bd72ccb4-0ef2-4100-aa22-e787122d6875"}',
         )
-        self.sut.server_log_to_logline.insert.assert_called_once_with(
-            {
-                "message_id": uuid.UUID("bd72ccb4-0ef2-4100-aa22-e787122d6875"),
-                "logline_id": uuid.UUID("da3aec7f-b355-4a2c-a2f4-2066d49431a5"),
-            }
+        self.sut.server_log_to_logline.insert.assert_called_once()
+        server_log_to_logline = self.sut.server_log_to_logline.insert.call_args.args[0]
+        self.assertEqual(
+            uuid.UUID("bd72ccb4-0ef2-4100-aa22-e787122d6875"),
+            server_log_to_logline["message_id"],
         )
+        self.assertEqual(
+            uuid.UUID("da3aec7f-b355-4a2c-a2f4-2066d49431a5"),
+            server_log_to_logline["logline_id"],
+        )
+        self.assertIn("timestamp", server_log_to_logline)
 
 
 class TestGetSubnetId(unittest.TestCase):
