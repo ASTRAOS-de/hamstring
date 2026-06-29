@@ -13,9 +13,77 @@ logging:
     data_inspection.inspector:
       debug: false
     data_analysis.detector:
-      debug: false
+      debug: true
 
 pipeline:
+  acceleration:
+    enabled: true
+    fallback_to_cpu: true
+    log_device: true
+    default:
+      device: auto
+      backend: auto
+      batch_size: auto
+
+  scaling:
+    defaults:
+      executor: thread
+      max_workers: 1
+    modules:
+      log_storage.logserver:
+        executor: thread
+        max_workers: 4
+      log_collection.collector:
+        executor: thread
+        max_workers: 1
+        instances:
+          dga_collector:
+            max_workers: 2
+          domainator_collector:
+            max_workers: 2
+      log_filtering.prefilter:
+        executor: thread
+        max_workers: 2
+        instances:
+          dga_filter:
+            max_workers: 2
+          no_filter:
+            max_workers: 2
+      data_inspection.inspector:
+        executor: thread
+        max_workers: 2
+        instances:
+          dga_inspector:
+            max_workers: 2
+          no_inspector:
+            max_workers: 2
+      data_analysis.detector:
+        executor: thread
+        max_workers: 2
+        instances:
+          RF-dga_detector:
+            max_workers: 2
+          domainator:
+            max_workers: 3
+          domainator_attributor:
+            max_workers: 1
+          domainator_attributor_behaviour:
+            max_workers: 1
+          domainator_attributor_identification_behaviour:
+            max_workers: 1
+          domainator_attributor_identification:
+            max_workers: 1
+      pipeline.alerter:
+        executor: thread
+        max_workers: 2
+        instances:
+          generic:
+            max_workers: 2
+          attributor:
+            max_workers: 2
+      monitoring.agent:
+        executor: thread
+        max_workers: 2
   log_storage:
     logserver:
       input_file: "/opt/file.txt"
@@ -59,7 +127,7 @@ pipeline:
       # method to apply for rule based prefiltering according to the needs
       relevance_method: check_dga_relevance
       collector_name: dga_collector
-    - name: "no_filter"
+    - name: "domainator_filter"
       relevance_method: no_relevance_check
       collector_name: domainator_collector
 
@@ -83,46 +151,122 @@ pipeline:
       score_threshold: 0.5
       time_type: ms
       time_range: 20
-    - name: no_inspector
+      acceleration:
+        enabled: true
+        device: auto
+        backend: auto
+        fallback_to_cpu: true
+    - name: domainator_inspector
       inspector_module_name: "no_inspector"
       inspector_class_name: "NoInspector"
-      prefilter_name: dga_filter
+      prefilter_name: domainator_filter
+      acceleration:
+        enabled: false
 
   data_analysis:
     - name: "RF-dga_detector"
       detector_module_name: "dga_detector"
       detector_class_name: "DGADetector"
       model: rf
+      use_scaler: false
       checksum: 5db8bfb617e80361362c33b1d1afc6d762c28e9fa9275fb11514a3bdef76bb88
       base_url: https://heibox.uni-heidelberg.de/d/0d5cbcbe16cd46a58021/
       threshold: 0.5
       consume_from: inspector
       inspector_name: dga_inspector
-      next_detectors: domainator
+      next_detectors: ""
       send_to_alerter: true
       produce_topics: ""
+      acceleration:
+        enabled: true
+        device: auto
+        backend: sklearn
+        fallback_to_cpu: true
     - name: "domainator"
       detector_module_name: "domainator_detector"
       detector_class_name: "DomainatorDetector"
       model: domainator
-      checksum: 9d86d66b4976c9b325bed0934a9a9eb3a20960b08be9afe491454624cc0aaa6c
+      use_scaler: false
+      checksum: a4aac4c585f1e614c3cf0d737e80b960c5de6e87b253f7cdd07125d9ce486476
       base_url: https://heibox.uni-heidelberg.de/d/0d5cbcbe16cd46a58021/
-      threshold: 0.5
+      threshold: 0.05
+      consume_from: inspector
+      inspector_name: "domainator_inspector"
+      next_detectors: 
+        - "domainator_attributor_behaviour"
+        - "domainator_attributor_identification_behaviour"
+        - "domainator_attributor_identification"
+      send_to_alerter: true
+      produce_topics: ""
+      acceleration:
+        enabled: true
+        device: auto
+        backend: auto
+        fallback_to_cpu: true
+    - name: "domainator_attributor_behaviour"
+      detector_module_name: "domainator_attributor"
+      detector_class_name: "DomainatorAttributor"
+      model: domainator_attributor_behaviour
+      use_scaler: false
+      checksum: d8f302edc166ecc80985838a30b5dff16ccc83480ea3c2480652f49c8f6b5e9b
+      base_url: https://heibox.uni-heidelberg.de/d/0d5cbcbe16cd46a58021/
+      threshold: 0.05
       consume_from: detector
-      inspector_name: ""
+      detector_name: "domainator"
       next_detectors: ""
       send_to_alerter: true
       produce_topics: ""
+      acceleration:
+        enabled: true
+        device: auto
+        backend: auto
+        fallback_to_cpu: true
+    - name: "domainator_attributor_identification_behaviour"
+      detector_module_name: "domainator_attributor"
+      detector_class_name: "DomainatorAttributor"
+      model: domainator_attributor_identification_behaviour
+      use_scaler: false
+      checksum: 9a0970b4160b22f4c3c5ac99760f0ace5500dd25c5a195ff13254ad3c11d5dcd
+      base_url: https://heibox.uni-heidelberg.de/d/0d5cbcbe16cd46a58021/
+      threshold: 0.05
+      consume_from: detector
+      detector_name: "domainator"
+      next_detectors: ""
+      send_to_alerter: true
+      produce_topics: ""
+      acceleration:
+        enabled: true
+        device: auto
+        backend: auto
+        fallback_to_cpu: true
+    - name: "domainator_attributor_identification"
+      detector_module_name: "domainator_attributor"
+      detector_class_name: "DomainatorAttributor"
+      model: domainator_attributor_identification
+      use_scaler: false
+      checksum: 360bd26881beabce7e7581963240915de807c48b5e4a3501a657139f2ecb8a8b
+      base_url: https://heibox.uni-heidelberg.de/d/0d5cbcbe16cd46a58021/
+      threshold: 0.05
+      consume_from: detector
+      detector_name: "domainator"
+      next_detectors: ""
+      send_to_alerter: true
+      produce_topics: ""
+      acceleration:
+        enabled: true
+        device: auto
+        backend: auto
+        fallback_to_cpu: true
 
   alerting:
     log_to_file: true
     log_file_path: "/opt/logs/alerts.txt"
+    log_rotation:
+      enabled: true
+      retention_days: 7
     log_to_kafka: true
     external_kafka_topic: "hamstring_alerts"
-    plugins:
-      - name: attributor
-        alerter_class_name: AttributorAlerter
-        alerter_module_name: attributor_alerter
+    plugins: []
   monitoring:
     clickhouse_connector:
       batch_size: 50  # do not set higher
@@ -152,6 +296,40 @@ environment:
       internal_port: 19094
       external_port: 8099
       node_ip: 127.0.0.1
+  kafka_consumer:
+    # Allow long-running detector batches without Kafka forcing a group rebalance.
+    # Default librdkafka value is 300000 ms (5 minutes), which can be too short
+    # for model inference plus downstream alert/monitoring writes.
+    max_poll_interval_ms: 1800000
+  kafka_topics:
+    replication_factor: 3
+    auto_expand_partitions: true
+    stages:
+      logserver_in:
+        partitions: 12
+        replication_factor: 3
+      logserver_to_collector:
+        partitions: 12
+        replication_factor: 3
+      batch_sender_to_prefilter:
+        partitions: 12
+        replication_factor: 3
+      prefilter_to_inspector:
+        partitions: 12
+        replication_factor: 3
+      inspector_to_detector:
+        partitions: 12
+        replication_factor: 3
+      detector_to_alerter:
+        partitions: 12
+        replication_factor: 3
+      detector_to_detector:
+        partitions: 12
+        replication_factor: 3
+    topics:
+      hamstring_alerts:
+        partitions: 12
+        replication_factor: 3
   kafka_topics_prefix:
     pipeline:
       logserver_in: "hamstring_input"

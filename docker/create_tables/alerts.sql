@@ -4,7 +4,9 @@ CREATE TABLE IF NOT EXISTS alerts (
     suspicious_batch_id UUID NOT NULL,
     overall_score Float32 NOT NULL,
     domain_names String NOT NULL,
-    result String,
+    result String
 )
 ENGINE = MergeTree
-PRIMARY KEY(src_ip, alert_timestamp);
+PARTITION BY toYYYYMM(alert_timestamp)
+ORDER BY (alert_timestamp, src_ip, suspicious_batch_id)
+TTL toDateTime(alert_timestamp) + INTERVAL 60 DAY;

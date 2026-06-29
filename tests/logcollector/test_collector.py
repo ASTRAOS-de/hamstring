@@ -67,17 +67,28 @@ class TestStart(unittest.IsolatedAsyncioTestCase):
             validation_config={},
         )
 
+    @patch("src.logcollector.collector.create_pipeline_executor")
     @patch("src.logcollector.collector.asyncio.get_event_loop")
-    async def test_start_successful_execution(self, mock_get_event_loop):
+    async def test_start_successful_execution(
+        self, mock_get_event_loop, mock_create_pipeline_executor
+    ):
         # Arrange
         self.sut.fetch = MagicMock()
+        mock_executor = MagicMock()
+        mock_create_pipeline_executor.return_value = mock_executor
         mock_loop = MagicMock()
         mock_loop.run_in_executor = AsyncMock(return_value=None)
         mock_get_event_loop.return_value = mock_loop
 
         await self.sut.start()
 
-        mock_loop.run_in_executor.assert_awaited_once_with(None, self.sut.fetch)
+        mock_create_pipeline_executor.assert_called_once()
+        mock_loop.run_in_executor.assert_awaited_once_with(
+            mock_executor, self.sut.fetch
+        )
+        mock_executor.shutdown.assert_called_once_with(
+            wait=False, cancel_futures=True
+        )
 
 
 class _StopFetching(RuntimeError):
@@ -127,6 +138,7 @@ class TestFetch(unittest.TestCase):
             self.sut.fetch()
 
         mock_send.assert_called_once()
+        mock_consume_handler.commit.assert_called_once()
 
 
 class TestSend(unittest.TestCase):
@@ -163,6 +175,29 @@ class TestSend(unittest.TestCase):
         # Assert
         self.sut.batch_handler.add_message.assert_not_called()
 
+    def test_invalid_logline_records_failed_terminal_event_for_logserver_message(self):
+        timestamp = datetime.datetime(2026, 2, 14, 16, 38, 6, 184006)
+        message = "test_message"
+        server_message_id = uuid.UUID("bd72ccb4-0ef2-4100-aa22-e787122d6875")
+
+        self.sut.failed_protocol_loglines = MagicMock()
+        self.sut.server_log_terminal_events = MagicMock()
+        self.sut.logline_handler.validate_logline_and_get_fields_as_json.side_effect = [
+            ValueError
+        ]
+
+        self.sut.send(
+            timestamp_in=timestamp,
+            message=message,
+            server_message_id=str(server_message_id),
+        )
+
+        self.sut.server_log_terminal_events.insert.assert_called_once()
+        terminal_event = self.sut.server_log_terminal_events.insert.call_args.args[0]
+        self.assertEqual(server_message_id, terminal_event["message_id"])
+        self.assertEqual("log_collection.collector", terminal_event["stage"])
+        self.assertEqual("failed", terminal_event["status"])
+
     def test_invalid_logline(self):
         timestamp = datetime.datetime(2026, 2, 14, 16, 38, 6, 184006)
         message = "test_message"
@@ -170,6 +205,7 @@ class TestSend(unittest.TestCase):
         # Arrange
         mock_logline_handler = Mock()
         self.sut.logline_handler = mock_logline_handler.return_value
+        self.sut.server_log_to_logline = MagicMock()
         self.sut.logline_handler.validate_logline_and_get_fields_as_json.return_value = {
             "ts": str(timestamp),
             "status_code": "test_status",
@@ -184,13 +220,28 @@ class TestSend(unittest.TestCase):
                 return_value=uuid.UUID("da3aec7f-b355-4a2c-a2f4-2066d49431a5"),
             ),
         ):
-            self.sut.send(timestamp_in=timestamp, message=message)
+            self.sut.send(
+                timestamp_in=timestamp,
+                message=message,
+                server_message_id="bd72ccb4-0ef2-4100-aa22-e787122d6875",
+            )
 
         # Assert
         self.sut.batch_handler.add_message.assert_called_once_with(
             "192.168.3.0_24",
-            '{"ts": "2026-02-14 16:38:06.184006", "status_code": "test_status", "src_ip": "192.168.3.141", "record_type": "test_record_type", "logline_id": "da3aec7f-b355-4a2c-a2f4-2066d49431a5"}',
+            '{"ts": "2026-02-14 16:38:06.184006", "status_code": "test_status", "src_ip": "192.168.3.141", "record_type": "test_record_type", "logline_id": "da3aec7f-b355-4a2c-a2f4-2066d49431a5", "server_message_id": "bd72ccb4-0ef2-4100-aa22-e787122d6875"}',
         )
+        self.sut.server_log_to_logline.insert.assert_called_once()
+        server_log_to_logline = self.sut.server_log_to_logline.insert.call_args.args[0]
+        self.assertEqual(
+            uuid.UUID("bd72ccb4-0ef2-4100-aa22-e787122d6875"),
+            server_log_to_logline["message_id"],
+        )
+        self.assertEqual(
+            uuid.UUID("da3aec7f-b355-4a2c-a2f4-2066d49431a5"),
+            server_log_to_logline["logline_id"],
+        )
+        self.assertIn("timestamp", server_log_to_logline)
 
 
 class TestGetSubnetId(unittest.TestCase):
@@ -463,23 +514,27 @@ class TestMain(unittest.IsolatedAsyncioTestCase):
         ]
 
     @patch("src.logcollector.collector.logger")
-    @patch("src.logcollector.collector.LogCollector")
+    @patch(
+        "src.logcollector.collector.start_pipeline_worker_replicas",
+        new_callable=AsyncMock,
+    )
     @patch("asyncio.create_task")
     @patch("asyncio.run")
     async def test_main(
-        self, mock_asyncio_run, mock_asyncio_create_task, mock_instance, mock_logger
+        self,
+        mock_asyncio_run,
+        mock_asyncio_create_task,
+        mock_start_workers,
+        mock_logger,
     ):
         # Arrange
 
-        mock_instance_obj = MagicMock()
-        mock_instance.return_value = mock_instance_obj
-        mock_instance_obj.start = AsyncMock()
         mock_asyncio_create_task.side_effect = lambda coro: coro
 
         with patch("src.logcollector.collector.COLLECTORS", self.cs):
             await main()
 
-        mock_instance_obj.start.assert_called_once()
+        mock_start_workers.assert_awaited_once()
         args, kwargs = mock_asyncio_create_task.call_args_list[0]
         expected_call = args[0]
         mock_asyncio_create_task.assert_called_once_with(expected_call)

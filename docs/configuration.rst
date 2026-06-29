@@ -116,6 +116,206 @@ Pipeline Configuration
 The following parameters control the behavior of each stage of the HAMSTRING pipeline, including the
 functionality of the modules.
 
+``pipeline.scaling``
+^^^^^^^^^^^^^^^^^^^^
+
+Controls how many independent workers each pipeline module starts. Each worker owns its own Kafka
+consumer and producer, so workers consuming the same topic join the same Kafka consumer group and can
+process different partitions in parallel. Values from ``defaults`` apply to every module and can be
+overridden per module under ``modules``. Modules that run several configured instances can also override
+an individual instance under ``instances``.
+
+Scaling is resolved in this order:
+
+#. ``pipeline.scaling.defaults``
+#. ``pipeline.scaling.modules.<module-name>``
+#. ``pipeline.scaling.modules.<module-name>.instances.<instance-name>``
+
+The instance names are the configured pipeline object names, not Docker service names. For example,
+``log_collection.collector.instances.dga_collector`` applies only to the collector whose
+``pipeline.log_collection.collectors[].name`` is ``dga_collector``.
+
+.. code-block:: yaml
+
+   pipeline:
+     scaling:
+       defaults:
+         executor: thread
+         max_workers: 1
+       modules:
+         log_collection.collector:
+           executor: thread
+           max_workers: 2
+           instances:
+             dga_collector:
+               threads: 4
+         data_analysis.detector:
+           executor: process
+           processes: 2
+         pipeline.alerter:
+           executor: hybrid
+           processes: 2
+           threads_per_process: 4
+
+.. list-table:: Scaling options
+   :header-rows: 1
+   :widths: 25 20 55
+
+   * - Parameter
+     - Default
+     - Description
+   * - ``executor``
+     - ``thread``
+     - Worker model. Valid values are ``thread``, ``process``, and ``hybrid``.
+   * - ``threads``
+     - ``1``
+     - Number of thread workers for ``executor: thread``. In ``executor: hybrid``, this is accepted as an alias for ``threads_per_process``.
+   * - ``threads_per_process``
+     - ``1``
+     - Number of thread workers inside each process for ``executor: hybrid``.
+   * - ``processes``
+     - ``1``
+     - Number of worker processes for ``executor: process`` or ``executor: hybrid``.
+   * - ``max_workers``
+     - ``1``
+     - Backwards-compatible worker-count alias. For ``thread`` it maps to ``threads``; for pure ``process`` it maps to ``processes``.
+   * - ``workers``
+     - ``1``
+     - Alias for ``max_workers``.
+   * - ``instances``
+     - none
+     - Per-configured-instance overrides. The nested keys must match the instance names listed below.
+
+``thread`` mode starts ``threads`` independent workers in the service process. ``process`` mode starts
+``processes`` worker processes with one worker each. ``hybrid`` mode starts ``processes`` processes with
+``threads_per_process`` worker threads inside each process.
+
+If ``executor`` is omitted, HAMSTRING infers it from the worker-count keys:
+
+* ``threads`` only: ``thread``
+* ``processes`` only: ``process``
+* ``processes`` and ``threads`` or ``threads_per_process``: ``hybrid``
+
+For example, this starts two processes with four Kafka-consuming workers in each process:
+
+.. code-block:: yaml
+
+   pipeline:
+     scaling:
+       modules:
+         data_analysis.detector:
+           executor: hybrid
+           processes: 2
+           threads_per_process: 4
+
+This is equivalent, because ``threads`` is an alias for ``threads_per_process`` in hybrid mode:
+
+.. code-block:: yaml
+
+   pipeline:
+     scaling:
+       modules:
+         data_analysis.detector:
+           processes: 2
+           threads: 4
+
+Per-instance overrides are useful when one configured stage is more expensive than another. This example
+uses hybrid mode for all log collectors, but gives the ``dga_collector`` fewer workers and the
+``domainator_collector`` pure process workers:
+
+.. code-block:: yaml
+
+   pipeline:
+     scaling:
+       modules:
+         log_collection.collector:
+           executor: hybrid
+           processes: 2
+           threads_per_process: 4
+           instances:
+             dga_collector:
+               processes: 1
+               threads_per_process: 2
+             domainator_collector:
+               executor: process
+               processes: 3
+
+The effective number of Kafka consumers for one configured pipeline instance is:
+
+.. code-block:: text
+
+   Docker service replicas * processes * threads_per_process
+
+For ``thread`` mode, ``processes`` is ``1``. For pure ``process`` mode, ``threads_per_process`` is ``1``.
+The consumed Kafka topic needs at least that many partitions to keep every worker busy. HAMSTRING requests
+at least the local worker count when creating or expanding topics; set ``NUMBER_OF_INSTANCES`` on the
+service when Docker Compose replicas are used so topic creation can account for the replica count as well.
+
+.. list-table:: Module and instance keys
+   :header-rows: 1
+   :widths: 30 30 40
+
+   * - Module key
+     - Instance keys
+     - Example
+   * - ``log_storage.logserver``
+     - Full consumed input topic name. Without an instance override, the module setting applies to every logserver protocol topic.
+     - ``pipeline-logserver_in-dns`` when the ``logserver_in`` topic prefix is ``pipeline-logserver_in`` and the protocol is ``dns``.
+   * - ``log_collection.collector``
+     - ``pipeline.log_collection.collectors[].name``
+     - ``dga_collector``, ``domainator_collector``
+   * - ``log_filtering.prefilter``
+     - ``pipeline.log_filtering[].name``
+     - ``dga_filter``, ``domainator_filter``
+   * - ``data_inspection.inspector``
+     - ``pipeline.data_inspection[].name``
+     - ``dga_inspector``, ``domainator_inspector``
+   * - ``data_analysis.detector``
+     - ``pipeline.data_analysis[].name``
+     - ``RF-dga_detector``, ``domainator``
+   * - ``pipeline.alerter``
+     - ``generic`` and ``pipeline.alerting.plugins[].name``
+     - ``generic``, ``attributor``
+   * - ``monitoring.agent``
+     - No per-instance key by default.
+     - Configure the module key directly.
+
+Docker Compose service replicas are configured separately from ``pipeline.scaling``. Compose replicas add
+more containers; ``pipeline.scaling`` adds more workers inside each container. Both forms of scaling use the
+same Kafka consumer group for the same stage/topic.
+
+For local Docker Compose runs, scale services with ``docker compose up --scale``:
+
+.. code-block:: console
+
+   $ HOST_IP=127.0.0.1 docker compose -f docker/docker-compose.yml --profile prod up --scale logcollector=3 --scale detector=2
+
+For the development profile, use the ``-dev`` service names from ``docker/docker-compose.yml``:
+
+.. code-block:: console
+
+   $ HOST_IP=127.0.0.1 docker compose -f docker/docker-compose.yml --profile dev up --scale logcollector-dev=3 --scale detector-dev=2
+
+The compose fragments under ``docker/docker-compose/dev`` and ``docker/docker-compose/prod`` also contain
+``deploy.replicas`` fields. Those fields document the intended replica count and are used by orchestrators
+that honor Compose ``deploy`` settings. For portable local Compose usage, prefer the explicit ``--scale``
+flag and keep ``NUMBER_OF_INSTANCES`` aligned with the replica count:
+
+.. code-block:: yaml
+
+   services:
+     detector:
+       environment:
+         - GROUP_ID=data_analysis
+         - NUMBER_OF_INSTANCES=2
+
+.. code-block:: console
+
+   $ HOST_IP=127.0.0.1 docker compose -f docker/docker-compose.yml --profile prod up --scale detector=2
+
+With this example and the hybrid detector config shown above, the detector starts
+``2 Docker replicas * 2 processes * 4 threads_per_process = 16`` Kafka consumers.
+
 ``pipeline.log_storage``
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -142,11 +342,11 @@ functionality of the modules.
    * - Parameter
      - Description
    * - name
-     - A unique name amongst the ``collectors``configurations top identify the collector instance.
+     - A unique name amongst the ``collectors`` configurations top identify the collector instance.
    * - protocol_base
      - The lowercase protocol name to ingest data from. Currently supported: ``dns`` and ``http``.
    * - required_log_information
-     - Defines the expected format for incoming log lines. See the :ref:`Logline format configuration` section for more
+     - Defines the expected format for incoming log lines. See the :doc:`configuration` page for more
        details.
 
 Each log_collector has a BatchHandler instance. Default confgurations for all Batch handlers are defined in ``pipeline.log_collection.default_batch_handler_config``.
@@ -201,6 +401,7 @@ The following list shows the available configuration options.
 .. list-table:: ``inspector`` Parameters
    :header-rows: 1
    :widths: 30 70
+
    * - Parameter
      - Description
    * - name
@@ -335,6 +536,21 @@ The following parameters control the infrastructure of the software.
      - Not given here
      - Kafka topic name prefixes given as strings. These prefix name are used to construct the actual topic names based on the instance name (e.g. a collector instance name) that produces for the given stage.
        (e.g. a prefilter instance name is added as suffix to the prefilter_to_inspector prefix for the inspector to know where to consume.)
+   * - kafka_consumer.max_poll_interval_ms
+     - ``1800000``
+     - Maximum time in milliseconds between Kafka consumer polls before Kafka removes the consumer from its group. Increase this for long-running detector batches.
+   * - kafka_topics.replication_factor
+     - ``3``
+     - Replication factor used when creating new Kafka topics. At runtime this is capped to the number of configured Kafka brokers.
+   * - kafka_topics.auto_expand_partitions
+     - ``true``
+     - If enabled, existing HAMSTRING topics with fewer than the desired partition count are automatically expanded on consumer startup. Kafka does not support shrinking partition counts, so topics that are already larger are left unchanged.
+   * - kafka_topics.stages
+     - See ``config.yaml``
+     - Per-pipeline-stage topic settings. Keys match ``environment.kafka_topics_prefix.pipeline`` keys. Each stage can set ``partitions`` and ``replication_factor`` for topics whose names use that stage prefix.
+   * - kafka_topics.topics
+     - See ``config.yaml``
+     - Exact per-topic settings for topics that are not represented by a pipeline prefix, for example external alert topics. Topics without a stage or exact entry use 12 partitions and the default replication factor.
    * - monitoring.clickhouse_server.hostname
      - ``clickhouse-server``
      - Hostname of the ClickHouse server. Used by Grafana.

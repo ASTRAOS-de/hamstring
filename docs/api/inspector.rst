@@ -1,0 +1,5 @@
+Inspector
+=========
+
+.. automodule:: src.inspector
+

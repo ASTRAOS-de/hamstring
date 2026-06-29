@@ -1,5 +1,5 @@
 Welcome to HAMSTRING's documentation!
-===================================
+======================================
 
 **HAMSTRING** is a machine learning-based DNS classifier for detecting Domain Generation Algorithms (DGAs), tunneling, and
 data exfiltration by malicious actors.
@@ -26,4 +26,5 @@ Contents
    training
    developer_guide
    api/index
+   sources
    references

@@ -857,26 +857,26 @@ class TestMainFunction(unittest.IsolatedAsyncioTestCase):
     #     mock_prefilter_instance.clear_data.assert_called()
 
     @patch("src.prefilter.prefilter.logger")
-    @patch("src.prefilter.prefilter.Prefilter")
+    @patch(
+        "src.prefilter.prefilter.start_pipeline_worker_replicas",
+        new_callable=AsyncMock,
+    )
     @patch("asyncio.create_task")
     @patch("asyncio.run")
     async def test_main_normal_flow(
         self,
         mock_asyncio_run,
         mock_asyncio_create_task,
-        mock_prefilter_cls,
+        mock_start_workers,
         mock_logger,
     ):
         # Arrange
-        mock_prefilter_instance = MagicMock()
-        mock_prefilter_instance.start = AsyncMock()
-        mock_prefilter_cls.return_value = mock_prefilter_instance
         mock_asyncio_create_task.side_effect = lambda coro: coro
 
         with patch("src.prefilter.prefilter.PREFILTERS", self.pf):
             await main()
 
-        mock_prefilter_instance.start.assert_called_once()
+        mock_start_workers.assert_awaited_once()
 
     # @patch("src.prefilter.prefilter.logger")
     # @patch("src.prefilter.prefilter.Prefilter")

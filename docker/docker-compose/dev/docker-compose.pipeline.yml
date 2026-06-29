@@ -8,6 +8,9 @@ services:
       - ../../../config.yaml:/app/config.yaml
     environment:
       - GROUP_ID=log_storage
+    deploy:
+      mode: "replicated"
+      replicas: 1
     networks:
       hamstring:
 
@@ -16,6 +19,9 @@ services:
       context: ../../..
       dockerfile: docker/dockerfiles/Dockerfile.logcollector
     restart: "unless-stopped"
+    deploy:
+      mode: "replicated"
+      replicas: 1
     volumes:
       - ../../../config.yaml:/app/config.yaml
     networks:
@@ -81,7 +87,7 @@ services:
     restart: "unless-stopped"
     volumes:
       - ../../../config.yaml:/app/config.yaml
-      - /opt/logs:/opt/logs
+      - ../../../logs:/opt/logs
     networks:
       hamstring:
     deploy:

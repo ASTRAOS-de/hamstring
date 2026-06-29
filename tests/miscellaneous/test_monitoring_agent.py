@@ -1,7 +1,8 @@
 import datetime
+import os
 import unittest
 import uuid
-from unittest.mock import patch, AsyncMock, Mock, mock_open
+from unittest.mock import patch, AsyncMock, Mock, MagicMock, call, mock_open
 
 import marshmallow_dataclass
 
@@ -11,7 +12,7 @@ from src.monitoring.monitoring_agent import MonitoringAgent, prepare_all_tables
 
 
 class TestPrepareAllTables(unittest.TestCase):
-    @patch("os.listdir", return_value=["table1.sql", "table2.sql", "not_sql.txt"])
+    @patch("os.listdir", return_value=["table2.sql", "not_sql.txt", "table1.sql"])
     @patch("builtins.open", new_callable=mock_open, read_data="CREATE TABLE test;")
     @patch("clickhouse_connect.get_client")
     def test_prepare_all_tables(self, mock_get_client, mock_open_file, mock_listdir):
@@ -25,8 +26,41 @@ class TestPrepareAllTables(unittest.TestCase):
         # Assert
         mock_listdir.assert_called_once_with(CREATE_TABLES_DIRECTORY)
         self.assertEqual(mock_open_file.call_count, 2)
-        mock_client.command.assert_called_with("CREATE TABLE test;")
+        self.assertEqual(
+            mock_open_file.call_args_list,
+            [
+                call(os.path.join(CREATE_TABLES_DIRECTORY, "table1.sql"), "r"),
+                call(os.path.join(CREATE_TABLES_DIRECTORY, "table2.sql"), "r"),
+            ],
+        )
+        mock_client.command.assert_called_with("CREATE TABLE test")
         self.assertEqual(mock_client.command.call_count, 2)
+
+    @patch("os.listdir", return_value=["rollups.sql"])
+    @patch(
+        "builtins.open",
+        new_callable=mock_open,
+        read_data="CREATE TABLE first;\n\nCREATE VIEW second AS SELECT 1;\n",
+    )
+    @patch("clickhouse_connect.get_client")
+    def test_prepare_all_tables_executes_each_statement(
+        self, mock_get_client, mock_open_file, mock_listdir
+    ):
+        # Arrange
+        mock_client = Mock()
+        mock_get_client.return_value.__enter__.return_value = mock_client
+
+        # Act
+        prepare_all_tables()
+
+        # Assert
+        self.assertEqual(
+            mock_client.command.call_args_list,
+            [
+                call("CREATE TABLE first"),
+                call("CREATE VIEW second AS SELECT 1"),
+            ],
+        )
 
     @patch("os.listdir", return_value=["table1.sql"])
     @patch("builtins.open", new_callable=mock_open, read_data="CREATE TABLE test;")
@@ -99,9 +133,16 @@ class TestStart(unittest.IsolatedAsyncioTestCase):
             "clickhouse_server_logs",
         )
 
-        with patch(
-            "src.monitoring.monitoring_agent.asyncio.get_running_loop"
-        ) as mock_get_running_loop:
+        with (
+            patch(
+                "src.monitoring.monitoring_agent.asyncio.get_running_loop"
+            ) as mock_get_running_loop,
+            patch(
+                "src.monitoring.monitoring_agent.create_pipeline_executor"
+            ) as mock_create_pipeline_executor,
+        ):
+            mock_executor = MagicMock()
+            mock_create_pipeline_executor.return_value = mock_executor
             mock_loop = AsyncMock()
             mock_get_running_loop.return_value = mock_loop
 
@@ -114,6 +155,12 @@ class TestStart(unittest.IsolatedAsyncioTestCase):
             await self.sut.start()
 
         # Assert
+        mock_loop.run_in_executor.assert_any_await(
+            mock_executor, self.sut.kafka_consumer.consume
+        )
+        mock_executor.shutdown.assert_called_once_with(
+            wait=False, cancel_futures=True
+        )
         self.sut.batch_sender.add.assert_called_once_with(
             "server_logs",
             {

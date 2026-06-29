@@ -11,7 +11,7 @@ Overview
 The software includes a monitoring functionality that stores relevant information in a database (`ClickHouse`). The
 collected data is then visualized using multiple `Grafana` dashboard views.
 
-.. image:: media/monitoring_pipeline.png
+.. image:: ../assets/readme_assets/overview.png
 
 
 Setup

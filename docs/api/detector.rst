@@ -1,0 +1,5 @@
+Detector
+========
+
+.. automodule:: src.detector
+

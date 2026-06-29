@@ -11,8 +11,10 @@ from src.base.kafka_handler import SimpleKafkaConsumeHandler
 from src.base.data_classes.clickhouse_connectors import TABLE_NAME_TO_TYPE
 from src.base.log_config import get_logger
 from src.base.utils import setup_config
+from src.base.execution import create_pipeline_executor
 
 logger = get_logger()
+module_name = "monitoring.agent"
 
 CONFIG = setup_config()
 CREATE_TABLES_DIRECTORY = "docker/create_tables"  # TODO: Get from config
@@ -35,17 +37,24 @@ def prepare_all_tables():
         with open(file_name, "r") as file:
             return file.read()
 
-    for filename in os.listdir(CREATE_TABLES_DIRECTORY):
+    def _iter_statements(sql_content: str):
+        for statement in sql_content.split(";"):
+            statement = statement.strip()
+            if statement:
+                yield statement
+
+    for filename in sorted(os.listdir(CREATE_TABLES_DIRECTORY)):
         if filename.endswith(".sql"):
             file_path = os.path.join(CREATE_TABLES_DIRECTORY, filename)
             sql_content = _load_contents(file_path)
 
             with clickhouse_connect.get_client(host=CLICKHOUSE_HOSTNAME) as client:
-                try:
-                    client.command(sql_content)
-                except Exception as e:
-                    logger.critical("Error in CREATE TABLE statement")
-                    raise e
+                for statement in _iter_statements(sql_content):
+                    try:
+                        client.command(statement)
+                    except Exception as e:
+                        logger.critical("Error in CREATE TABLE statement")
+                        raise e
 
 
 class MonitoringAgent:
@@ -64,6 +73,8 @@ class MonitoringAgent:
         self.table_names = [
             "server_logs",
             "server_logs_timestamps",
+            "server_log_to_logline",
+            "server_log_terminal_events",
             "failed_loglines",
             "logline_to_batches",
             "loglines",
@@ -92,26 +103,30 @@ class MonitoringAgent:
             Exception: For any other processing errors (logged as warnings).
         """
         loop = asyncio.get_running_loop()
+        executor = create_pipeline_executor(CONFIG, module_name)
 
-        while True:
-            try:
-                key, value, topic = await loop.run_in_executor(
-                    None, self.kafka_consumer.consume
-                )
-                logger.debug(f"From Kafka: {value}")
+        try:
+            while True:
+                try:
+                    key, value, topic = await loop.run_in_executor(
+                        executor, self.kafka_consumer.consume
+                    )
+                    logger.debug(f"From Kafka: {value}")
 
-                table_name = topic.replace("clickhouse_", "")
-                data_schema = marshmallow_dataclass.class_schema(
-                    TABLE_NAME_TO_TYPE.get(table_name)
-                )()
-                data = data_schema.loads(value)
+                    table_name = topic.replace("clickhouse_", "")
+                    data_schema = marshmallow_dataclass.class_schema(
+                        TABLE_NAME_TO_TYPE.get(table_name)
+                    )()
+                    data = data_schema.loads(value)
 
-                self.batch_sender.add(table_name, asdict(data))
-            except KeyboardInterrupt:
-                logger.info("Stopped MonitoringAgent.")
-                break
-            except Exception as e:
-                logger.warning(e)
+                    self.batch_sender.add(table_name, asdict(data))
+                except KeyboardInterrupt:
+                    logger.info("Stopped MonitoringAgent.")
+                    break
+                except Exception as e:
+                    logger.warning(e)
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
 
 
 def main():

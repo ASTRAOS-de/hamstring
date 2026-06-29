@@ -98,6 +98,22 @@ class ClickHouseBatchSender:
                     "event_timestamp": datetime.datetime,
                 },
             ),
+            "server_log_to_logline": Table(
+                "server_log_to_logline",
+                {
+                    "message_id": uuid.UUID,
+                    "logline_id": uuid.UUID,
+                },
+            ),
+            "server_log_terminal_events": Table(
+                "server_log_terminal_events",
+                {
+                    "message_id": uuid.UUID,
+                    "stage": str,
+                    "status": str,
+                    "timestamp": datetime.datetime,
+                },
+            ),
             "failed_loglines": Table(
                 "failed_loglines",
                 {
@@ -191,7 +207,7 @@ class ClickHouseBatchSender:
                 {
                     "batch_row_id": str,
                     "batch_id": uuid.UUID,
-                    "parent_batch_row_id": Optional[str],
+                    "parent_batch_row_id": str,
                     "instance_name": str,
                     "stage": str,
                     "status": str,
@@ -227,6 +243,9 @@ class ClickHouseBatchSender:
             ValueError: If table name is invalid or data format is incorrect.
             TypeError: If data types don't match table schema.
         """
+        if table_name == "batch_tree" and data.get("parent_batch_row_id") is None:
+            data["parent_batch_row_id"] = ""
+
         self.tables.get(table_name).verify(data)
         self.batch.get(table_name).append(list(data.values()))
 

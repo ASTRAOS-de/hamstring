@@ -2,6 +2,7 @@ import math
 import numpy as np
 import unittest
 from unittest.mock import MagicMock, patch, call
+from pandas.testing import assert_frame_equal
 
 import os
 import sys
@@ -10,6 +11,10 @@ sys.path.append(os.getcwd())
 
 from src.detector.plugins.domainator_detector import DomainatorDetector
 from src.base.data_classes.batch import Batch
+from src.detector.plugins.domainator_utils import (
+    DOMAINATOR_FEATURE_COLUMNS,
+    get_domainator_features
+)
 
 
 DEFAULT_DATA = {
@@ -43,7 +48,7 @@ class TestDomainatorDetector(unittest.TestCase):
             "detector_class_name": "DomainatorDetector",
             "model": "rf",
             "checksum": "9d86d66b4976c9b325bed0934a9a9eb3a20960b08be9afe491454624cc0aaa6c",
-            "base_url": "https://ajknqwjdnkjnkjnsakjdnkjsandkndkjwndjksnkakndw.de/d/0d5cbcbe16cd46a58021",
+            "base_url": "https://heibox.uni-heidelberg.de/d/0d5cbcbe16cd46a58021/",
             "threshold": 0.005,
         }
 
@@ -71,7 +76,7 @@ class TestDomainatorDetector(unittest.TestCase):
         # overwrite model here again to not interefere with other tests when using it globally
         detector.model = "rf"
         self.maxDiff = None
-        expected_url = "https://ajknqwjdnkjnkjnsakjdnkjsandkndkjwndjksnkakndw.de/d/0d5cbcbe16cd46a58021/files/?p=%2Frf%2F9d86d66b4976c9b325bed0934a9a9eb3a20960b08be9afe491454624cc0aaa6c%2Frf.pickle&dl=1"
+        expected_url = "https://heibox.uni-heidelberg.de/d/0d5cbcbe16cd46a58021/files/?p=%2Frf%2F9d86d66b4976c9b325bed0934a9a9eb3a20960b08be9afe491454624cc0aaa6c%2Frf.pickle&dl=1"
         self.assertEqual(detector.get_model_download_url(), expected_url)
 
     def test_detect(self):
@@ -106,10 +111,36 @@ class TestDomainatorDetector(unittest.TestCase):
 
         # Verify the argument was correct
         called_features = detector.model.predict_proba.call_args[0][0]
-        expected_features = detector._get_features(["google.com", "google.com"])
-        np.testing.assert_array_equal(called_features, expected_features)
+        expected_features = get_domainator_features(["google.com", "google.com"])
+        assert_frame_equal(called_features, expected_features)
 
         # Verify prediction result
+        np.testing.assert_array_equal(result, mock_prediction)
+
+    def test_predict_uses_domainator_feature_order(self):
+        """Test that predict passes features in Domainator's generated order."""
+        mock_kafka = MagicMock()
+        mock_ch = MagicMock()
+        detector = self._create_detector(mock_kafka, mock_ch)
+
+        mock_prediction = np.array([[0.2, 0.8]])
+        detector.model.predict_proba.return_value = mock_prediction
+        detector.model.feature_names_in_ = np.array(
+            list(reversed(DOMAINATOR_FEATURE_COLUMNS))
+        )
+
+        message = [
+            {"domain_name": "a.example.com"},
+            {"domain_name": "b.example.com"},
+            {"domain_name": "c.example.com"},
+        ]
+        result = detector.predict(message)
+
+        called_features = detector.model.predict_proba.call_args[0][0]
+        self.assertEqual(
+            called_features.columns.tolist(),
+            DOMAINATOR_FEATURE_COLUMNS,
+        )
         np.testing.assert_array_equal(result, mock_prediction)
 
     def test_get_features_basic_attributes(self):
@@ -119,14 +150,14 @@ class TestDomainatorDetector(unittest.TestCase):
         detector = self._create_detector(mock_kafka, mock_ch)
 
         # Test with various 'google.com' subdomains
-        features = detector._get_features(
+        features = get_domainator_features(
             ["sub1.google.com", "sub2.google.com", "sub3.google.com"]
         )
 
         # Basic features: label_length, label_max, label_average
-        leven_dist = features[0][0]  # Levenshtein distance
-        jaro_dist = features[0][1]  # Jaro distance
-        lcs = features[0][6]  # Longest common string
+        leven_dist = features.iloc[0, 0]  # Levenshtein distance
+        jaro_dist = features.iloc[0, 1]  # Jaro distance
+        lcs = features.iloc[0, 6]  # Longest common string
 
         self.assertEqual(leven_dist, 0.75)
         self.assertAlmostEqual(jaro_dist, 0.833, 3)  # Rounded to 3 decimal places
@@ -138,27 +169,27 @@ class TestDomainatorDetector(unittest.TestCase):
         mock_ch = MagicMock()
         detector = self._create_detector(mock_kafka, mock_ch)
 
-        features = detector._get_features(["", "", "", ""])
+        features = get_domainator_features(["", "", "", ""])
 
         # Basic features
         self.assertEqual(
-            features[0][0], 1.0
+            features.iloc[0, 0], 1.0
         )  # Levenshtein distance of empty strings is 1
-        self.assertEqual(features[0][1], 1.0)  # Jaro distance of empty strings is 1
+        self.assertEqual(features.iloc[0, 1], 1.0)  # Jaro distance of empty strings is 1
         self.assertEqual(
-            features[0][2], 1.0
+            features.iloc[0, 2], 1.0
         )  # Jaro distance on the reverse empty strings is 1
         self.assertEqual(
-            features[0][3], 1.0
+            features.iloc[0, 3], 1.0
         )  # Jaro-Winkler distance of empty strings is 1
         self.assertEqual(
-            features[0][4], 1.0
+            features.iloc[0, 4], 1.0
         )  # Jaro-Winkler distance on the reverse empty strings is 1
         self.assertEqual(
-            features[0][5], 0.0
+            features.iloc[0, 5], 0.0
         )  # Longest common sequence of empty strings is 0
         self.assertEqual(
-            features[0][6], 0.0
+            features.iloc[0, 6], 0.0
         )  # Longest common string of empty strings is 0
 
     def test_get_features_single_same_character(self):
@@ -167,27 +198,27 @@ class TestDomainatorDetector(unittest.TestCase):
         mock_ch = MagicMock()
         detector = self._create_detector(mock_kafka, mock_ch)
 
-        features = detector._get_features(["a", "a", "a"])
+        features = get_domainator_features(["a", "a", "a"])
 
         # Basic features
         self.assertEqual(
-            features[0][0], 1.0
+            features.iloc[0, 0], 1.0
         )  # Levenshtein distance of same strings is 1
-        self.assertEqual(features[0][1], 1.0)  # Jaro distance of same strings is 1
+        self.assertEqual(features.iloc[0, 1], 1.0)  # Jaro distance of same strings is 1
         self.assertEqual(
-            features[0][2], 1.0
+            features.iloc[0, 2], 1.0
         )  # Jaro distance on the reverse same strings is 1
         self.assertEqual(
-            features[0][3], 1.0
+            features.iloc[0, 3], 1.0
         )  # Jaro-Winkler distance of same strings is 1
         self.assertEqual(
-            features[0][4], 1.0
+            features.iloc[0, 4], 1.0
         )  # Jaro-Winkler distance on the reverse same strings is 1
         self.assertEqual(
-            features[0][5], 0.0
+            features.iloc[0, 5], 0.0
         )  # Longest common sequence of same strings is 0
         self.assertEqual(
-            features[0][6], 0.0
+            features.iloc[0, 6], 0.0
         )  # Longest common string of same strings is 0
 
     def test_get_features_feature_vector_shape(self):
@@ -196,13 +227,14 @@ class TestDomainatorDetector(unittest.TestCase):
         mock_ch = MagicMock()
         detector = self._create_detector(mock_kafka, mock_ch)
 
-        features = detector._get_features(
+        features = get_domainator_features(
             ["test.domain.com", "test.domain.com", "test.domain.com"]
         )
 
         expected_entropy = 7
 
         self.assertEqual(features.shape, (1, expected_entropy))
+        self.assertEqual(features.columns.tolist(), DOMAINATOR_FEATURE_COLUMNS)
 
     def test_get_features_case_insensitivity(self):
         """Test that the statistical comparison is case-insensitive."""
@@ -210,16 +242,16 @@ class TestDomainatorDetector(unittest.TestCase):
         mock_ch = MagicMock()
         detector = self._create_detector(mock_kafka, mock_ch)
 
-        features_upper = detector._get_features(
+        features_upper = get_domainator_features(
             ["DRIVE.GOOGLE.COM", "WORKSPACE.GOOGLE.COM"]
         )
-        features_lower = detector._get_features(
+        features_lower = get_domainator_features(
             ["drive.google.com", "workspace.google.com"]
         )
 
         # The comparison features should be identical regardless of case
         np.testing.assert_array_almost_equal(
-            features_upper[0][0:],
-            features_lower[0][0:],
+            features_upper.to_numpy()[0],
+            features_lower.to_numpy()[0],
             decimal=5,
         )
