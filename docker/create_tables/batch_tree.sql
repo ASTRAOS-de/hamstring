@@ -11,4 +11,5 @@ CREATE TABLE IF NOT EXISTS batch_tree (
 )
 ENGINE = MergeTree
 PARTITION BY toYYYYMM(timestamp)
-ORDER BY (stage, status, timestamp, instance_name, batch_row_id, parent_batch_row_id);
+ORDER BY (stage, status, timestamp, instance_name, batch_row_id, parent_batch_row_id)
+TTL toDateTime(timestamp) + INTERVAL 1 DAY;

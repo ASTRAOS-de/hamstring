@@ -8,6 +8,7 @@ from streamad.util import StreamGenerator, CustomDS
 
 # TODO: test all of this!
 sys.path.append(os.getcwd())
+from src.base.acceleration import apply_model_acceleration
 from src.base.utils import setup_config
 from src.base.log_config import get_logger
 
@@ -226,7 +227,14 @@ class StreamADInspector(InspectorBase):
 
             module = importlib.import_module(model["module"])
             module_model = getattr(module, model["model"])
-            model_list.append(module_model(**model["model_args"]))
+            model_instance = module_model(**model["model_args"])
+            model_list.append(
+                apply_model_acceleration(
+                    model_instance,
+                    self.acceleration,
+                    logger=logger,
+                )
+            )
         return model_list
 
     def inspect_anomalies(self):
@@ -351,4 +359,8 @@ class StreamADInspector(InspectorBase):
 
         module = importlib.import_module(self.ensemble_config["module"])
         module_model = getattr(module, self.ensemble_config["model"])
-        self.ensemble = module_model(**self.ensemble_config["model_args"])
+        self.ensemble = apply_model_acceleration(
+            module_model(**self.ensemble_config["model_args"]),
+            self.acceleration,
+            logger=logger,
+        )

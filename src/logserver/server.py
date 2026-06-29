@@ -13,7 +13,11 @@ from src.base.kafka_handler import (
 )
 from src.base.clickhouse_kafka_sender import ClickHouseKafkaSender
 from src.base.utils import setup_config, get_zeek_sensor_topic_base_names
-from src.base.execution import create_pipeline_executor
+from src.base.execution import (
+    create_pipeline_executor,
+    run_thread_worker_pool,
+    start_pipeline_worker_replicas,
+)
 from src.base.log_config import get_logger
 
 module_name = "log_storage.logserver"
@@ -82,7 +86,11 @@ class LogServer:
             message (str): Message to be sent.
         """
         for topic in self.produce_topics:
-            self.kafka_produce_handler.produce(topic=topic, data=message)
+            self.kafka_produce_handler.produce(
+                topic=topic,
+                data=message,
+                key=str(message_id),
+            )
             logger.debug(f"Sent: '{message}' to topic {topic}")
 
         self.server_logs_timestamps.insert(
@@ -114,6 +122,33 @@ class LogServer:
             )
 
             self.send(message_id, value)
+            self.kafka_consume_handler.commit()
+
+
+def build_logserver_worker(consume_topic, produce_topics, worker_id=None):
+    worker = LogServer(consume_topic=consume_topic, produce_topics=produce_topics)
+    worker.worker_id = worker_id
+    return worker
+
+
+def run_logserver_worker_process(
+    process_index, threads_per_process, consume_topic, produce_topics
+):
+    def worker_factory(worker_id):
+        return build_logserver_worker(
+            consume_topic=consume_topic,
+            produce_topics=produce_topics,
+            worker_id=worker_id,
+        )
+
+    run_thread_worker_pool(
+        worker_factory=worker_factory,
+        target_name="fetch_from_kafka",
+        module_name=module_name,
+        instance_name=consume_topic,
+        process_index=process_index,
+        threads_per_process=threads_per_process,
+    )
 
 
 async def main() -> None:
@@ -128,10 +163,31 @@ async def main() -> None:
             for collector in COLLECTORS
             if collector["protocol_base"] == protocol
         ]
-        server_instance = LogServer(
-            consume_topic=consume_topic, produce_topics=produce_topics
+
+        def worker_factory(
+            worker_id,
+            consume_topic=consume_topic,
+            produce_topics=produce_topics,
+        ):
+            return build_logserver_worker(
+                consume_topic=consume_topic,
+                produce_topics=produce_topics,
+                worker_id=worker_id,
+            )
+
+        tasks.append(
+            asyncio.create_task(
+                start_pipeline_worker_replicas(
+                    config=config,
+                    module_name=module_name,
+                    instance_name=consume_topic,
+                    worker_factory=worker_factory,
+                    target_name="fetch_from_kafka",
+                    process_entrypoint=run_logserver_worker_process,
+                    process_args=(consume_topic, produce_topics),
+                )
+            )
         )
-        tasks.append(asyncio.create_task(server_instance.start()))
 
     await asyncio.gather(*tasks)
 

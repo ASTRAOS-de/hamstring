@@ -98,6 +98,22 @@ class ClickHouseBatchSender:
                     "event_timestamp": datetime.datetime,
                 },
             ),
+            "server_log_to_logline": Table(
+                "server_log_to_logline",
+                {
+                    "message_id": uuid.UUID,
+                    "logline_id": uuid.UUID,
+                },
+            ),
+            "server_log_terminal_events": Table(
+                "server_log_terminal_events",
+                {
+                    "message_id": uuid.UUID,
+                    "stage": str,
+                    "status": str,
+                    "timestamp": datetime.datetime,
+                },
+            ),
             "failed_loglines": Table(
                 "failed_loglines",
                 {

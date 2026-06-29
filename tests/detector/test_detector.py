@@ -379,6 +379,128 @@ class TestSendWarning(unittest.TestCase):
         self.assertEqual("test-detector", alert["detector_name"])
         self.assertEqual("192.168.1.1", alert["src_ip"])
         self.assertEqual(2, len(alert["result"]))
+        self.assertNotIn("request", alert["result"][0])
+
+    @patch("src.detector.detector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.detector.detector.ClickHouseKafkaSender")
+    @patch("src.detector.detector.DetectorBase._get_model")
+    def test_save_warning_with_nested_message_windows(
+        self, mock_get_model, mock_clickhouse, mock_kafka_consume_handler
+    ):
+        mock_get_model.return_value = (MagicMock(), MagicMock())
+        mock_kafka_consume_handler.return_value = MagicMock()
+
+        sut = TestDetector(
+            consume_topic="test_topic", detector_config=MINIMAL_DETECTOR_CONFIG
+        )
+        request_window = [
+            {"logline_id": "test_id_1", "domain_name": "one.example"},
+            {"logline_id": "test_id_2", "domain_name": "two.example"},
+        ]
+        sut.warnings = [
+            {
+                "request": request_window,
+                "probability": 0.8765,
+                "model": "rf",
+                "sha256": "021af76b2385ddbc76f6e3ad10feb0bb081f9cf05cff2e52333e31040bbf36cc",
+            }
+        ]
+        sut.parent_row_id = f"{uuid.uuid4()}-{uuid.uuid4()}"
+        sut.key = "192.168.1.1"
+        sut.suspicious_batch_id = uuid.uuid4()
+        sut.messages = [request_window]
+        sut.kafka_produce_handler = MagicMock()
+
+        sut.send_warning()
+
+        sut.kafka_produce_handler.produce.assert_called_once()
+        alert = json.loads(sut.kafka_produce_handler.produce.call_args.kwargs["data"])
+        self.assertEqual(2, alert["result"][0]["request_count"])
+        self.assertEqual(
+            ["one.example", "two.example"],
+            alert["result"][0]["domain_names"],
+        )
+        self.assertNotIn("request", alert["result"][0])
+
+    @patch("src.detector.detector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.detector.detector.ClickHouseKafkaSender")
+    @patch("src.detector.detector.DetectorBase._get_model")
+    def test_normalize_warning_for_storage_keeps_detector_output_separate(
+        self, mock_get_model, mock_clickhouse, mock_kafka_consume_handler
+    ):
+        mock_get_model.return_value = (MagicMock(), MagicMock())
+        mock_kafka_consume_handler.return_value = MagicMock()
+
+        sut = TestDetector(
+            consume_topic="test_topic", detector_config=MINIMAL_DETECTOR_CONFIG
+        )
+        warning = {
+            "request": [
+                {
+                    "logline_id": "logline-1",
+                    "server_message_id": "server-message-1",
+                    "domain_name": "one.example",
+                },
+                {
+                    "logline_id": "logline-2",
+                    "server_message_id": "server-message-2",
+                    "domain_name": "two.example",
+                },
+            ],
+            "probability": 0.8765,
+            "predicted_class": "cobaltstrike",
+            "attributes": [
+                {"attribute": "cobaltstrike", "probability": 0.8765},
+            ],
+            "name": "domainator_attributor",
+            "sha256": "021af76b2385ddbc76f6e3ad10feb0bb081f9cf05cff2e52333e31040bbf36cc",
+        }
+
+        normalized = sut._normalize_warning_for_storage(warning)
+
+        self.assertEqual("domainator_attributor", normalized["detector_name"])
+        self.assertEqual(0.8765, normalized["score"])
+        self.assertEqual("cobaltstrike", normalized["predicted_class"])
+        self.assertEqual(["one.example", "two.example"], normalized["domains"])
+        self.assertEqual(["logline-1", "logline-2"], normalized["logline_ids"])
+        self.assertEqual(
+            ["server-message-1", "server-message-2"],
+            normalized["server_message_ids"],
+        )
+        self.assertEqual(warning["request"], normalized["request"])
+        self.assertNotIn("request", normalized["raw_detector_output"])
+        self.assertEqual(
+            "cobaltstrike",
+            normalized["raw_detector_output"]["predicted_class"],
+        )
+
+    @patch("src.detector.detector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.detector.detector.ClickHouseKafkaSender")
+    @patch("src.detector.detector.DetectorBase._get_model")
+    def test_normalize_warning_for_storage_handles_sparse_detector_output(
+        self, mock_get_model, mock_clickhouse, mock_kafka_consume_handler
+    ):
+        mock_get_model.return_value = (MagicMock(), MagicMock())
+        mock_kafka_consume_handler.return_value = MagicMock()
+
+        sut = TestDetector(
+            consume_topic="test_topic", detector_config=MINIMAL_DETECTOR_CONFIG
+        )
+        normalized = sut._normalize_warning_for_storage(
+            {
+                "request_domain": "malicious.example",
+                "probability": 0.7,
+                "name": "sparse_detector",
+            }
+        )
+
+        self.assertEqual("sparse_detector", normalized["detector_name"])
+        self.assertEqual(0.7, normalized["score"])
+        self.assertEqual("", normalized["predicted_class"])
+        self.assertEqual([], normalized["attributes"])
+        self.assertEqual(["malicious.example"], normalized["domains"])
+        self.assertEqual([], normalized["logline_ids"])
+        self.assertIn("request_domain", normalized["raw_detector_output"])
 
     @patch("src.detector.detector.ExactlyOnceKafkaConsumeHandler")
     @patch("src.detector.detector.ClickHouseKafkaSender")
@@ -686,7 +808,7 @@ class TestGetModelMethod(unittest.TestCase):
             # Verify download was attempted
             mock_requests_get.assert_called()
             # Verify model was loaded
-            self.assertEqual(model, ("mock_model_or_scaler", "mock_model_or_scaler"))
+            self.assertEqual(model, ("mock_model_or_scaler", None))
             # Verify logger messages
             self.mock_logger.info.assert_any_call(
                 f"Get model: {sut.model_name} with checksum {sut.checksum}"
@@ -728,9 +850,7 @@ class TestGetModelMethod(unittest.TestCase):
             # Verify no download was attempted
             mock_requests_get.assert_not_called()
             # Verify model was loaded
-            self.assertEqual(
-                model_and_scaler, ("mock_model_or_scaler", "mock_model_or_scaler")
-            )
+            self.assertEqual(model_and_scaler, ("mock_model_or_scaler", None))
             # Verify logger messages
             self.mock_logger.info.assert_any_call(
                 f"Get model: {sut.model_name} with checksum {sut.checksum}"

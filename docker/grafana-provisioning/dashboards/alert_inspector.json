@@ -1,0 +1,321 @@
+{
+  "annotations": {
+    "list": [
+      {
+        "builtIn": 1,
+        "datasource": {
+          "type": "grafana",
+          "uid": "-- Grafana --"
+        },
+        "enable": true,
+        "hide": true,
+        "iconColor": "rgba(0, 211, 255, 1)",
+        "name": "Annotations & Alerts",
+        "type": "dashboard"
+      }
+    ]
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 0,
+  "links": [
+    {
+      "asDropdown": true,
+      "icon": "external link",
+      "includeVars": true,
+      "keepTime": true,
+      "tags": [
+        "HAMSTRING"
+      ],
+      "targetBlank": false,
+      "title": "Dashboards",
+      "tooltip": "Open another HAMSTRING dashboard",
+      "type": "dashboards",
+      "url": ""
+    }
+  ],
+  "panels": [
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "PDEE91DDB90597936"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto",
+              "wrapText": false
+            },
+            "filterable": true,
+            "inspect": true
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": [
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Suspicious batch ID"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "targetBlank": false,
+                    "title": "Inspect alert",
+                    "url": "/d/edxz3fduc2m0af/alert-inspector?from=${__from}&to=${__to}&var-IpFilter=&var-DomainFilter=&var-BatchFilter=${__value.raw}&var-DetectorFilter="
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Client IP address"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "targetBlank": false,
+                    "title": "Filter by IP",
+                    "url": "/d/edxz3fduc2m0af/alert-inspector?from=${__from}&to=${__to}&var-IpFilter=${__value.raw}&var-DomainFilter=&var-BatchFilter=&var-DetectorFilter="
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Detectors"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "targetBlank": false,
+                    "title": "Filter by detector",
+                    "url": "/d/edxz3fduc2m0af/alert-inspector?from=${__from}&to=${__to}&var-IpFilter=&var-DomainFilter=&var-BatchFilter=&var-DetectorFilter=${__value.raw}"
+                  }
+                ]
+              }
+            ]
+          },
+          {
+            "matcher": {
+              "id": "byName",
+              "options": "Domains"
+            },
+            "properties": [
+              {
+                "id": "links",
+                "value": [
+                  {
+                    "targetBlank": false,
+                    "title": "Filter by domain",
+                    "url": "/d/edxz3fduc2m0af/alert-inspector?from=${__from}&to=${__to}&var-IpFilter=&var-DomainFilter=${__value.raw}&var-BatchFilter=&var-DetectorFilter="
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "id": 1,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "countRows": false,
+          "enablePagination": true,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "pluginVersion": "11.2.2+security-01",
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "PDEE91DDB90597936"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "pluginVersion": "4.6.0",
+          "queryType": "table",
+          "rawSql": "WITH parsed_alerts AS (\n    SELECT\n        alert_timestamp,\n        src_ip,\n        suspicious_batch_id,\n        overall_score,\n        arrayStringConcat(arrayDistinct(arrayFilter(x -> x != '', arrayMap(entry -> multiIf(\n            substring(entry, 1, 1) = '\"', replaceRegexpAll(entry, '^\"|\"$', ''),\n            JSONHas(entry, 'domain_name'), JSONExtractString(entry, 'domain_name'),\n            entry\n        ), arrayFlatten(arrayMap(item -> if(substring(item, 1, 1) = '[', JSONExtractArrayRaw(item), [item]), JSONExtractArrayRaw(domain_names)))))), ', ') AS domains,\n        arrayStringConcat(arrayDistinct(arrayFilter(x -> x != '', arrayMap(warning -> JSONExtractString(warning, 'name'), JSONExtractArrayRaw(result)))), ', ') AS detector_names,\n        result\n    FROM alerts\n    WHERE alert_timestamp >= $__fromTime\n      AND alert_timestamp <= $__toTime\n)\nSELECT\n    alert_timestamp AS \"Time\",\n    src_ip AS \"Client IP address\",\n    suspicious_batch_id AS \"Suspicious batch ID\",\n    round(overall_score, 4) AS \"Score\",\n    detector_names AS \"Detectors\",\n    domains AS \"Domains\"\nFROM parsed_alerts\nWHERE ('${IpFilter}' = '' OR positionCaseInsensitive(src_ip, '${IpFilter}') > 0)\n  AND ('${DomainFilter}' = '' OR positionCaseInsensitive(domains, '${DomainFilter}') > 0)\n  AND ('${BatchFilter}' = '' OR positionCaseInsensitive(toString(suspicious_batch_id), '${BatchFilter}') > 0)\n  AND ('${DetectorFilter}' = '' OR positionCaseInsensitive(detector_names, '${DetectorFilter}') > 0)\nORDER BY alert_timestamp DESC\nLIMIT 500;",
+          "refId": "A"
+        }
+      ],
+      "title": "Alerts",
+      "type": "table"
+    },
+    {
+      "datasource": {
+        "type": "grafana-clickhouse-datasource",
+        "uid": "PDEE91DDB90597936"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto",
+            "cellOptions": {
+              "type": "auto",
+              "wrapText": true
+            },
+            "filterable": true,
+            "inspect": true
+          },
+          "mappings": [],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 10,
+        "w": 24,
+        "x": 0,
+        "y": 10
+      },
+      "id": 2,
+      "options": {
+        "cellHeight": "lg",
+        "footer": {
+          "countRows": false,
+          "enablePagination": true,
+          "fields": "",
+          "reducer": [
+            "sum"
+          ],
+          "show": false
+        },
+        "showHeader": true
+      },
+      "pluginVersion": "11.2.2+security-01",
+      "targets": [
+        {
+          "datasource": {
+            "type": "grafana-clickhouse-datasource",
+            "uid": "PDEE91DDB90597936"
+          },
+          "editorType": "sql",
+          "format": 1,
+          "pluginVersion": "4.6.0",
+          "queryType": "table",
+          "rawSql": "WITH parsed_alerts AS (\n    SELECT\n        alert_timestamp,\n        src_ip,\n        suspicious_batch_id,\n        overall_score,\n        arrayStringConcat(arrayDistinct(arrayFilter(x -> x != '', arrayMap(entry -> multiIf(\n            substring(entry, 1, 1) = '\"', replaceRegexpAll(entry, '^\"|\"$', ''),\n            JSONHas(entry, 'domain_name'), JSONExtractString(entry, 'domain_name'),\n            entry\n        ), arrayFlatten(arrayMap(item -> if(substring(item, 1, 1) = '[', JSONExtractArrayRaw(item), [item]), JSONExtractArrayRaw(domain_names)))))), ', ') AS domains,\n        result\n    FROM alerts\n    WHERE alert_timestamp >= $__fromTime\n      AND alert_timestamp <= $__toTime\n), detector_outputs AS (\n    SELECT\n        alert_timestamp,\n        src_ip,\n        suspicious_batch_id,\n        domains,\n        warning,\n        multiIf(\n            JSONExtractString(warning, 'detector_name') != '', JSONExtractString(warning, 'detector_name'),\n            JSONExtractString(warning, 'name') != '', JSONExtractString(warning, 'name'),\n            ''\n        ) AS detector_name,\n        multiIf(\n            JSONHas(warning, 'score'), JSONExtractFloat(warning, 'score'),\n            JSONHas(warning, 'probability'), JSONExtractFloat(warning, 'probability'),\n            0\n        ) AS score,\n        JSONExtractString(warning, 'predicted_class') AS predicted_class,\n        multiIf(\n            JSONHas(warning, 'attributes'), JSONExtractRaw(warning, 'attributes'),\n            JSONHas(warning, 'class_probabilities'), JSONExtractRaw(warning, 'class_probabilities'),\n            ''\n        ) AS detector_class_output,\n        multiIf(\n            JSONHas(warning, 'domains'), JSONExtractRaw(warning, 'domains'),\n            JSONHas(warning, 'domain_names'), JSONExtractRaw(warning, 'domain_names'),\n            ''\n        ) AS detector_domains,\n        multiIf(JSONHas(warning, 'logline_ids'), JSONExtractRaw(warning, 'logline_ids'), '') AS logline_ids,\n        multiIf(JSONHas(warning, 'server_message_ids'), JSONExtractRaw(warning, 'server_message_ids'), '') AS server_message_ids,\n        JSONExtractRaw(warning, 'request') AS request_raw,\n        multiIf(JSONHas(warning, 'raw_detector_output'), JSONExtractRaw(warning, 'raw_detector_output'), warning) AS raw_detector_output\n    FROM parsed_alerts\n    ARRAY JOIN JSONExtractArrayRaw(result) AS warning\n)\nSELECT\n    alert_timestamp AS \"Time\",\n    src_ip AS \"Client IP address\",\n    suspicious_batch_id AS \"Suspicious batch ID\",\n    detector_name AS \"Detector\",\n    round(score, 4) AS \"Score\",\n    predicted_class AS \"Predicted class\",\n    detector_class_output AS \"Class output\",\n    detector_domains AS \"Detector domains\",\n    logline_ids AS \"Logline IDs\",\n    server_message_ids AS \"Server message IDs\",\n    request_raw AS \"Raw request/window\",\n    raw_detector_output AS \"Raw detector output\"\nFROM detector_outputs\nWHERE ('${IpFilter}' = '' OR positionCaseInsensitive(src_ip, '${IpFilter}') > 0)\n  AND ('${DomainFilter}' = '' OR positionCaseInsensitive(concat(domains, ' ', detector_domains, ' ', request_raw), '${DomainFilter}') > 0)\n  AND ('${BatchFilter}' = '' OR positionCaseInsensitive(toString(suspicious_batch_id), '${BatchFilter}') > 0)\n  AND ('${DetectorFilter}' = '' OR positionCaseInsensitive(detector_name, '${DetectorFilter}') > 0)\nORDER BY alert_timestamp DESC, score DESC\nLIMIT 500;",
+          "refId": "A"
+        }
+      ],
+      "title": "Detector outputs",
+      "type": "table"
+    }
+  ],
+  "refresh": "auto",
+  "schemaVersion": 39,
+  "tags": [
+    "HAMSTRING"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": false,
+          "text": "",
+          "value": ""
+        },
+        "hide": 0,
+        "label": "IP",
+        "name": "IpFilter",
+        "options": [],
+        "query": "",
+        "skipUrlSync": false,
+        "type": "textbox"
+      },
+      {
+        "current": {
+          "selected": false,
+          "text": "",
+          "value": ""
+        },
+        "hide": 0,
+        "label": "DNS name",
+        "name": "DomainFilter",
+        "options": [],
+        "query": "",
+        "skipUrlSync": false,
+        "type": "textbox"
+      },
+      {
+        "current": {
+          "selected": false,
+          "text": "",
+          "value": ""
+        },
+        "hide": 0,
+        "label": "Selected batch ID",
+        "name": "BatchFilter",
+        "options": [],
+        "query": "",
+        "skipUrlSync": false,
+        "type": "textbox"
+      },
+      {
+        "current": {
+          "selected": false,
+          "text": "",
+          "value": ""
+        },
+        "hide": 0,
+        "label": "Detector",
+        "name": "DetectorFilter",
+        "options": [],
+        "query": "",
+        "skipUrlSync": false,
+        "type": "textbox"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-24h",
+    "to": "now"
+  },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "Alert Inspector",
+  "uid": "edxz3fduc2m0af",
+  "version": 1,
+  "weekStart": ""
+}

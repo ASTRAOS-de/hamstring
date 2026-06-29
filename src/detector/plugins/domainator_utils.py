@@ -1,7 +1,23 @@
 import numpy as np
 import itertools
+import pandas as pd
 import pylcs
 import Levenshtein
+
+from src.base.log_config import get_logger
+
+module_name = "data_analysis.detector"
+logger = get_logger(module_name)
+
+DOMAINATOR_FEATURE_COLUMNS = [
+    "levenshtein",
+    "jaro",
+    "jaro_reversed",
+    "jaro_winkler",
+    "jaro_winkler_reversed",
+    "lcs_sequence",
+    "lcs_string",
+]
 
 
 def strip_domain(query: str):
@@ -24,7 +40,7 @@ def strip_domain(query: str):
 
     return domain
 
-def get_domainator_features(queries: list) -> np.ndarray:
+def get_domainator_features(queries: list) -> pd.DataFrame:
     """Extracts feature vector from domain name for ML model inference.
 
     Computes various statistical and linguistic features from the domain name
@@ -35,23 +51,13 @@ def get_domainator_features(queries: list) -> np.ndarray:
         queries (list): List of query strings to extract features from.
 
     Returns:
-        numpy.ndarray: Feature vector ready for ML model prediction.
+        pandas.DataFrame: Feature vector ready for ML model prediction.
     """
 
     queries = [query.strip(".") for query in queries]
     subdomains = [".".join(domain.split(".")[:-2]) for domain in queries]
 
-    # Values can be put directly into an array, as the return converts them anyway,
-    # but this slightly improves readability
-    metrics = {
-        "levenshtein": [],
-        "jaro": [],
-        "rev_jaro": [],
-        "jaro_winkler": [],
-        "rev_jaro_wink": [],
-        "lcs_seq": [],
-        "lcs_str": [],
-    }
+    metrics = {column: [] for column in DOMAINATOR_FEATURE_COLUMNS}
 
     # if subdomains:
     cartesian = list(itertools.combinations(subdomains, 2))
@@ -62,19 +68,19 @@ def get_domainator_features(queries: list) -> np.ndarray:
     metrics["jaro"] = np.mean(
         [Levenshtein.jaro(product[0], product[1]) for product in cartesian]
     )
+    metrics["jaro_reversed"] = np.mean(
+        [
+            Levenshtein.jaro(product[0][::-1], product[1][::-1])
+            for product in cartesian
+        ]
+    )
     metrics["jaro_winkler"] = np.mean(
         [
             Levenshtein.jaro_winkler(product[0], product[1], prefix_weight=0.2)
             for product in cartesian
         ]
     )
-    metrics["rev_jaro"] = np.mean(
-        [
-            Levenshtein.jaro(product[0][::-1], product[1][::-1])
-            for product in cartesian
-        ]
-    )
-    metrics["rev_jaro_wink"] = np.mean(
+    metrics["jaro_winkler_reversed"] = np.mean(
         [
             Levenshtein.jaro_winkler(
                 product[0][::-1], product[1][::-1], prefix_weight=0.2
@@ -83,7 +89,7 @@ def get_domainator_features(queries: list) -> np.ndarray:
         ]
     )
 
-    metrics["lcs_seq"] = np.mean(
+    metrics["lcs_sequence"] = np.mean(
         [
             (
                 pylcs.lcs_sequence_length(product[0], product[1])
@@ -94,7 +100,7 @@ def get_domainator_features(queries: list) -> np.ndarray:
             for product in cartesian
         ]
     )
-    metrics["lcs_str"] = np.mean(
+    metrics["lcs_string"] = np.mean(
         [
             (
                 pylcs.lcs_string_length(product[0], product[1])
@@ -106,4 +112,8 @@ def get_domainator_features(queries: list) -> np.ndarray:
         ]
     )
 
-    return np.fromiter(metrics.values(), dtype=float).reshape(1, -1)
+    return pd.DataFrame(
+        [[metrics[column] for column in DOMAINATOR_FEATURE_COLUMNS]],
+        columns=DOMAINATOR_FEATURE_COLUMNS,
+    )
+

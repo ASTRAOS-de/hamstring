@@ -5,4 +5,5 @@ CREATE TABLE IF NOT EXISTS server_logs_timestamps (
 )
 ENGINE = MergeTree
 PARTITION BY toYYYYMM(event_timestamp)
-ORDER BY (event, event_timestamp, message_id);
+ORDER BY (event, event_timestamp, message_id)
+TTL toDateTime(event_timestamp) + INTERVAL 1 DAY;

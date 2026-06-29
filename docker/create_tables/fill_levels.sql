@@ -6,4 +6,5 @@ CREATE TABLE IF NOT EXISTS fill_levels (
 )
 ENGINE = MergeTree
 PARTITION BY toYYYYMM(timestamp)
-ORDER BY (stage, entry_type, timestamp);
+ORDER BY (stage, entry_type, timestamp)
+TTL toDateTime(timestamp) + INTERVAL 1 DAY;

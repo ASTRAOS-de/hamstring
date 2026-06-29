@@ -1,5 +1,6 @@
 xgboost
 scikit-learn~=1.5.2
+pandas
 requests
 colorlog~=6.8.2
 PyYAML~=6.0.1

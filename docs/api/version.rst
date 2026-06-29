@@ -1,0 +1,5 @@
+Version
+=======
+
+.. automodule:: src.version
+

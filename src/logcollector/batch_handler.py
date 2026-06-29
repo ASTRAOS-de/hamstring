@@ -80,6 +80,7 @@ class BufferedBatch:
             batch_id = self.batch_id.get(key)
             self.logline_to_batches.insert(
                 dict(
+                    timestamp=datetime.datetime.now(),
                     logline_id=logline_id,
                     batch_id=batch_id,
                 )
@@ -105,6 +106,7 @@ class BufferedBatch:
 
             self.logline_to_batches.insert(
                 dict(
+                    timestamp=datetime.datetime.now(),
                     logline_id=logline_id,
                     batch_id=new_batch_id,
                 )

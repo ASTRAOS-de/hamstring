@@ -70,7 +70,7 @@ services:
         condition: service_healthy
       clickhouse-server:
         condition: service_healthy
-    profiles: ["dev"]
+    profiles: ["dev", "dev-gpu"]
 
   monitoring_agent:
     extends:
@@ -85,7 +85,7 @@ services:
         condition: service_healthy
       clickhouse-server:
         condition: service_healthy
-    profiles: ["prod"]
+    profiles: ["prod", "prod-gpu"]
 
   logserver-dev:
     extends:
@@ -98,7 +98,7 @@ services:
         condition: service_healthy
       kafka3:
         condition: service_healthy
-    profiles: ["dev"]
+    profiles: ["dev", "dev-gpu"]
 
   logserver:
     extends:
@@ -111,7 +111,7 @@ services:
         condition: service_healthy
       kafka3:
         condition: service_healthy
-    profiles: ["prod"]
+    profiles: ["prod", "prod-gpu"]
 
   logcollector-dev:
     extends:
@@ -124,7 +124,7 @@ services:
         condition: service_healthy
       kafka3:
         condition: service_healthy
-    profiles: ["dev"]
+    profiles: ["dev", "dev-gpu"]
 
 
   logcollector:
@@ -138,7 +138,7 @@ services:
         condition: service_healthy
       kafka3:
         condition: service_healthy
-    profiles: ["prod"]
+    profiles: ["prod", "prod-gpu"]
 
   prefilter-dev:
     extends:
@@ -151,7 +151,7 @@ services:
         condition: service_healthy
       kafka3:
         condition: service_healthy
-    profiles: ["dev"]
+    profiles: ["dev", "dev-gpu"]
 
   prefilter:
     extends:
@@ -164,7 +164,7 @@ services:
         condition: service_healthy
       kafka3:
         condition: service_healthy
-    profiles: ["prod"]
+    profiles: ["prod", "prod-gpu"]
 
   inspector-dev:
     extends:
@@ -191,6 +191,70 @@ services:
       kafka3:
         condition: service_healthy
     profiles: ["prod"]
+
+  inspector-dev-gpu:
+    extends:
+      file: "docker-compose/dev/docker-compose.pipeline.yml"
+      service: inspector
+    depends_on:
+      kafka1:
+        condition: service_healthy
+      kafka2:
+        condition: service_healthy
+      kafka3:
+        condition: service_healthy
+    deploy:
+      mode: "replicated"
+      replicas: 1
+      resources:
+        limits:
+          cpus: '2'
+          memory: 512m
+        reservations:
+          cpus: '1'
+          memory: 256m
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      - GROUP_ID=data_inspection
+      - NUMBER_OF_INSTANCES=1
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    profiles: ["dev-gpu"]
+
+  inspector-gpu:
+    extends:
+      file: "docker-compose/prod/docker-compose.pipeline.yml"
+      service: inspector
+    depends_on:
+      kafka1:
+        condition: service_healthy
+      kafka2:
+        condition: service_healthy
+      kafka3:
+        condition: service_healthy
+    deploy:
+      mode: "replicated"
+      replicas: 1
+      resources:
+        limits:
+          cpus: '2'
+          memory: 512m
+        reservations:
+          cpus: '1'
+          memory: 256m
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      - GROUP_ID=data_inspection
+      - NUMBER_OF_INSTANCES=1
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    profiles: ["prod-gpu"]
 
 
   detector-dev:
@@ -219,6 +283,58 @@ services:
         condition: service_healthy
     profiles: ["prod"]
 
+  detector-dev-gpu:
+    extends:
+      file: "docker-compose/dev/docker-compose.pipeline.yml"
+      service: detector
+    depends_on:
+      kafka1:
+        condition: service_healthy
+      kafka2:
+        condition: service_healthy
+      kafka3:
+        condition: service_healthy
+    deploy:
+      mode: "replicated"
+      replicas: 1
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      - GROUP_ID=data_analysis
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    profiles: ["dev-gpu"]
+
+  detector-gpu:
+    extends:
+      file: "docker-compose/prod/docker-compose.pipeline.yml"
+      service: detector
+    depends_on:
+      kafka1:
+        condition: service_healthy
+      kafka2:
+        condition: service_healthy
+      kafka3:
+        condition: service_healthy
+    deploy:
+      mode: "replicated"
+      replicas: 1
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      - GROUP_ID=data_analysis
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    profiles: ["prod-gpu"]
+
   alerter-dev:
     extends:
       file: "docker-compose/dev/docker-compose.pipeline.yml"
@@ -230,7 +346,7 @@ services:
         condition: service_healthy
       kafka3:
         condition: service_healthy
-    profiles: ["dev"]
+    profiles: ["dev", "dev-gpu"]
 
   alerter:
     extends:
@@ -243,7 +359,7 @@ services:
         condition: service_healthy
       kafka3:
         condition: service_healthy
-    profiles: ["prod"]
+    profiles: ["prod", "prod-gpu"]
 
   zeek:
     image: ghcr.io/astraos-de/hamstring-zeek:2.0.1

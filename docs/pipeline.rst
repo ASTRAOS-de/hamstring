@@ -29,10 +29,10 @@ Main Classes
 ------------
 
 .. py:currentmodule:: src.zeek.zeek_config_handler
-.. autoclass:: ZeekConfigurationHandler
+.. py:class:: ZeekConfigurationHandler
 
 .. py:currentmodule:: src.zeek.zeek_analysis_handler
-.. autoclass:: ZeekAnalysisHandler
+.. py:class:: ZeekAnalysisHandler
 
 Usage and configuration
 -----------------------
@@ -58,6 +58,8 @@ Necessary attributes are:
 
 Stage 2: Log Storage
 ====================
+
+.. _stage-log-storage:
 
 This stage serves as the central ingestion point for all data.
 
@@ -93,7 +95,7 @@ batches based on subnet IDs, and forwards them to the next pipeline stage for fu
 Core Functionality
 ------------------
 
-The `Log Collection` stage is responsible for retrieving loglines from the :ref:`Log Storage<stage-1-log-storage>`,
+The `Log Collection` stage is responsible for retrieving loglines from the :ref:`Log Storage<stage-log-storage>`,
 parsing their information fields, and validating the data. Each field is checked to ensure it is of the correct type
 and format. This stage ensures that all data is accurate, reducing the need for further verification
 in subsequent stages.
@@ -180,7 +182,7 @@ allowing for multiprocessing and threading.
 
   As the log information differs for each protocol, there is a default format per protocol.
   This can be either adapted or a completely new one can be added as well. For more information
-  please reffer to section :ref:`Logline format configuration`.
+  please reffer to the :doc:`configuration` page.
 
     .. code-block::
 
@@ -490,7 +492,7 @@ We currently support the following relevance methods:
     +---------------------------+-------------------------------------------------------------+
     | **Name**                  | **Description**                                             |
     +===========================+=============================================================+
-    | ``no_relevance_check ``   | Skip the relevance check of the prefilters entirely.        |
+    | ``no_relevance_check``    | Skip the relevance check of the prefilters entirely.        |
     +---------------------------+-------------------------------------------------------------+
     | ``check_dga_relevance``   | Function to filter requests based on LisItems in the        |
     |                           | logcollector configuration. Using the fourth item in the    |
@@ -722,6 +724,12 @@ Main Classes
 .. py:currentmodule:: src.detector.plugins.dga_detector
 .. autoclass:: DGADetector
 
+.. py:currentmodule:: src.detector.plugins.domainator_detector
+.. autoclass:: DomainatorDetector
+
+.. py:currentmodule:: src.detector.plugins.domainator_attributor
+.. autoclass:: DomainatorAttributor
+
 
 The :class:`DetectorBase` is the primary class for Detectors. It holds common functionalities and is responsible for data ingesting, triggering alerts, logging, etc.. Any Detector is build on top of this
 class and needs to implement the methods specified by :class:`DetectorAbstractBase`. The class implementations need to go into ``"/src/detector/plugins"``
@@ -765,6 +773,40 @@ Detector instances can be chained by setting ``next_detectors`` on the upstream 
 
 For intermediary detectors that should only forward suspicious output to another detector, set ``send_to_alerter: false`` or ``produce_topics: []``.
 
+Domainator Detector Models
+--------------------------
+
+The Domainator detection and attribution pipeline is divided into four model variants. They can be used as a multi-stage chain, where the binary detector forwards suspicious windows to attribution models, or as individual detectors when a deployment already has an upstream selection mechanism. The models use the same feature family and training data, but differ in their ground-truth labels and therefore in the task they solve: detection, tool identification, behavior analysis, or combined identification and behavior analysis.
+
+The current Domainator model family was trained with a combination of real malware samples from Petrov et al. :cite:p:`petrov_domainator_2025`, tunneling-tool datasets from Chen et al. :cite:p:`chen_dns_lstm_2021` and Gao et al. :cite:p:`gao_graphtunnel_2024`, and benign DNS traffic from Žiža et al. :cite:p:`ziza_dns_exfiltration_2023`. The feature extraction procedure follows Petrov et al. :cite:p:`petrov_domainator_2025`: HAMSTRING calculates features over the subdomain portions of DNS requests sent by the client or victim side of the conversation.
+
+The shared feature set contains:
+
+- Levenshtein distance
+- Jaro similarity metric
+- Jaro-Winkler similarity metric
+- Jaro similarity metric on reversed strings
+- Jaro-Winkler similarity metric on reversed strings
+- Longest common string
+- Longest common substring
+
+The pure detection model, ``1779955108_SPRING-detector``, classifies traffic as legitimate or malicious. The identification model, ``1779955108_SPRING-attributor-identification``, distinguishes between individual DNS tunneling tools or malware families. Unknown tools can therefore be misclassified as one of the known tools or labelled as legitimate. The combined identification and behavior model, ``1779955108_SPRING-attributor-identification-behaviour``, predicts both the tool and observed behavior, such as download, upload, or idle activity. Since this requires behavior-specific training labels, it supports a subset of the identification classes. The generalized behavior model, ``1779955108_SPRING-attributor-behaviour``, omits tool names from the labels and predicts only the behavior, which can help classify behavior from tools not present in the training data.
+
+.. list-table:: Domainator model labels
+   :header-rows: 1
+   :widths: 35 65
+
+   * - Model
+     - Classes
+   * - ``1779955108_SPRING-detector``
+     - ``legitimate``, ``malicious``
+   * - ``1779955108_SPRING-attributor-behaviour``
+     - ``legitimate``, ``download``, ``idle``, ``upload``
+   * - ``1779955108_SPRING-attributor-identification``
+     - ``legitimate``, ``cobaltstrike``, ``det``, ``dns2tcp``, ``dnscat``, ``dnsexfiltrator``, ``dnspot``, ``dnsshell``, ``iodine``, ``ozymandns``, ``roguerobin-net``, ``roguerobin-ps``, ``saitama``, ``symbiote``, ``symbiote-dnscat``, ``tcpoverdns``, ``tuns``
+   * - ``1779955108_SPRING-attributor-identification-behaviour``
+     - ``legitimate_legitimate``, ``cobaltstrike_download``, ``cobaltstrike_upload``, ``det_upload``, ``dns2tcp_download``, ``dns2tcp_upload``, ``dnscat_download``, ``dnscat_idle``, ``dnscat_upload``, ``dnsexfiltrator_upload``, ``dnsshell_download``, ``dnsshell_upload``, ``iodine_download``, ``iodine_idle``, ``iodine_upload``, ``ozymandns_download``, ``ozymandns_upload``, ``roguerobin-net_download``, ``roguerobin-net_idle``, ``roguerobin-net_upload``, ``roguerobin-ps_download``, ``roguerobin-ps_idle``, ``roguerobin-ps_upload``, ``saitama_download``, ``saitama_idle``, ``saitama_upload``, ``symbiote-dnscat_download``, ``symbiote-dnscat_idle``, ``symbiote-dnscat_upload``, ``symbiote_download``, ``symbiote_upload``
+
 
 Stage 7: Alerter
 ================
@@ -796,7 +838,7 @@ Main Classes
 .. py:currentmodule:: src.alerter.alerter
 .. autoclass:: AlerterBase
 
-.. py:currentmodule:: src.alerter.alerter
+.. py:currentmodule:: src.alerter.plugins.generic_alerter
 .. autoclass:: GenericAlerter
 
 The :class:`AlerterBase` provides the foundation for all alerter instances, handling the base logging and Kafka forwarding logic. Custom plugins should not necessarily inherit from it but are loaded dynamically by the framework.
@@ -850,3 +892,7 @@ The :class:`DomainatorDetector` consumes anomalous batches of requests.
 It identifies potential data exfiltration and command & control on the subdomain level by analyzing characteristics of the subdomains.
 Messages are grouped by domain into fixed-size windows to allow for sequential anomaly detection. The detector leverages machine learning based on statistical and linguistic features from the domain name
 including label lengths, character frequencies, entropy measures, and counts of different character types across domain name levels.
+
+Domainator Attributor
+.....................
+The :class:`DomainatorAttributor` uses the same subdomain-window feature extraction as the :class:`DomainatorDetector`, but its labels describe the likely tool, malware family, behavior, or tool-behavior combination. It can run downstream of ``DomainatorDetector`` through detector chaining, or independently when its input already contains DNS windows that should be attributed.

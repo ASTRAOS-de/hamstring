@@ -11,7 +11,11 @@ from src.base.clickhouse_kafka_sender import ClickHouseKafkaSender
 from src.base.kafka_handler import ExactlyOnceKafkaConsumeHandler
 from src.base.logline_handler import LoglineHandler
 from src.base import utils
-from src.base.execution import create_pipeline_executor
+from src.base.execution import (
+    create_pipeline_executor,
+    run_thread_worker_pool,
+    start_pipeline_worker_replicas,
+)
 from src.logcollector.batch_handler import BufferedBatchSender
 from src.base.log_config import get_logger
 from collections import defaultdict
@@ -74,6 +78,10 @@ class LogCollector:
         self.failed_protocol_loglines = ClickHouseKafkaSender("failed_loglines")
         self.protocol_loglines = ClickHouseKafkaSender("loglines")
         self.logline_timestamps = ClickHouseKafkaSender("logline_timestamps")
+        self.server_log_to_logline = ClickHouseKafkaSender("server_log_to_logline")
+        self.server_log_terminal_events = ClickHouseKafkaSender(
+            "server_log_terminal_events"
+        )
         self.fill_levels = ClickHouseKafkaSender("fill_levels")
 
         self.fill_levels.insert(
@@ -121,9 +129,15 @@ class LogCollector:
         while True:
             key, value, topic = self.kafka_consume_handler.consume()
             logger.debug(f"From Kafka: '{value}'")
-            self.send(datetime.datetime.now(), value)
+            self.send(datetime.datetime.now(), value, server_message_id=key)
+            self.kafka_consume_handler.commit()
 
-    def send(self, timestamp_in: datetime.datetime, message: str) -> None:
+    def send(
+        self,
+        timestamp_in: datetime.datetime,
+        message: str,
+        server_message_id: str | uuid.UUID | None = None,
+    ) -> None:
         """Processes and sends a log line to the batch handler after validation.
 
         This method:
@@ -135,20 +149,33 @@ class LogCollector:
         Args:
             timestamp_in (datetime.datetime): Timestamp when the log line entered the pipeline
             message (str): Raw log line message in JSON format
+            server_message_id (str | uuid.UUID | None): Optional LogServer message id
+                received as the Kafka key.
         """
+        server_message_uuid = self._parse_server_message_id(server_message_id)
         try:
             fields = self.logline_handler.validate_logline_and_get_fields_as_json(
                 message
             )
         except ValueError:
+            timestamp_failed = datetime.datetime.now()
             self.failed_protocol_loglines.insert(
                 dict(
                     message_text=message,
                     timestamp_in=timestamp_in,
-                    timestamp_failed=datetime.datetime.now(),
+                    timestamp_failed=timestamp_failed,
                     reason_for_failure=None,  # TODO: Add actual reason
                 )
             )
+            if server_message_uuid:
+                self.server_log_terminal_events.insert(
+                    dict(
+                        message_id=server_message_uuid,
+                        stage=module_name,
+                        status="failed",
+                        timestamp=timestamp_failed,
+                    )
+                )
             return
         additional_fields = fields.copy()
         for field in REQUIRED_FIELDS:
@@ -164,6 +191,14 @@ class LogCollector:
                 additional_fields=json.dumps(additional_fields),
             )
         )
+        if server_message_uuid:
+            self.server_log_to_logline.insert(
+                dict(
+                    timestamp=datetime.datetime.now(),
+                    message_id=server_message_uuid,
+                    logline_id=logline_id,
+                )
+            )
         self.logline_timestamps.insert(
             dict(
                 logline_id=logline_id,
@@ -175,6 +210,8 @@ class LogCollector:
         )
         message_fields = fields.copy()
         message_fields["logline_id"] = str(logline_id)
+        if server_message_uuid:
+            message_fields["server_message_id"] = str(server_message_uuid)
 
         self.logline_timestamps.insert(
             dict(
@@ -187,6 +224,22 @@ class LogCollector:
         )
         self.batch_handler.add_message(subnet_id, json.dumps(message_fields))
         logger.debug(f"Sent: {message}")
+
+    @staticmethod
+    def _parse_server_message_id(
+        server_message_id: str | uuid.UUID | None,
+    ) -> uuid.UUID | None:
+        if not server_message_id:
+            return None
+        if isinstance(server_message_id, uuid.UUID):
+            return server_message_id
+        try:
+            return uuid.UUID(str(server_message_id))
+        except (TypeError, ValueError):
+            logger.warning(
+                "Ignoring non-UUID LogServer message id '%s'.", server_message_id
+            )
+            return None
 
     def _get_subnet_id(
         self, address: ipaddress.IPv4Address | ipaddress.IPv6Address
@@ -221,6 +274,54 @@ class LogCollector:
         return f"{normalized_ip_address}_{prefix_length}"
 
 
+def build_logcollector_worker(
+    collector_name,
+    protocol,
+    consume_topic,
+    produce_topics,
+    validation_config,
+    worker_id=None,
+):
+    worker = LogCollector(
+        collector_name=collector_name,
+        protocol=protocol,
+        consume_topic=consume_topic,
+        produce_topics=produce_topics,
+        validation_config=validation_config,
+    )
+    worker.worker_id = worker_id
+    return worker
+
+
+def run_logcollector_worker_process(
+    process_index,
+    threads_per_process,
+    collector_name,
+    protocol,
+    consume_topic,
+    produce_topics,
+    validation_config,
+):
+    def worker_factory(worker_id):
+        return build_logcollector_worker(
+            collector_name=collector_name,
+            protocol=protocol,
+            consume_topic=consume_topic,
+            produce_topics=produce_topics,
+            validation_config=validation_config,
+            worker_id=worker_id,
+        )
+
+    run_thread_worker_pool(
+        worker_factory=worker_factory,
+        target_name="fetch",
+        module_name=module_name,
+        instance_name=collector_name,
+        process_index=process_index,
+        threads_per_process=threads_per_process,
+    )
+
+
 async def main() -> None:
     """Creates and starts all configured LogCollector instances.
 
@@ -242,14 +343,43 @@ async def main() -> None:
             if collector["name"] == prefilter["collector_name"]
         ]
         validation_config = collector["required_log_information"]
-        collector_instance = LogCollector(
-            collector_name=collector["name"],
+
+        def worker_factory(
+            worker_id,
+            collector=collector,
             protocol=protocol,
             consume_topic=consume_topic,
             produce_topics=produce_topics,
             validation_config=validation_config,
+        ):
+            return build_logcollector_worker(
+                collector_name=collector["name"],
+                protocol=protocol,
+                consume_topic=consume_topic,
+                produce_topics=produce_topics,
+                validation_config=validation_config,
+                worker_id=worker_id,
+            )
+
+        tasks.append(
+            asyncio.create_task(
+                start_pipeline_worker_replicas(
+                    config=config,
+                    module_name=module_name,
+                    instance_name=collector["name"],
+                    worker_factory=worker_factory,
+                    target_name="fetch",
+                    process_entrypoint=run_logcollector_worker_process,
+                    process_args=(
+                        collector["name"],
+                        protocol,
+                        consume_topic,
+                        produce_topics,
+                        validation_config,
+                    ),
+                )
+            )
         )
-        tasks.append(asyncio.create_task(collector_instance.start()))
     await asyncio.gather(*tasks)
 
 
