@@ -22,6 +22,7 @@ CREATE_TABLES_DIRECTORY = "docker/create_tables"  # TODO: Get from config
 CLICKHOUSE_HOSTNAME = CONFIG["environment"]["monitoring"]["clickhouse_server"][
     "hostname"
 ]
+RETRY_CONFIG = CONFIG.get("pipeline", {}).get("resilience", {}).get("retry", {})
 
 
 def prepare_all_tables():
@@ -49,17 +50,14 @@ def prepare_all_tables():
             file_path = os.path.join(CREATE_TABLES_DIRECTORY, filename)
             sql_content = _load_contents(file_path)
 
-            client = retry_forever(
+            with retry_forever(
                 lambda: clickhouse_connect.get_client(host=CLICKHOUSE_HOSTNAME),
                 "ClickHouse table preparation connection",
-            )
-            with client:
+                retry_config=RETRY_CONFIG,
+            ) as client:
                 for statement in _iter_statements(sql_content):
                     try:
-                        retry_forever(
-                            lambda statement=statement: client.command(statement),
-                            "ClickHouse CREATE TABLE statement",
-                        )
+                        client.command(statement)
                     except Exception as e:
                         logger.critical("Error in CREATE TABLE statement")
                         raise e

@@ -99,7 +99,7 @@ class InspectorBase(InspectorAbstractBase):
             self.time_range = config["time_range"]
         self.name = config["name"]
         self.acceleration = resolve_acceleration_config(
-            config["pipeline"],
+            globals()["config"].get("pipeline", {}),
             config,
             component_name=f"{module_name}.{self.name}",
             logger=logger,
