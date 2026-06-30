@@ -327,10 +327,19 @@ services:
       - "/home/max/HAMSTRING/hamstring/config.yaml:/app/config.yaml"
     environment:
       GROUP_ID: data_analysis
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
+      NVIDIA_VISIBLE_DEVICES: all
       HAMSTRING_CONFIG_CHECKSUM: "d9bc812b76c2b58c633b412a6c07f981f3c4d787"
     deploy:
       mode: replicated
       replicas: 1
+      # Use when nvidia gpu is available to you
+      # resources:
+      #   reservations:
+      #     generic_resources:
+      #       - discrete_resource_spec:
+      #           kind: NVIDIA-GPU
+      #           value: 1
       restart_policy:
         condition: any
 
