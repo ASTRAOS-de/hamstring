@@ -114,7 +114,8 @@ class TestConsume(unittest.TestCase):
 
     def test_consumer_raises_other_error(self):
         other_error = Mock()
-        other_error.code.return_value = KafkaError._ALL_BROKERS_DOWN
+        other_error.retriable.return_value = False
+        other_error.code.return_value = 123456
 
         msg = Mock()
         msg.error.return_value = other_error

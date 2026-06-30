@@ -46,6 +46,7 @@ class TestInit(unittest.TestCase):
         mock_producer.assert_called_once_with(expected_conf)
         mock_producer_instance.init_transactions.assert_called_once()
 
+    @patch("src.base.retry.time.sleep", return_value=None)
     @patch("src.base.kafka_handler.uuid")
     @patch("src.base.kafka_handler.logger")
     @patch(
@@ -66,7 +67,9 @@ class TestInit(unittest.TestCase):
         ],
     )
     @patch("src.base.kafka_handler.Producer")
-    def test_init_fail(self, mock_producer, mock_logger, mock_uuid):
+    def test_init_retries_until_transactions_initialize(
+        self, mock_producer, mock_logger, mock_uuid, mock_sleep
+    ):
         mock_producer_instance = MagicMock()
         mock_producer.return_value = mock_producer_instance
         mock_uuid.uuid4.return_value = "fixed‑uuid‑1234‑abcd‑5678‑90ef"
@@ -78,14 +81,17 @@ class TestInit(unittest.TestCase):
             "message.max.bytes": 1000000000,
         }
 
-        with patch.object(
-            mock_producer_instance, "init_transactions", side_effect=KafkaException
-        ):
-            with self.assertRaises(KafkaException):
-                sut = ExactlyOnceKafkaProduceHandler()
+        mock_producer_instance.init_transactions.side_effect = [
+            KafkaException(),
+            None,
+        ]
 
-            mock_producer.assert_called_once_with(expected_conf)
-            mock_producer_instance.init_transactions.assert_called_once()
+        sut = ExactlyOnceKafkaProduceHandler()
+
+        self.assertEqual(mock_producer_instance, sut.producer)
+        mock_producer.assert_called_once_with(expected_conf)
+        self.assertEqual(2, mock_producer_instance.init_transactions.call_count)
+        mock_sleep.assert_called()
 
 
 class TestSend(unittest.TestCase):

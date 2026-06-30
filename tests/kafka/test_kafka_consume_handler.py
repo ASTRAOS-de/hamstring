@@ -7,7 +7,6 @@ from src.base.kafka_handler import (
     ensure_topics,
     KafkaConsumeHandler,
     KafkaMessageFetchException,
-    TooManyFailedAttemptsError,
     _desired_topic_partitions,
     _topic_replication_factor,
     _topic_config,
@@ -110,6 +109,26 @@ class TestTopicReconciliation(unittest.TestCase):
 
         admin_client.create_topics.assert_not_called()
         admin_client.create_partitions.assert_not_called()
+
+    @patch("src.base.retry.time.sleep", return_value=None)
+    def test_metadata_lookup_retries_until_kafka_is_available(self, mock_sleep):
+        admin_client = MagicMock()
+        admin_client.list_topics.side_effect = [
+            RuntimeError("broker unavailable"),
+            _metadata({"test_topic": 4}),
+            _metadata({"test_topic": 4}),
+        ]
+
+        target_partitions_by_topic = ensure_topics(
+            admin_client,
+            ["test_topic"],
+            target_partitions=4,
+            replication_factor=2,
+        )
+
+        self.assertEqual({"test_topic": 4}, target_partitions_by_topic)
+        self.assertEqual(3, admin_client.list_topics.call_count)
+        mock_sleep.assert_called()
 
     def test_auto_expand_can_be_disabled(self):
         admin_client = MagicMock()
@@ -238,12 +257,13 @@ class TestInit(unittest.TestCase):
     )
     @patch(
         "src.base.kafka_handler.KafkaConsumeHandler._all_topics_created",
-        return_value=False,
+        side_effect=[False, True],
     )
+    @patch("src.base.retry.time.sleep", return_value=None)
     @patch("src.base.kafka_handler.AdminClient")
     @patch("src.base.kafka_handler.Consumer")
-    def test_init_unsuccessful(
-        self, mock_consumer, mock_admin_client, mock_all_topics_created
+    def test_init_retries_until_topics_are_visible(
+        self, mock_consumer, mock_admin_client, mock_sleep, mock_all_topics_created
     ):
         # Arrange
         mock_consumer_instance = MagicMock()
@@ -259,12 +279,15 @@ class TestInit(unittest.TestCase):
         }
 
         # Act
-        with self.assertRaises(TooManyFailedAttemptsError):
-            KafkaConsumeHandler(topics="test_topic")
+        sut = KafkaConsumeHandler(topics="test_topic")
 
         # Assert
-        mock_consumer.assert_called_once_with(expected_conf)
-        mock_consumer_instance.subscribe.assert_not_called()
+        self.assertEqual(mock_consumer_instance, sut.consumer)
+        self.assertEqual(2, mock_consumer.call_count)
+        mock_consumer.assert_any_call(expected_conf)
+        mock_consumer_instance.close.assert_called_once()
+        mock_consumer_instance.subscribe.assert_called_once()
+        mock_sleep.assert_called()
 
     @patch("src.base.kafka_handler.CONSUMER_GROUP_ID", "test_group_id")
     @patch(

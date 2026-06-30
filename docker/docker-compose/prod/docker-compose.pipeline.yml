@@ -1,6 +1,6 @@
 services:
   logserver:
-    image:  ghcr.io/astraos-de/hamstring-logserver:v2.0.0
+    image:  ghcr.io/astraos-de/hamstring-logserver:v2.2.0-dev
     restart: "unless-stopped"
     networks:
       hamstring:
@@ -10,7 +10,7 @@ services:
     environment:
       - GROUP_ID=log_storage
   logcollector:
-    image:  ghcr.io/astraos-de/hamstring-logcollector:v2.0.0
+    image:  ghcr.io/astraos-de/hamstring-logcollector:v2.2.0-dev
     restart: "unless-stopped"
     volumes:
       - ../../../config.yaml:/app/config.yaml
@@ -20,7 +20,7 @@ services:
       - GROUP_ID=log_collection
 
   prefilter:
-    image: ghcr.io/astraos-de/hamstring-prefilter:v2.0.0
+    image: ghcr.io/astraos-de/hamstring-prefilter:v2.2.0-dev
     restart: "unless-stopped"
     volumes:
       - ../../../config.yaml:/app/config.yaml
@@ -33,7 +33,7 @@ services:
       - GROUP_ID=log_filtering
 
   inspector:
-    image:  ghcr.io/astraos-de/hamstring-inspector:v2.0.0
+    image:  ghcr.io/astraos-de/hamstring-inspector:v2.2.0-dev
     restart: "unless-stopped"
     volumes:
       - ../../../config.yaml:/app/config.yaml
@@ -54,7 +54,7 @@ services:
       - NUMBER_OF_INSTANCES=1
 
   detector:
-    image:  ghcr.io/astraos-de/hamstring-detector:v2.0.0
+    image:  ghcr.io/astraos-de/hamstring-detector:v2.2.0-dev
     restart: "unless-stopped"
     volumes:
       - ../../../config.yaml:/app/config.yaml
@@ -67,7 +67,7 @@ services:
       - GROUP_ID=data_analysis
 
   alerter:
-    image:  ghcr.io/astraos-de/hamstring-alerter:v2.0.0
+    image:  ghcr.io/astraos-de/hamstring-alerter:v2.2.0-dev
     restart: "unless-stopped"
     volumes:
       - ../../../config.yaml:/app/config.yaml

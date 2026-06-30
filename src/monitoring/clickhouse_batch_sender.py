@@ -10,6 +10,7 @@ import clickhouse_connect
 
 sys.path.append(os.getcwd())
 from src.base.log_config import get_logger
+from src.base.retry import retry_forever
 from src.base.utils import setup_config
 
 logger = get_logger()
@@ -221,10 +222,22 @@ class ClickHouseBatchSender:
 
         self.timer = None
         self.batch = {key: [] for key in self.tables}
-        self._client = clickhouse_connect.get_client(
-            host=CLICKHOUSE_HOSTNAME,
-        )
+        self._client = self._connect_client()
         self.lock = Lock()
+
+    def _connect_client(self):
+        return retry_forever(
+            lambda: clickhouse_connect.get_client(host=CLICKHOUSE_HOSTNAME),
+            "ClickHouse client connection",
+        )
+
+    def _reset_client(self) -> None:
+        try:
+            if self._client:
+                self._client.close()
+        except Exception as exception:
+            logger.warning("Ignoring ClickHouse client close failure during reconnect: %s", exception)
+        self._client = self._connect_client()
 
     def __del__(self):
         self.insert_all()
@@ -266,13 +279,28 @@ class ClickHouseBatchSender:
         """
         if self.batch[table_name]:
             with self.lock:
-                self._client.insert(
-                    table_name,
-                    self.batch.get(table_name),
-                    column_names=list(self.tables.get(table_name).columns),
-                )
+                pending_rows = self.batch.get(table_name)
+                column_names = list(self.tables.get(table_name).columns)
+
+                def insert_batch():
+                    try:
+                        self._client.insert(
+                            table_name,
+                            pending_rows,
+                            column_names=column_names,
+                        )
+                    except Exception as exception:
+                        logger.warning(
+                            "ClickHouse insert for table '%s' failed, reconnecting: %s",
+                            table_name,
+                            exception,
+                        )
+                        self._reset_client()
+                        raise
+
+                retry_forever(insert_batch, f"ClickHouse insert for table '{table_name}'")
                 logger.debug(
-                    f"Inserted {table_name=},{self.batch.get(table_name)=},{list(self.tables.get(table_name).columns)=}"
+                    f"Inserted {table_name=},{pending_rows=},{column_names=}"
                 )
                 self.batch[table_name] = []
 

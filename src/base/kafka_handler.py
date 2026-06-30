@@ -11,7 +11,7 @@ import sys
 import time
 import uuid
 from abc import abstractmethod
-from typing import Optional
+from typing import Callable, Optional
 
 import marshmallow_dataclass
 from confluent_kafka import (
@@ -25,8 +25,8 @@ from confluent_kafka.admin import AdminClient, NewPartitions, NewTopic
 sys.path.append(os.getcwd())
 from src.base.data_classes.batch import Batch
 from src.base.log_config import get_logger
+from src.base.retry import retry_forever
 from src.base.utils import kafka_delivery_report, setup_config
-import uuid
 
 logger = get_logger()
 
@@ -188,6 +188,32 @@ def _wait_for_admin_futures(futures: dict, operation: str) -> None:
             raise
 
 
+def _is_retriable_kafka_exception(exception: Exception) -> bool:
+    if isinstance(exception, (KafkaException, BufferError, RuntimeError, OSError)):
+        return True
+    return False
+
+
+def _is_retriable_kafka_error(error) -> bool:
+    retriable = getattr(error, "retriable", None)
+    if callable(retriable) and retriable():
+        return True
+
+    retriable_codes = {
+        getattr(KafkaError, name)
+        for name in (
+            "_ALL_BROKERS_DOWN",
+            "_TRANSPORT",
+            "_TIMED_OUT",
+            "_MSG_TIMED_OUT",
+            "_RESOLVE",
+            "_WAIT_COORD",
+        )
+        if hasattr(KafkaError, name)
+    }
+    return hasattr(error, "code") and error.code() in retriable_codes
+
+
 def ensure_topics(
     admin_client: AdminClient,
     topics: str | list[str],
@@ -210,7 +236,10 @@ def ensure_topics(
         else _as_bool(auto_expand_partitions)
     )
 
-    cluster_metadata = admin_client.list_topics(timeout=10)
+    cluster_metadata = retry_forever(
+        lambda: admin_client.list_topics(timeout=10),
+        "Kafka metadata lookup",
+    )
     topics_metadata = getattr(cluster_metadata, "topics", {})
     existing_topics = (
         set(topics_metadata.keys())
@@ -226,22 +255,30 @@ def ensure_topics(
             "Creating Kafka topics %s.",
             missing_topics,
         )
-        futures = admin_client.create_topics(
-            [
-                NewTopic(
-                    topic,
-                    target_partitions_by_topic[topic],
-                    replication_factor_by_topic[topic],
-                )
-                for topic in missing_topics
-            ]
+        retry_forever(
+            lambda: _wait_for_admin_futures(
+                admin_client.create_topics(
+                    [
+                        NewTopic(
+                            topic,
+                            target_partitions_by_topic[topic],
+                            replication_factor_by_topic[topic],
+                        )
+                        for topic in missing_topics
+                    ]
+                ),
+                "create topic",
+            ),
+            f"Kafka topic creation for {missing_topics}",
         )
-        _wait_for_admin_futures(futures, "create topic")
 
     if not auto_expand_partitions:
         return target_partitions_by_topic
 
-    cluster_metadata = admin_client.list_topics(timeout=10)
+    cluster_metadata = retry_forever(
+        lambda: admin_client.list_topics(timeout=10),
+        "Kafka metadata lookup after topic creation",
+    )
     topics_to_expand = []
     for topic in normalized_topics:
         current_partition_count = _topic_partition_count(cluster_metadata, topic)
@@ -258,8 +295,13 @@ def ensure_topics(
             topics_to_expand.append(NewPartitions(topic, target_partitions))
 
     if topics_to_expand:
-        futures = admin_client.create_partitions(topics_to_expand)
-        _wait_for_admin_futures(futures, "expand partitions")
+        retry_forever(
+            lambda: _wait_for_admin_futures(
+                admin_client.create_partitions(topics_to_expand),
+                "expand partitions",
+            ),
+            f"Kafka partition expansion for {[str(topic) for topic in topics_to_expand]}",
+        )
 
     return target_partitions_by_topic
 
@@ -334,7 +376,39 @@ class KafkaProduceHandler(KafkaHandler):
                          Should contain broker settings and producer-specific options.
         """
         super().__init__()
-        self.producer = Producer(conf)
+        self.conf = conf
+        self.producer = self._new_producer()
+
+    def _new_producer(self):
+        return retry_forever(
+            lambda: Producer(self.conf),
+            "Kafka producer creation",
+        )
+
+    def _reset_producer(self) -> None:
+        try:
+            if self.producer:
+                self.producer.flush(5)
+        except Exception as exception:
+            logger.warning("Ignoring Kafka producer flush failure during reconnect: %s", exception)
+        self.producer = self._new_producer()
+
+    def _with_producer_retry(self, description: str, operation: Callable[[], None]) -> None:
+        def attempt():
+            try:
+                operation()
+            except Exception as exception:
+                if not _is_retriable_kafka_exception(exception):
+                    raise
+                logger.warning("%s failed, recreating Kafka producer: %s", description, exception)
+                self._reset_producer()
+                raise
+
+        retry_forever(
+            attempt,
+            description,
+            retryable=(KafkaException, BufferError, RuntimeError, OSError),
+        )
 
     @abstractmethod
     def produce(self, *args, **kwargs):
@@ -358,7 +432,8 @@ class KafkaProduceHandler(KafkaHandler):
         Ensures that all pending messages are flushed before the producer
         is destroyed, preventing message loss.
         """
-        self.producer.flush()
+        if self.producer:
+            self.producer.flush()
 
 
 class SimpleKafkaProduceHandler(KafkaProduceHandler):
@@ -410,13 +485,30 @@ class SimpleKafkaProduceHandler(KafkaProduceHandler):
         """
         if not data:
             return
-        self.producer.flush()
-        self.producer.produce(
-            topic=topic,
-            key=key,
-            value=data,
-            callback=kafka_delivery_report,
-        )
+
+        def operation():
+            delivery_errors = []
+
+            def delivery_callback(err, msg):
+                kafka_delivery_report(err, msg)
+                if err:
+                    delivery_errors.append(err)
+
+            self.producer.flush()
+            self.producer.produce(
+                topic=topic,
+                key=key,
+                value=data,
+                callback=delivery_callback,
+            )
+            self.producer.flush()
+            if delivery_errors:
+                delivery_error = delivery_errors[0]
+                if _is_retriable_kafka_error(delivery_error):
+                    raise KafkaException(delivery_error)
+                raise ValueError(f"Kafka delivery failed: {delivery_error}")
+
+        self._with_producer_retry(f"Kafka produce to {topic}", operation)
 
 
 class ExactlyOnceKafkaProduceHandler(KafkaProduceHandler):
@@ -458,7 +550,17 @@ class ExactlyOnceKafkaProduceHandler(KafkaProduceHandler):
         }
 
         super().__init__(conf)
-        self.producer.init_transactions()
+        self._init_transactions_with_retry()
+
+    def _reset_producer(self) -> None:
+        super()._reset_producer()
+        self._init_transactions_with_retry()
+
+    def _init_transactions_with_retry(self) -> None:
+        retry_forever(
+            lambda: self.producer.init_transactions(),
+            "Kafka transactional producer initialization",
+        )
 
     def produce(self, topic: str, data: str, key: None | str = None) -> None:
         """Produce a message to the specified Kafka topic with exactly-once semantics.
@@ -480,24 +582,29 @@ class ExactlyOnceKafkaProduceHandler(KafkaProduceHandler):
         if not data:
             return
 
-        self.producer.flush()
-        self.producer.begin_transaction()
+        def operation():
+            self.producer.flush()
+            self.producer.begin_transaction()
 
-        try:
-            self.producer.produce(
-                topic=topic,
-                key=key,
-                value=data,
-                callback=kafka_delivery_report,
-            )
+            try:
+                self.producer.produce(
+                    topic=topic,
+                    key=key,
+                    value=data,
+                    callback=kafka_delivery_report,
+                )
+                self.commit_transaction_with_retry()
+            except Exception as e:
+                logger.info(f"aborted for topic {topic}")
+                try:
+                    self.producer.abort_transaction()
+                except Exception as abort_exception:
+                    logger.warning("Kafka transaction abort failed: %s", abort_exception)
+                logger.error("Transaction aborted.")
+                logger.error(e)
+                raise
 
-            self.commit_transaction_with_retry()
-        except Exception as e:
-            logger.info(f"aborted for topic {topic}")
-            self.producer.abort_transaction()
-            logger.error("Transaction aborted.")
-            logger.error(e)
-            raise
+        self._with_producer_retry(f"Kafka transactional produce to {topic}", operation)
 
     def commit_transaction_with_retry(
         self, max_retries: int = 3, retry_interval_ms: int = 1000
@@ -572,6 +679,7 @@ class KafkaConsumeHandler(KafkaHandler):
 
         if isinstance(topics, str):
             topics = [topics]
+        self.topics = topics
 
         # get brokers
         self.brokers = ",".join(
@@ -580,37 +688,58 @@ class KafkaConsumeHandler(KafkaHandler):
                 for broker in KAFKA_BROKERS
             ]
         )
+        self.conf = self._build_consumer_conf()
+        self._connect_consumer()
 
-        # create consumer
-        conf = {
+    def _build_consumer_conf(self) -> dict:
+        return {
             "bootstrap.servers": self.brokers,
-            "group.id": build_consumer_group_id(topics),
+            "group.id": build_consumer_group_id(self.topics),
             "enable.auto.commit": False,
             "auto.offset.reset": "earliest",
             "enable.partition.eof": True,
             "max.poll.interval.ms": KAFKA_CONSUMER_MAX_POLL_INTERVAL_MS,
         }
-        self.consumer = Consumer(conf)
 
-        # create topics
-        admin_client = AdminClient(
-            {
-                "bootstrap.servers": self.brokers,
-            }
-        )
-        target_partitions_by_topic = ensure_topics(admin_client, topics)
+    def _connect_consumer(self) -> None:
+        def connect():
+            consumer = Consumer(self.conf)
+            admin_client = AdminClient(
+                {
+                    "bootstrap.servers": self.brokers,
+                }
+            )
+            target_partitions_by_topic = ensure_topics(admin_client, self.topics)
 
-        # check if topics are created
-        if not self._all_topics_created(topics, target_partitions_by_topic):
-            raise TooManyFailedAttemptsError("Not all topics were created.")
+            if not self._all_topics_created(self.topics, target_partitions_by_topic, consumer):
+                try:
+                    consumer.close()
+                except Exception:
+                    pass
+                raise TooManyFailedAttemptsError("Not all topics were created.")
 
-        # subscribe to the topics
-        self.consumer.subscribe(topics)
+            consumer.subscribe(self.topics)
+            return consumer
+
+        self.consumer = retry_forever(connect, f"Kafka consumer setup for {self.topics}")
+
+    def _reset_consumer(self) -> None:
+        try:
+            if self.consumer:
+                self.consumer.close()
+        except Exception as exception:
+            logger.warning("Ignoring Kafka consumer close failure during reconnect: %s", exception)
+        self._last_consumed_message = None
+        self._connect_consumer()
 
     def commit(self) -> None:
         """Commit the last message returned by ``consume``."""
         if self.consumer and self._last_consumed_message is not None:
-            self.consumer.commit(self._last_consumed_message)
+            retry_forever(
+                lambda: self.consumer.commit(self._last_consumed_message),
+                "Kafka consumer offset commit",
+                retryable=(KafkaException, RuntimeError, OSError),
+            )
             self._last_consumed_message = None
 
     @abstractmethod
@@ -660,7 +789,10 @@ class KafkaConsumeHandler(KafkaHandler):
             raise ValueError("Unknown data format")
 
     def _all_topics_created(
-        self, topics: list[str], min_partitions: int | dict[str, int] = 1
+        self,
+        topics: list[str],
+        min_partitions: int | dict[str, int] = 1,
+        consumer=None,
     ) -> bool:
         """Verify that all specified topics have been created successfully.
 
@@ -676,8 +808,13 @@ class KafkaConsumeHandler(KafkaHandler):
         """
         number_of_retries_left = 30
         all_topics_created = False
+        consumer = consumer or self.consumer
         while not all_topics_created:  # try for 15 seconds
-            assigned_topics = self.consumer.list_topics(timeout=10)
+            assigned_topics = retry_forever(
+                lambda: consumer.list_topics(timeout=10),
+                "Kafka topic visibility check",
+                retryable=(KafkaException, RuntimeError, OSError),
+            )
 
             all_topics_created = True
             for topic in topics:
@@ -699,6 +836,28 @@ class KafkaConsumeHandler(KafkaHandler):
             time.sleep(0.5)
 
         return True
+
+    def _poll_message(self):
+        while True:
+            try:
+                msg = self.consumer.poll(timeout=1.0)
+            except (KafkaException, RuntimeError, OSError) as exception:
+                logger.warning("Kafka consumer poll failed, reconnecting: %s", exception)
+                self._reset_consumer()
+                continue
+
+            if msg is None:
+                return None
+
+            if msg.error():
+                if msg.error().code() == KafkaError._PARTITION_EOF:
+                    return None
+                if _is_retriable_kafka_error(msg.error()):
+                    logger.warning("Kafka consumer error is retriable, reconnecting: %s", msg.error())
+                    self._reset_consumer()
+                    return None
+
+            return msg
 
     def __del__(self) -> None:
         """Cleanup method called when the object is destroyed
@@ -795,7 +954,7 @@ class SimpleKafkaConsumeHandler(KafkaConsumeHandler):
 
         try:
             while True:
-                msg = self.consumer.poll(timeout=1.0)
+                msg = self._poll_message()
 
                 if msg is None:
                     if not empty_data_retrieved:
@@ -804,11 +963,8 @@ class SimpleKafkaConsumeHandler(KafkaConsumeHandler):
                     empty_data_retrieved = True
                     continue
                 if msg.error():
-                    if msg.error().code() == KafkaError._PARTITION_EOF:
-                        continue
-                    else:
-                        logger.error(f"Consumer error: {msg.error()}")
-                        raise ValueError("Message is invalid")
+                    logger.error(f"Consumer error: {msg.error()}")
+                    raise ValueError("Message is invalid")
 
                 # unpack message
                 key = msg.key().decode("utf-8") if msg.key() else None
@@ -860,7 +1016,7 @@ class ExactlyOnceKafkaConsumeHandler(KafkaConsumeHandler):
 
         try:
             while True:
-                msg = self.consumer.poll(timeout=1.0)
+                msg = self._poll_message()
 
                 if msg is None:
                     if not empty_data_retrieved:
@@ -870,11 +1026,8 @@ class ExactlyOnceKafkaConsumeHandler(KafkaConsumeHandler):
                     continue
 
                 if msg.error():
-                    if msg.error().code() == KafkaError._PARTITION_EOF:
-                        continue
-                    else:
-                        logger.error(f"Consumer error: {msg.error()}")
-                        raise ValueError("Message is invalid")
+                    logger.error(f"Consumer error: {msg.error()}")
+                    raise ValueError("Message is invalid")
 
                 # unpack message
                 key = msg.key().decode("utf-8") if msg.key() else None

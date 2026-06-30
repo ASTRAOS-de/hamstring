@@ -47,6 +47,10 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
       KAFKA_AUTHORIZER_CLASS_NAME: kafka.security.authorizer.AclAuthorizer
       KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: "true"
+      KAFKA_LOG_RETENTION_HOURS: 4
+      KAFKA_LOG_RETENTION_BYTES: 10737418240
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+      KAFKA_LOG_CLEANUP_POLICY: delete
     volumes:
       - kafka-data1:/var/lib/kafka/data
 
@@ -80,6 +84,10 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
       KAFKA_AUTHORIZER_CLASS_NAME: kafka.security.authorizer.AclAuthorizer
       KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: "true"
+      KAFKA_LOG_RETENTION_HOURS: 4
+      KAFKA_LOG_RETENTION_BYTES: 10737418240
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+      KAFKA_LOG_CLEANUP_POLICY: delete
     volumes:
       - kafka-data2:/var/lib/kafka/data
 
@@ -113,6 +121,10 @@ services:
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
       KAFKA_AUTHORIZER_CLASS_NAME: kafka.security.authorizer.AclAuthorizer
       KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: "true"
+      KAFKA_LOG_RETENTION_HOURS: 4
+      KAFKA_LOG_RETENTION_BYTES: 10737418240
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+      KAFKA_LOG_CLEANUP_POLICY: delete
     volumes:
       - kafka-data3:/var/lib/kafka/data
 

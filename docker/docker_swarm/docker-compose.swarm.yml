@@ -1,0 +1,385 @@
+# Compose file to deploy directly with docker stack deploy.
+---
+version: "3.8"
+
+services:
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.9.3
+    networks:
+      - hamstring
+    environment:
+      ZOOKEEPER_CLIENT_PORT: "2181"
+      ZOOKEEPER_TICK_TIME: "2000"
+      ZOOKEEPER_SERVER_ID: "1"
+    volumes:
+      - zk-data:/var/lib/zookeeper/data
+      - zk-txn-logs:/var/lib/zookeeper/log
+    healthcheck:
+      test: ["CMD-SHELL", "curl -s localhost:8080/commands | grep ruok"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    deploy:
+      placement:
+        constraints:
+          - "node.hostname == workstation"
+      restart_policy:
+        condition: any
+
+  kafka1:
+    image: confluentinc/cp-kafka:7.9.3
+    networks:
+      - hamstring
+    ports:
+      - target: 8097
+        published: 8097
+        protocol: tcp
+        mode: ingress
+    environment:
+      KAFKA_BROKER_ID: "1"
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka1:19092,EXTERNAL://workstation:8097
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:19092,EXTERNAL://0.0.0.0:8097
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "3"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "2"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "3"
+      KAFKA_AUTHORIZER_CLASS_NAME: kafka.security.authorizer.AclAuthorizer
+      KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: "true"
+      KAFKA_LOG_RETENTION_HOURS: 4
+      KAFKA_LOG_RETENTION_BYTES: 10737418240
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+      KAFKA_LOG_CLEANUP_POLICY: delete
+    volumes:
+      - kafka-data1:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 19092"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+    deploy:
+      placement:
+        constraints:
+          - "node.hostname == workstation"
+      restart_policy:
+        condition: any
+
+  kafka2:
+    image: confluentinc/cp-kafka:7.9.3
+    networks:
+      - hamstring
+    ports:
+      - target: 8098
+        published: 8098
+        protocol: tcp
+        mode: ingress
+    environment:
+      KAFKA_BROKER_ID: "2"
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka2:19093,EXTERNAL://workstation:8098
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:19093,EXTERNAL://0.0.0.0:8098
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG4J_LOGGERS: kafka.controller=INFO,kafka.producer.async.DefaultEventHandler=INFO,state.change.logger=INFO
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "3"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "2"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "3"
+      KAFKA_AUTHORIZER_CLASS_NAME: kafka.security.authorizer.AclAuthorizer
+      KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: "true"
+      KAFKA_LOG_RETENTION_HOURS: 4
+      KAFKA_LOG_RETENTION_BYTES: 10737418240
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+      KAFKA_LOG_CLEANUP_POLICY: delete
+    volumes:
+      - kafka-data2:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 19093"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+    deploy:
+      placement:
+        constraints:
+          - "node.hostname == workstation"
+      restart_policy:
+        condition: any
+
+  kafka3:
+    image: confluentinc/cp-kafka:7.9.3
+    networks:
+      - hamstring
+    ports:
+      - target: 8099
+        published: 8099
+        protocol: tcp
+        mode: ingress
+    environment:
+      KAFKA_BROKER_ID: "3"
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka3:19094,EXTERNAL://workstation:8099
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:19094,EXTERNAL://0.0.0.0:8099
+      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG4J_LOGGERS: kafka.controller=INFO,kafka.producer.async.DefaultEventHandler=INFO,state.change.logger=INFO
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "3"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "2"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "3"
+      KAFKA_AUTHORIZER_CLASS_NAME: kafka.security.authorizer.AclAuthorizer
+      KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: "true"
+      KAFKA_LOG_RETENTION_HOURS: 4
+      KAFKA_LOG_RETENTION_BYTES: 10737418240
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824
+      KAFKA_LOG_CLEANUP_POLICY: delete
+    volumes:
+      - kafka-data3:/var/lib/kafka/data
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 19094"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+    deploy:
+      placement:
+        constraints:
+          - "node.hostname == workstation"
+      restart_policy:
+        condition: any
+
+  clickhouse-server:
+    image: clickhouse/clickhouse-server:24.3.12.75-alpine
+    networks:
+      - hamstring
+    ports:
+      - target: 8123
+        published: 8123
+        protocol: tcp
+        mode: ingress
+      - target: 9000
+        published: 9000
+        protocol: tcp
+        mode: ingress
+    volumes:
+      - "/home/max/HAMSTRING/hamstring/docker/create_tables:/docker-entrypoint-initdb.d"
+      - ch_data:/var/lib/clickhouse/
+      - ch_logs:/var/log/clickhouse-server/
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 8123"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    deploy:
+      placement:
+        constraints:
+          - "node.hostname == workstation"
+      restart_policy:
+        condition: any
+
+  grafana:
+    image: grafana/grafana:11.2.2-security-01
+    networks:
+      - hamstring
+    ports:
+      - target: 3000
+        published: 3000
+        protocol: tcp
+        mode: ingress
+    volumes:
+      - "/home/max/HAMSTRING/hamstring/docker/grafana-provisioning/dashboards:/etc/grafana/provisioning/dashboards"
+      - "/home/max/HAMSTRING/hamstring/docker/grafana-provisioning/dashboards/dashboards.yaml:/etc/grafana/provisioning/dashboards/dashboards.yaml"
+      - "/home/max/HAMSTRING/hamstring/docker/grafana-provisioning/datasources.yaml:/etc/grafana/provisioning/datasources/datasources.yaml"
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_INSTALL_PLUGINS: grafana-clickhouse-datasource
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z localhost 3000"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    deploy:
+      placement:
+        constraints:
+          - "node.hostname == workstation"
+      restart_policy:
+        condition: any
+
+  prometheus:
+    image: prom/prometheus
+    networks:
+      - hamstring
+    ports:
+      - target: 9090
+        published: 9088
+        protocol: tcp
+        mode: ingress
+    volumes:
+      - "/home/max/HAMSTRING/hamstring/docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml"
+    deploy:
+      placement:
+        constraints:
+          - "node.hostname == workstation"
+      restart_policy:
+        condition: any
+
+  kafka-exporter:
+    image: danielqsj/kafka-exporter
+    command:
+      - --kafka.server=kafka1:19092
+      - --kafka.server=kafka2:19093
+      - --kafka.server=kafka3:19094
+    networks:
+      - hamstring
+    ports:
+      - target: 9308
+        published: 9308
+        protocol: tcp
+        mode: ingress
+    deploy:
+      restart_policy:
+        condition: any
+
+  monitoring_agent:
+    image: ghcr.io/astraos-de/hamstring-monitoring:v2.2.0-dev
+    networks:
+      - hamstring
+    volumes:
+      - "/home/max/HAMSTRING/hamstring/config.yaml:/app/config.yaml"
+    environment:
+      GROUP_ID: monitoring_agent
+      HAMSTRING_CONFIG_CHECKSUM: "d9bc812b76c2b58c633b412a6c07f981f3c4d787"
+    deploy:
+      restart_policy:
+        condition: any
+
+  logserver:
+    image: ghcr.io/astraos-de/hamstring-logserver:v2.2.0-dev
+    networks:
+      - hamstring
+    volumes:
+      - "/home/max/HAMSTRING/hamstring/docker/default.txt:/opt/file.txt"
+      - "/home/max/HAMSTRING/hamstring/config.yaml:/app/config.yaml"
+    environment:
+      GROUP_ID: log_storage
+      HAMSTRING_CONFIG_CHECKSUM: "d9bc812b76c2b58c633b412a6c07f981f3c4d787"
+    deploy:
+      restart_policy:
+        condition: any
+
+  logcollector:
+    image: ghcr.io/astraos-de/hamstring-logcollector:v2.2.0-dev
+    networks:
+      - hamstring
+    volumes:
+      - "/home/max/HAMSTRING/hamstring/config.yaml:/app/config.yaml"
+    environment:
+      GROUP_ID: log_collection
+      HAMSTRING_CONFIG_CHECKSUM: "d9bc812b76c2b58c633b412a6c07f981f3c4d787"
+    deploy:
+      restart_policy:
+        condition: any
+
+  prefilter:
+    image: ghcr.io/astraos-de/hamstring-prefilter:v2.2.0-dev
+    networks:
+      - hamstring
+    volumes:
+      - "/home/max/HAMSTRING/hamstring/config.yaml:/app/config.yaml"
+    environment:
+      GROUP_ID: log_filtering
+      HAMSTRING_CONFIG_CHECKSUM: "d9bc812b76c2b58c633b412a6c07f981f3c4d787"
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: any
+
+  inspector:
+    image: ghcr.io/astraos-de/hamstring-inspector:v2.2.0-dev
+    networks:
+      - hamstring
+    volumes:
+      - "/home/max/HAMSTRING/hamstring/config.yaml:/app/config.yaml"
+    environment:
+      GROUP_ID: data_inspection
+      NUMBER_OF_INSTANCES: "1"
+      HAMSTRING_CONFIG_CHECKSUM: "d9bc812b76c2b58c633b412a6c07f981f3c4d787"
+    deploy:
+      mode: replicated
+      replicas: 1
+      resources:
+        limits:
+          cpus: "2"
+          memory: 512M
+        reservations:
+          cpus: "1"
+          memory: 256M
+      restart_policy:
+        condition: any
+
+  detector:
+    image: ghcr.io/astraos-de/hamstring-detector:v2.2.0-dev
+    networks:
+      - hamstring
+    volumes:
+      - "/home/max/HAMSTRING/hamstring/config.yaml:/app/config.yaml"
+    environment:
+      GROUP_ID: data_analysis
+      HAMSTRING_CONFIG_CHECKSUM: "d9bc812b76c2b58c633b412a6c07f981f3c4d787"
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: any
+
+  alerter:
+    image: ghcr.io/astraos-de/hamstring-alerter:v2.2.0-dev
+    networks:
+      - hamstring
+    volumes:
+      - "/home/max/HAMSTRING/hamstring/config.yaml:/app/config.yaml"
+      - "/home/max/HAMSTRING/hamstring/docker/logs:/opt/logs"
+    environment:
+      GROUP_ID: data_alerting
+      HAMSTRING_CONFIG_CHECKSUM: "d9bc812b76c2b58c633b412a6c07f981f3c4d787"
+    deploy:
+      mode: replicated
+      replicas: 1
+      restart_policy:
+        condition: any
+
+  zeek:
+    image: ghcr.io/astraos-de/hamstring-zeek:v2.2.0-dev
+    networks:
+      - hamstring
+    volumes:
+      - "/home/max/HAMSTRING/hamstring/config.yaml:/opt/config.yaml"
+      - "/home/max/HAMSTRING/hamstring/docker/data/test_pcaps:/opt/static_files"
+    environment:
+      CONTAINER_NAME: zeek
+      HAMSTRING_CONFIG_CHECKSUM: "d9bc812b76c2b58c633b412a6c07f981f3c4d787"
+    deploy:
+      restart_policy:
+        condition: any
+
+networks:
+  hamstring:
+    driver: overlay
+    attachable: true
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.27.0.0/16
+
+volumes:
+  ch_data:
+  ch_logs:
+  kafka-data1:
+  kafka-data2:
+  kafka-data3:
+  zk-data:
+  zk-txn-logs:
+
+# code: language=yaml
