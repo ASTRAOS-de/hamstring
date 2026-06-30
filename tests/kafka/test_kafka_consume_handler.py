@@ -50,12 +50,10 @@ class TestTopicReconciliation(unittest.TestCase):
             _metadata({"test_topic": 4}),
         ]
         admin_client.create_topics.return_value = {"test_topic": MagicMock()}
-        mock_new_topic.side_effect = (
-            lambda topic, partitions, replication_factor: (
-                topic,
-                partitions,
-                replication_factor,
-            )
+        mock_new_topic.side_effect = lambda topic, partitions, replication_factor: (
+            topic,
+            partitions,
+            replication_factor,
         )
 
         target_partitions_by_topic = ensure_topics(
@@ -79,8 +77,9 @@ class TestTopicReconciliation(unittest.TestCase):
             _metadata({"test_topic": 2}),
         ]
         admin_client.create_partitions.return_value = {"test_topic": MagicMock()}
-        mock_new_partitions.side_effect = (
-            lambda topic, total_count: (topic, total_count)
+        mock_new_partitions.side_effect = lambda topic, total_count: (
+            topic,
+            total_count,
         )
 
         ensure_topics(

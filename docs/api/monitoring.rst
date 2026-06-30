@@ -2,4 +2,3 @@ Monitoring
 ==========
 
 .. automodule:: src.monitoring
-

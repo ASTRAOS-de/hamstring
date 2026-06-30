@@ -34,18 +34,18 @@ from src.base.execution import (
 module_name = "data_inspection.inspector"
 logger = get_logger(module_name)
 
-APP_CONFIG = setup_config()
-PRODUCE_TOPIC_PREFIX = APP_CONFIG["environment"]["kafka_topics_prefix"]["pipeline"][
+config = setup_config()
+PRODUCE_TOPIC_PREFIX = config["environment"]["kafka_topics_prefix"]["pipeline"][
     "inspector_to_detector"
 ]
-CONSUME_TOPIC_PREFIX = APP_CONFIG["environment"]["kafka_topics_prefix"]["pipeline"][
+CONSUME_TOPIC_PREFIX = config["environment"]["kafka_topics_prefix"]["pipeline"][
     "prefilter_to_inspector"
 ]
-SENSOR_PROTOCOLS = get_zeek_sensor_topic_base_names(APP_CONFIG)
-PREFILTERS = APP_CONFIG["pipeline"]["log_filtering"]
-INSPECTORS = APP_CONFIG["pipeline"]["data_inspection"]
-COLLECTORS = APP_CONFIG["pipeline"]["log_collection"]["collectors"]
-DETECTORS = APP_CONFIG["pipeline"]["data_analysis"]
+SENSOR_PROTOCOLS = get_zeek_sensor_topic_base_names(config)
+PREFILTERS = config["pipeline"]["log_filtering"]
+INSPECTORS = config["pipeline"]["data_inspection"]
+COLLECTORS = config["pipeline"]["log_collection"]["collectors"]
+DETECTORS = config["pipeline"]["data_analysis"]
 PLUGIN_PATH = "src.inspector.plugins"
 
 
@@ -99,7 +99,7 @@ class InspectorBase(InspectorAbstractBase):
             self.time_range = config["time_range"]
         self.name = config["name"]
         self.acceleration = resolve_acceleration_config(
-            APP_CONFIG["pipeline"],
+            globals()["config"].get("pipeline", {}),
             config,
             component_name=f"{module_name}.{self.name}",
             logger=logger,

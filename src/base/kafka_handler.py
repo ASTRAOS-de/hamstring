@@ -53,8 +53,8 @@ KAFKA_TOPIC_AUTO_EXPAND_PARTITIONS = KAFKA_TOPIC_CONFIG.get(
 )
 KAFKA_TOPIC_STAGE_CONFIG = KAFKA_TOPIC_CONFIG.get("stages", {})
 KAFKA_TOPIC_EXACT_CONFIG = KAFKA_TOPIC_CONFIG.get("topics", {})
-KAFKA_PIPELINE_TOPIC_PREFIXES = config["environment"].get("kafka_topics_prefix", {}).get(
-    "pipeline", {}
+KAFKA_PIPELINE_TOPIC_PREFIXES = (
+    config["environment"].get("kafka_topics_prefix", {}).get("pipeline", {})
 )
 
 
@@ -390,17 +390,23 @@ class KafkaProduceHandler(KafkaHandler):
             if self.producer:
                 self.producer.flush(5)
         except Exception as exception:
-            logger.warning("Ignoring Kafka producer flush failure during reconnect: %s", exception)
+            logger.warning(
+                "Ignoring Kafka producer flush failure during reconnect: %s", exception
+            )
         self.producer = self._new_producer()
 
-    def _with_producer_retry(self, description: str, operation: Callable[[], None]) -> None:
+    def _with_producer_retry(
+        self, description: str, operation: Callable[[], None]
+    ) -> None:
         def attempt():
             try:
                 operation()
             except Exception as exception:
                 if not _is_retriable_kafka_exception(exception):
                     raise
-                logger.warning("%s failed, recreating Kafka producer: %s", description, exception)
+                logger.warning(
+                    "%s failed, recreating Kafka producer: %s", description, exception
+                )
                 self._reset_producer()
                 raise
 
@@ -599,7 +605,9 @@ class ExactlyOnceKafkaProduceHandler(KafkaProduceHandler):
                 try:
                     self.producer.abort_transaction()
                 except Exception as abort_exception:
-                    logger.warning("Kafka transaction abort failed: %s", abort_exception)
+                    logger.warning(
+                        "Kafka transaction abort failed: %s", abort_exception
+                    )
                 logger.error("Transaction aborted.")
                 logger.error(e)
                 raise
@@ -711,7 +719,9 @@ class KafkaConsumeHandler(KafkaHandler):
             )
             target_partitions_by_topic = ensure_topics(admin_client, self.topics)
 
-            if not self._all_topics_created(self.topics, target_partitions_by_topic, consumer):
+            if not self._all_topics_created(
+                self.topics, target_partitions_by_topic, consumer
+            ):
                 try:
                     consumer.close()
                 except Exception:
@@ -721,14 +731,18 @@ class KafkaConsumeHandler(KafkaHandler):
             consumer.subscribe(self.topics)
             return consumer
 
-        self.consumer = retry_forever(connect, f"Kafka consumer setup for {self.topics}")
+        self.consumer = retry_forever(
+            connect, f"Kafka consumer setup for {self.topics}"
+        )
 
     def _reset_consumer(self) -> None:
         try:
             if self.consumer:
                 self.consumer.close()
         except Exception as exception:
-            logger.warning("Ignoring Kafka consumer close failure during reconnect: %s", exception)
+            logger.warning(
+                "Ignoring Kafka consumer close failure during reconnect: %s", exception
+            )
         self._last_consumed_message = None
         self._connect_consumer()
 
@@ -842,7 +856,9 @@ class KafkaConsumeHandler(KafkaHandler):
             try:
                 msg = self.consumer.poll(timeout=1.0)
             except (KafkaException, RuntimeError, OSError) as exception:
-                logger.warning("Kafka consumer poll failed, reconnecting: %s", exception)
+                logger.warning(
+                    "Kafka consumer poll failed, reconnecting: %s", exception
+                )
                 self._reset_consumer()
                 continue
 
@@ -853,7 +869,10 @@ class KafkaConsumeHandler(KafkaHandler):
                 if msg.error().code() == KafkaError._PARTITION_EOF:
                     return None
                 if _is_retriable_kafka_error(msg.error()):
-                    logger.warning("Kafka consumer error is retriable, reconnecting: %s", msg.error())
+                    logger.warning(
+                        "Kafka consumer error is retriable, reconnecting: %s",
+                        msg.error(),
+                    )
                     self._reset_consumer()
                     return None
 

@@ -2,4 +2,3 @@ Inspector
 =========
 
 .. automodule:: src.inspector
-

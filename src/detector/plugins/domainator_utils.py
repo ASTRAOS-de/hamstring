@@ -40,6 +40,7 @@ def strip_domain(query: str):
 
     return domain
 
+
 def get_domainator_features(queries: list) -> pd.DataFrame:
     """Extracts feature vector from domain name for ML model inference.
 
@@ -69,10 +70,7 @@ def get_domainator_features(queries: list) -> pd.DataFrame:
         [Levenshtein.jaro(product[0], product[1]) for product in cartesian]
     )
     metrics["jaro_reversed"] = np.mean(
-        [
-            Levenshtein.jaro(product[0][::-1], product[1][::-1])
-            for product in cartesian
-        ]
+        [Levenshtein.jaro(product[0][::-1], product[1][::-1]) for product in cartesian]
     )
     metrics["jaro_winkler"] = np.mean(
         [
@@ -116,4 +114,3 @@ def get_domainator_features(queries: list) -> pd.DataFrame:
         [[metrics[column] for column in DOMAINATOR_FEATURE_COLUMNS]],
         columns=DOMAINATOR_FEATURE_COLUMNS,
     )
-

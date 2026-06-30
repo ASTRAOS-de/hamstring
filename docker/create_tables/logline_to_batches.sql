@@ -7,5 +7,3 @@ ENGINE = MergeTree
 ORDER BY (timestamp, batch_id, logline_id)
 PARTITION BY toYYYYMM(timestamp)
 TTL toDateTime(timestamp) + INTERVAL 1 DAY;
-
-

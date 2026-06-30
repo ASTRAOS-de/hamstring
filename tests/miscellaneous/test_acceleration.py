@@ -27,9 +27,7 @@ class TestAccelerationConfig(unittest.TestCase):
         self.assertTrue(result.uses_gpu)
 
     @patch("src.base.acceleration.is_cuda_available", return_value=False)
-    def test_auto_falls_back_to_cpu_when_cuda_is_unavailable(
-        self, mock_cuda_available
-    ):
+    def test_auto_falls_back_to_cpu_when_cuda_is_unavailable(self, mock_cuda_available):
         config = {
             "acceleration": {
                 "enabled": True,
@@ -129,4 +127,3 @@ class TestApplyModelAcceleration(unittest.TestCase):
 
         self.assertEqual({"device": "cuda:0"}, model.params)
         self.assertIs(model, result)
-

@@ -236,7 +236,10 @@ class ClickHouseBatchSender:
             if self._client:
                 self._client.close()
         except Exception as exception:
-            logger.warning("Ignoring ClickHouse client close failure during reconnect: %s", exception)
+            logger.warning(
+                "Ignoring ClickHouse client close failure during reconnect: %s",
+                exception,
+            )
         self._client = self._connect_client()
 
     def __del__(self):
@@ -298,10 +301,10 @@ class ClickHouseBatchSender:
                         self._reset_client()
                         raise
 
-                retry_forever(insert_batch, f"ClickHouse insert for table '{table_name}'")
-                logger.debug(
-                    f"Inserted {table_name=},{pending_rows=},{column_names=}"
+                retry_forever(
+                    insert_batch, f"ClickHouse insert for table '{table_name}'"
                 )
+                logger.debug(f"Inserted {table_name=},{pending_rows=},{column_names=}")
                 self.batch[table_name] = []
 
     def insert_all(self):

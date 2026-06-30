@@ -21,11 +21,11 @@ _DEFAULT_CONFIG = {
 
 def resilience_config() -> dict[str, Any]:
     config = setup_config()
-    retry_config = (
-        config.get("pipeline", {})
-        .get("resilience", {})
-        .get("retry", {})
-    )
+    if not isinstance(config, dict):
+        return dict(_DEFAULT_CONFIG)
+    retry_config = config.get("pipeline", {}).get("resilience", {}).get("retry", {})
+    if not isinstance(retry_config, dict):
+        retry_config = {}
     merged = dict(_DEFAULT_CONFIG)
     merged.update(retry_config)
     return merged
@@ -37,7 +37,7 @@ def retry_forever(
     retry_config: dict[str, Any] | None = None,
     retryable: tuple[type[BaseException], ...] = (Exception,),
 ) -> T:
-    config = retry_config or resilience_config()
+    config = retry_config if retry_config is not None else resilience_config()
     initial_delay = _float_setting(config, "initial_delay_seconds")
     max_delay = _float_setting(config, "max_delay_seconds")
     multiplier = max(1.0, _float_setting(config, "backoff_multiplier"))
