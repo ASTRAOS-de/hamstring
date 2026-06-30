@@ -97,7 +97,9 @@ async def start_pipeline_worker_replicas(
         return
 
     if process_entrypoint is None:
-        raise ValueError("process_entrypoint is required for process and hybrid scaling")
+        raise ValueError(
+            "process_entrypoint is required for process and hybrid scaling"
+        )
 
     loop = asyncio.get_running_loop()
     executor = ProcessPoolExecutor(max_workers=executor_config.processes)

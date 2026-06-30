@@ -21,11 +21,7 @@ _DEFAULT_CONFIG = {
 
 def resilience_config() -> dict[str, Any]:
     config = setup_config()
-    retry_config = (
-        config.get("pipeline", {})
-        .get("resilience", {})
-        .get("retry", {})
-    )
+    retry_config = config.get("pipeline", {}).get("resilience", {}).get("retry", {})
     merged = dict(_DEFAULT_CONFIG)
     merged.update(retry_config)
     return merged

@@ -200,7 +200,7 @@ pipeline:
       threshold: 0.05
       consume_from: inspector
       inspector_name: "domainator_inspector"
-      next_detectors: 
+      next_detectors:
         - "domainator_attributor_behaviour"
         - "domainator_attributor_identification_behaviour"
         - "domainator_attributor_identification"

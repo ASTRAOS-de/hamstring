@@ -158,9 +158,7 @@ class TestStart(unittest.IsolatedAsyncioTestCase):
         mock_loop.run_in_executor.assert_any_await(
             mock_executor, self.sut.kafka_consumer.consume
         )
-        mock_executor.shutdown.assert_called_once_with(
-            wait=False, cancel_futures=True
-        )
+        mock_executor.shutdown.assert_called_once_with(wait=False, cancel_futures=True)
         self.sut.batch_sender.add.assert_called_once_with(
             "server_logs",
             {

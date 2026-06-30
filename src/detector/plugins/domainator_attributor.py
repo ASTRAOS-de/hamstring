@@ -19,17 +19,17 @@ LEGITIMATE_ATTRIBUTE_LABELS = {"benign", "legit", "legitimate", "legitimate_legi
 
 class DomainatorAttributor(DetectorBase):
     """
-    Detector implementation for the attribution of a tool or malware that was used in the 
+    Detector implementation for the attribution of a tool or malware that was used in the
     data exfiltration and command and control, using the subdomain level labels.
 
     This class extends the DetectorBase to provide specific functionality for identifying
-    the tool sending the malicious queries. It analyzes subdomain similarity characteristics 
+    the tool sending the malicious queries. It analyzes subdomain similarity characteristics
     based on grouping of the queries in windows of fixed size, similar to the Domainator detector
     approach. It can be used both as a standalone detector or as a next stage in a pipeline of detectors,
-    dependent on the provided model. 
+    dependent on the provided model.
 
     The identity detector extracts various statistical similarity features from windows of subdomains
-    to make predictions about what tool likely sent the malicious query or what job/behaviour was observed. 
+    to make predictions about what tool likely sent the malicious query or what job/behaviour was observed.
     """
 
     def __init__(
@@ -82,7 +82,7 @@ class DomainatorAttributor(DetectorBase):
 
     def detect(self):
         logger.info("Start detecting malicious requests.")
-        
+
         for message in self.messages:
             if isinstance(message, list):
                 # This assumes the current example for the request structure.

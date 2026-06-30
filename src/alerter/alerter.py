@@ -348,9 +348,7 @@ class AlerterBase(AlerterAbstractBase):
 
 def build_alerter_worker(alerter_config, consume_topic, worker_id=None):
     class_name = alerter_config.get("alerter_class_name", "GenericAlerter")
-    alerter_module_name = alerter_config.get(
-        "alerter_module_name", "generic_alerter"
-    )
+    alerter_module_name = alerter_config.get("alerter_module_name", "generic_alerter")
     plugin_module_name = f"{PLUGIN_PATH}.{alerter_module_name}"
     plugin_module = importlib.import_module(plugin_module_name)
     alerter_class = getattr(plugin_module, class_name)

@@ -2,7 +2,7 @@ Welcome to HAMSTRING's documentation!
 ======================================
 
 **HAMSTRING** is a CIDS framework to run signature and machine learning-based IDS classifiers. It employs several string and anomaly-based filtering techniques
-to maximize detection efficiency. Currently the tool focueses on DNS attacks, as it incorporates heiDGAF (DGA detection) & Domainator (DNS Tunneling Detector) 
+to maximize detection efficiency. Currently the tool focueses on DNS attacks, as it incorporates heiDGAF (DGA detection) & Domainator (DNS Tunneling Detector)
 :cite:p:`petrov_domainator_2025` :cite:p:`machmeier_heidgaf`.
 
 Check out the :doc:`usage` section for further information on how to use the software, including how to

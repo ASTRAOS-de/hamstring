@@ -152,7 +152,6 @@ class DGADetector(DetectorBase):
 
         return all_features.reshape(1, -1)
 
-
     def detect(self) -> None:
         """
         Process messages to detect malicious requests.

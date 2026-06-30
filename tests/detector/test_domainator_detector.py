@@ -13,7 +13,7 @@ from src.detector.plugins.domainator_detector import DomainatorDetector
 from src.base.data_classes.batch import Batch
 from src.detector.plugins.domainator_utils import (
     DOMAINATOR_FEATURE_COLUMNS,
-    get_domainator_features
+    get_domainator_features,
 )
 
 
@@ -175,7 +175,9 @@ class TestDomainatorDetector(unittest.TestCase):
         self.assertEqual(
             features.iloc[0, 0], 1.0
         )  # Levenshtein distance of empty strings is 1
-        self.assertEqual(features.iloc[0, 1], 1.0)  # Jaro distance of empty strings is 1
+        self.assertEqual(
+            features.iloc[0, 1], 1.0
+        )  # Jaro distance of empty strings is 1
         self.assertEqual(
             features.iloc[0, 2], 1.0
         )  # Jaro distance on the reverse empty strings is 1

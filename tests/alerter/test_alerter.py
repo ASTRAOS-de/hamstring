@@ -81,4 +81,3 @@ class TestAlerterLogRotation(unittest.TestCase):
 
             log_file = Path(temp_dir) / "alerts-2026-06-25.txt"
             self.assertEqual('{"src_ip": "192.0.2.1"}\n', log_file.read_text())
-

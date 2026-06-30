@@ -61,7 +61,9 @@ def _normalize_topic_suffixes(topic_suffixes) -> list[str]:
     if topic_suffixes is None:
         return []
     if isinstance(topic_suffixes, str):
-        return [suffix.strip() for suffix in topic_suffixes.split(",") if suffix.strip()]
+        return [
+            suffix.strip() for suffix in topic_suffixes.split(",") if suffix.strip()
+        ]
     if isinstance(topic_suffixes, (list, tuple, set)):
         return [str(suffix).strip() for suffix in topic_suffixes if str(suffix).strip()]
     return [str(topic_suffixes).strip()]
@@ -85,7 +87,9 @@ def build_alerter_topics(detector_config: dict) -> list[str]:
 def build_downstream_detector_topics(detector_config: dict) -> list[str]:
     detector_names = []
     for config_key in ("next_detectors", "produce_detector_topics"):
-        detector_names.extend(_normalize_topic_suffixes(detector_config.get(config_key)))
+        detector_names.extend(
+            _normalize_topic_suffixes(detector_config.get(config_key))
+        )
 
     return [
         f"{DETECTOR_TO_DETECTOR_TOPIC_PREFIX}-{detector_name}"
@@ -352,7 +356,6 @@ class DetectorBase(DetectorAbstractBase):
 
         return h.hexdigest()
 
-
     def get_model_download_url(self):
         """
         Generate the complete URL for downloading the Domainator detection model.
@@ -387,8 +390,6 @@ class DetectorBase(DetectorAbstractBase):
         )
         return f"{self.model_base_url}/files/?p=%2F{self.model_name}%2F{self.checksum}%2Fscaler.pickle&dl=1"
 
-
-
     def _get_model(self):
         """
         Download and validate the detection model.
@@ -410,7 +411,9 @@ class DetectorBase(DetectorAbstractBase):
             requests.HTTPError: If there's an error downloading the model.
         """
         logger.info(f"Get model: {self.model_name} with checksum {self.checksum}")
-        scaler_download_url = self.get_scaler_download_url() if self.use_scaler else None
+        scaler_download_url = (
+            self.get_scaler_download_url() if self.use_scaler else None
+        )
 
         if not os.path.isfile(self.model_path):
             model_download_url = self.get_model_download_url()
@@ -460,7 +463,7 @@ class DetectorBase(DetectorAbstractBase):
         then just overwrite the method and append to `self.warnings` a warning if a given messag is to be regarded malicious.
 
         Note:
-        
+
         """
         logger.info("general")
         logger.info("Start detecting malicious requests.")
@@ -479,7 +482,7 @@ class DetectorBase(DetectorAbstractBase):
                     "sha256": self.checksum,
                 }
                 self.warnings.append(warning)
-                
+
     def clear_data(self):
         """Clears the data in the internal data structures."""
         self.messages = []
@@ -646,8 +649,7 @@ class DetectorBase(DetectorAbstractBase):
 
     def _build_persisted_warnings(self) -> list[dict]:
         return [
-            self._normalize_warning_for_storage(warning)
-            for warning in self.warnings
+            self._normalize_warning_for_storage(warning) for warning in self.warnings
         ]
 
     def _normalize_warning_for_storage(self, warning: dict) -> dict:
@@ -658,11 +660,7 @@ class DetectorBase(DetectorAbstractBase):
         request_messages = (
             self._flatten_messages(request) if request is not None else []
         )
-        detector_name = (
-            warning.get("detector_name")
-            or warning.get("name")
-            or self.name
-        )
+        detector_name = warning.get("detector_name") or warning.get("name") or self.name
         score = warning.get("score", warning.get("probability"))
         domains = self._extract_warning_domains(warning)
         logline_ids = self._extract_message_values(request_messages, "logline_id")
@@ -753,9 +751,7 @@ class DetectorBase(DetectorAbstractBase):
                     field_value = item.get(field_name)
                     if isinstance(field_value, list):
                         domains.extend(
-                            domain
-                            for domain in field_value
-                            if isinstance(domain, str)
+                            domain for domain in field_value if isinstance(domain, str)
                         )
 
         return sorted(set(domains))

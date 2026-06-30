@@ -2,4 +2,3 @@ Base
 ====
 
 .. automodule:: src.base
-

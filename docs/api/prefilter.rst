@@ -2,4 +2,3 @@ Prefilter
 =========
 
 .. automodule:: src.prefilter
-

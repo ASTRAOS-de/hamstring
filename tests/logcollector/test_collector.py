@@ -86,9 +86,7 @@ class TestStart(unittest.IsolatedAsyncioTestCase):
         mock_loop.run_in_executor.assert_awaited_once_with(
             mock_executor, self.sut.fetch
         )
-        mock_executor.shutdown.assert_called_once_with(
-            wait=False, cancel_futures=True
-        )
+        mock_executor.shutdown.assert_called_once_with(wait=False, cancel_futures=True)
 
 
 class _StopFetching(RuntimeError):
