@@ -75,6 +75,23 @@ class TestInit(unittest.TestCase):
         self.assertIsNotNone(sut.lock)
         self.assertEqual({key: [] for key in sut.tables}, sut.batch)
 
+    @patch("src.base.retry.time.sleep", return_value=None)
+    def test_retries_until_clickhouse_is_available(self, mock_sleep):
+        client = Mock()
+        with patch(
+            "src.monitoring.clickhouse_batch_sender.clickhouse_connect"
+        ) as mock_clickhouse_connect:
+            mock_clickhouse_connect.get_client.side_effect = [
+                RuntimeError("clickhouse unavailable"),
+                client,
+            ]
+
+            sut = ClickHouseBatchSender()
+
+        self.assertEqual(client, sut._client)
+        self.assertEqual(2, mock_clickhouse_connect.get_client.call_count)
+        mock_sleep.assert_called()
+
 
 class TestDel(unittest.TestCase):
     def setUp(self):
@@ -213,7 +230,33 @@ class TestInsert(unittest.TestCase):
             ["one", "two", "three"],
             column_names=["col_1", "col_2"],
         )
-        self.assertEquals([], self.sut.batch[test_table_name])
+        self.assertEqual([], self.sut.batch[test_table_name])
+
+    @patch("src.base.retry.time.sleep", return_value=None)
+    def test_filled_batch_retries_without_dropping_rows(self, mock_sleep):
+        # Arrange
+        test_table_name = "test_table"
+        first_client = Mock()
+        second_client = Mock()
+        first_client.insert.side_effect = RuntimeError("clickhouse unavailable")
+
+        self.sut.tables = {
+            test_table_name: Table(test_table_name, {"col_1": str, "col_2": str})
+        }
+        self.sut.batch = {test_table_name: ["one", "two", "three"]}
+        self.sut._client = first_client
+
+        with patch.object(self.sut, "_connect_client", return_value=second_client):
+            self.sut.insert(test_table_name)
+
+        first_client.insert.assert_called_once()
+        second_client.insert.assert_called_once_with(
+            test_table_name,
+            ["one", "two", "three"],
+            column_names=["col_1", "col_2"],
+        )
+        self.assertEqual([], self.sut.batch[test_table_name])
+        mock_sleep.assert_called()
 
     def test_empty_batch(self):
         # Arrange
@@ -230,7 +273,7 @@ class TestInsert(unittest.TestCase):
 
         # Assert
         self.sut._client.insert.assert_not_called()
-        self.assertEquals([], self.sut.batch[test_table_name])
+        self.assertEqual([], self.sut.batch[test_table_name])
 
 
 class TestInsertAll(unittest.TestCase):

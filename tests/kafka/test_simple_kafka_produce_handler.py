@@ -1,8 +1,9 @@
 import unittest
-from unittest.mock import patch, Mock
+from unittest.mock import ANY, patch, Mock
+
+from confluent_kafka import KafkaError
 
 from src.base.kafka_handler import SimpleKafkaProduceHandler
-from src.base.utils import kafka_delivery_report
 
 
 class TestInit(unittest.TestCase):
@@ -58,13 +59,60 @@ class TestProduce(unittest.TestCase):
             sut.produce("test_topic", "test_data")
 
         # Assert
-        mock_producer_instance.flush.assert_called_once()
+        self.assertEqual(2, mock_producer_instance.flush.call_count)
         mock_producer_instance.produce.assert_called_once_with(
             topic="test_topic",
             key=None,
             value="test_data",
-            callback=kafka_delivery_report,
+            callback=ANY,
         )
+
+    @patch("src.base.retry.time.sleep", return_value=None)
+    def test_with_data_recreates_producer_after_transient_failure(self, mock_sleep):
+        with patch("src.base.kafka_handler.Producer") as mock_producer:
+            first_producer = Mock()
+            second_producer = Mock()
+            first_producer.flush.side_effect = BufferError("queue full")
+            mock_producer.side_effect = [first_producer, second_producer]
+
+            sut = SimpleKafkaProduceHandler()
+            sut.produce("test_topic", "test_data")
+
+        self.assertEqual(2, mock_producer.call_count)
+        first_producer.flush.assert_called()
+        second_producer.produce.assert_called_once_with(
+            topic="test_topic",
+            key=None,
+            value="test_data",
+            callback=ANY,
+        )
+        mock_sleep.assert_called()
+
+    @patch("src.base.retry.time.sleep", return_value=None)
+    def test_with_data_retries_delivery_callback_error(self, mock_sleep):
+        with patch("src.base.kafka_handler.Producer") as mock_producer:
+            first_producer = Mock()
+            second_producer = Mock()
+            delivery_error = KafkaError(KafkaError._ALL_BROKERS_DOWN)
+
+            def fail_delivery(**kwargs):
+                kwargs["callback"](delivery_error, None)
+
+            first_producer.produce.side_effect = fail_delivery
+            mock_producer.side_effect = [first_producer, second_producer]
+
+            sut = SimpleKafkaProduceHandler()
+            sut.produce("test_topic", "test_data")
+
+        self.assertEqual(2, mock_producer.call_count)
+        first_producer.produce.assert_called_once()
+        second_producer.produce.assert_called_once_with(
+            topic="test_topic",
+            key=None,
+            value="test_data",
+            callback=ANY,
+        )
+        mock_sleep.assert_called()
 
     def test_without_data(self):
         with patch("src.base.kafka_handler.Producer") as mock_producer:

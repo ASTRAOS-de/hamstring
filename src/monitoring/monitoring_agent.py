@@ -12,6 +12,7 @@ from src.base.data_classes.clickhouse_connectors import TABLE_NAME_TO_TYPE
 from src.base.log_config import get_logger
 from src.base.utils import setup_config
 from src.base.execution import create_pipeline_executor
+from src.base.retry import retry_forever
 
 logger = get_logger()
 module_name = "monitoring.agent"
@@ -48,10 +49,17 @@ def prepare_all_tables():
             file_path = os.path.join(CREATE_TABLES_DIRECTORY, filename)
             sql_content = _load_contents(file_path)
 
-            with clickhouse_connect.get_client(host=CLICKHOUSE_HOSTNAME) as client:
+            client = retry_forever(
+                lambda: clickhouse_connect.get_client(host=CLICKHOUSE_HOSTNAME),
+                "ClickHouse table preparation connection",
+            )
+            with client:
                 for statement in _iter_statements(sql_content):
                     try:
-                        client.command(statement)
+                        retry_forever(
+                            lambda statement=statement: client.command(statement),
+                            "ClickHouse CREATE TABLE statement",
+                        )
                     except Exception as e:
                         logger.critical("Error in CREATE TABLE statement")
                         raise e

@@ -25,6 +25,14 @@ pipeline:
       backend: auto
       batch_size: auto
 
+  resilience:
+    retry:
+      initial_delay_seconds: 1.0
+      max_delay_seconds: 30.0
+      backoff_multiplier: 2.0
+      jitter_seconds: 0.25
+      log_every_attempts: 5
+
   scaling:
     defaults:
       executor: thread
