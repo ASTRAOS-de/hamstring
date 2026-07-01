@@ -288,7 +288,7 @@ pipeline:
         protocols:
           - dns
         interfaces:
-          - eth0
+          - wlp3s0
 
 environment:
   kafka_brokers:
