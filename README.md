@@ -26,9 +26,9 @@
     <a href="https://hamstring.readthedocs.io/en/latest/"><strong>Explore the docs »</strong></a>
     <br />
     <br />
-    <a href="https://github.com/hamstring-ndr/hamstring/issues/new?labels=bug&template=bug-report---.md">Report Bug</a>
+    <a href="https://github.com/astraos-de/hamstring/issues/new?labels=bug&template=bug-report---.md">Report Bug</a>
     ·
-    <a href="https://github.com/hamstring-ndr/hamstring/issues/new?labels=enhancement&template=feature-request---.md">Request Feature</a>
+    <a href="https://github.com/astraos-de/hamstring/issues/new?labels=enhancement&template=feature-request---.md">Request Feature</a>
   </p>
 </div>
 
@@ -37,11 +37,11 @@
 <tr>
   <td><b>Continuous Integration</b></td>
   <td>
-    <a href="https://github.com/hamstring-ndr/hamstring/actions/workflows/build_test_linux.yml">
-    <img src="https://img.shields.io/github/actions/workflow/status/hamstring-ndr/hamstring/build_test_linux.yml?branch=main&logo=linux&style=for-the-badge&label=linux" alt="Linux WorkFlows" />
+    <a href="https://github.com/astraos-de/hamstring/actions/workflows/build_test_linux.yml">
+    <img src="https://img.shields.io/github/actions/workflow/status/astraos-de/hamstring/build_test_linux.yml?branch=main&logo=linux&style=for-the-badge&label=linux" alt="Linux WorkFlows" />
     </a>
-    <a href="https://github.com/hamstring-ndr/hamstring/actions/workflows/build_test_macos.yml">
-    <img src="https://img.shields.io/github/actions/workflow/status/hamstring-ndr/hamstring/build_test_macos.yml?branch=main&logo=apple&style=for-the-badge&label=macos" alt="MacOS WorkFlows" />
+    <a href="https://github.com/astraos-de/hamstring/actions/workflows/build_test_macos.yml">
+    <img src="https://img.shields.io/github/actions/workflow/status/astraos-de/hamstring/build_test_macos.yml?branch=main&logo=apple&style=for-the-badge&label=macos" alt="MacOS WorkFlows" />
     </a>
   </td>
 </tr>
@@ -187,7 +187,7 @@ Have a look at the following pictures showing examples of how these dashboards m
 
 ### Inserting Data for Testing
 
-For testing purposes, you can ingest PCAPs or tap on network interfaces using the zeek-based sensor that is integrated into the docker-compose file. For more information on the sensor, please refer to [the documentation](https://github.com/Hamstring-NDR/hamstring-zeek).
+For testing purposes, you can ingest PCAPs or tap on network interfaces using the zeek-based sensor that is integrated into the docker-compose file. For more information on the sensor, please refer to [the documentation](https://github.com/astraos-de/hamstring-zeek).
 
 ### Training Your Own Models
 
@@ -256,8 +256,8 @@ Don't forget to give the project a star! Thanks again!
 
 ### Top contributors:
 
-<a href="https://github.com/hamstring-ndr/hamstring/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=hamstring-ndr/hamstring" alt="contrib.rocks image" />
+<a href="https://github.com/astraos-de/hamstring/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=astraos-de/hamstring" alt="contrib.rocks image" />
 </a>
 
 
@@ -271,26 +271,26 @@ Distributed under the EUPL License. See `LICENSE.txt` for more information.
 <!-- MARKDOWN LINKS & IMAGES -->
 <!-- https://www.markdownguide.org/basic-syntax/#reference-style-links -->
 
-[contributors-shield]: https://img.shields.io/github/contributors/hamstring-ndr/hamstring.svg?style=for-the-badge
+[contributors-shield]: https://img.shields.io/github/contributors/astraos-de/hamstring.svg?style=for-the-badge
 
-[contributors-url]: https://github.com/hamstring-ndr/hamstring/graphs/contributors
+[contributors-url]: https://github.com/astraos-de/hamstring/graphs/contributors
 
-[forks-shield]: https://img.shields.io/github/forks/hamstring-ndr/hamstring.svg?style=for-the-badge
+[forks-shield]: https://img.shields.io/github/forks/astraos-de/hamstring.svg?style=for-the-badge
 
-[forks-url]: https://github.com/hamstring-ndr/hamstring/network/members
+[forks-url]: https://github.com/astraos-de/hamstring/network/members
 
-[stars-shield]: https://img.shields.io/github/stars/hamstring-ndr/hamstring.svg?style=for-the-badge
+[stars-shield]: https://img.shields.io/github/stars/astraos-de/hamstring.svg?style=for-the-badge
 
-[stars-url]: https://github.com/hamstring-ndr/hamstring/stargazers
+[stars-url]: https://github.com/astraos-de/hamstring/stargazers
 
-[issues-shield]: https://img.shields.io/github/issues/hamstring-ndr/hamstring.svg?style=for-the-badge
+[issues-shield]: https://img.shields.io/github/issues/astraos-de/hamstring.svg?style=for-the-badge
 
-[issues-url]: https://github.com/hamstring-ndr/hamstring/issues
+[issues-url]: https://github.com/astraos-de/hamstring/issues
 
-[license-shield]: https://img.shields.io/github/license/hamstring-ndr/hamstring.svg?style=for-the-badge
+[license-shield]: https://img.shields.io/github/license/astraos-de/hamstring.svg?style=for-the-badge
 
-[license-url]: https://github.com/hamstring-ndr/hamstring/blob/master/LICENSE.txt
+[license-url]: https://github.com/astraos-de/hamstring/blob/master/LICENSE.txt
 
-[coverage-shield]: https://img.shields.io/codecov/c/github/hamstring-ndr/hamstring?style=for-the-badge
+[coverage-shield]: https://img.shields.io/codecov/c/github/astraos-de/hamstring?style=for-the-badge
 
-[coverage-url]: https://app.codecov.io/github/hamstring-ndr/hamstring
+[coverage-url]: https://app.codecov.io/github/astraos-de/hamstring

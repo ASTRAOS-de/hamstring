@@ -70,7 +70,7 @@ services:
         condition: service_healthy
       clickhouse-server:
         condition: service_healthy
-    profiles: ["dev"]
+    profiles: ["dev", "dev-gpu"]
 
   monitoring_agent:
     extends:
@@ -85,7 +85,7 @@ services:
         condition: service_healthy
       clickhouse-server:
         condition: service_healthy
-    profiles: ["prod"]
+    profiles: ["prod", "prod-gpu"]
 
   logserver-dev:
     extends:
@@ -98,7 +98,7 @@ services:
         condition: service_healthy
       kafka3:
         condition: service_healthy
-    profiles: ["dev"]
+    profiles: ["dev", "dev-gpu"]
 
   logserver:
     extends:
@@ -111,7 +111,7 @@ services:
         condition: service_healthy
       kafka3:
         condition: service_healthy
-    profiles: ["prod"]
+    profiles: ["prod", "prod-gpu"]
 
   logcollector-dev:
     extends:
@@ -124,7 +124,7 @@ services:
         condition: service_healthy
       kafka3:
         condition: service_healthy
-    profiles: ["dev"]
+    profiles: ["dev", "dev-gpu"]
 
 
   logcollector:
@@ -138,7 +138,7 @@ services:
         condition: service_healthy
       kafka3:
         condition: service_healthy
-    profiles: ["prod"]
+    profiles: ["prod", "prod-gpu"]
 
   prefilter-dev:
     extends:
@@ -151,7 +151,7 @@ services:
         condition: service_healthy
       kafka3:
         condition: service_healthy
-    profiles: ["dev"]
+    profiles: ["dev", "dev-gpu"]
 
   prefilter:
     extends:
@@ -164,7 +164,7 @@ services:
         condition: service_healthy
       kafka3:
         condition: service_healthy
-    profiles: ["prod"]
+    profiles: ["prod", "prod-gpu"]
 
   inspector-dev:
     extends:
@@ -177,7 +177,7 @@ services:
         condition: service_healthy
       kafka3:
         condition: service_healthy
-    profiles: ["dev"]
+    profiles: ["dev", "dev-gpu"]
 
   inspector:
     extends:
@@ -190,7 +190,7 @@ services:
         condition: service_healthy
       kafka3:
         condition: service_healthy
-    profiles: ["prod"]
+    profiles: ["prod", "prod-gpu"]
 
 
   detector-dev:
@@ -206,6 +206,19 @@ services:
         condition: service_healthy
     profiles: ["dev"]
 
+  detector-dev-gpu:
+    extends:
+      file: "docker-compose/dev/docker-compose.pipeline.yml"
+      service: detector-gpu
+    depends_on:
+      kafka1:
+        condition: service_healthy
+      kafka2:
+        condition: service_healthy
+      kafka3:
+        condition: service_healthy
+    profiles: ["dev-gpu"]
+
   detector:
     extends:
       file: "docker-compose/prod/docker-compose.pipeline.yml"
@@ -219,6 +232,19 @@ services:
         condition: service_healthy
     profiles: ["prod"]
 
+  detector-gpu:
+    extends:
+      file: "docker-compose/prod/docker-compose.pipeline.yml"
+      service: detector-gpu
+    depends_on:
+      kafka1:
+        condition: service_healthy
+      kafka2:
+        condition: service_healthy
+      kafka3:
+        condition: service_healthy
+    profiles: ["prod-gpu"]
+
   alerter-dev:
     extends:
       file: "docker-compose/dev/docker-compose.pipeline.yml"
@@ -230,7 +256,7 @@ services:
         condition: service_healthy
       kafka3:
         condition: service_healthy
-    profiles: ["dev"]
+    profiles: ["dev", "dev-gpu"]
 
   alerter:
     extends:
@@ -243,10 +269,10 @@ services:
         condition: service_healthy
       kafka3:
         condition: service_healthy
-    profiles: ["prod"]
+    profiles: ["prod", "prod-gpu"]
 
   zeek:
-    image: ghcr.io/hamstring-ndr/hamstring-zeek:2.0.0
+    image: ghcr.io/astraos-de/hamstring-zeek:2.0.1
     cap_add:
       - NET_ADMIN
     network_mode: host

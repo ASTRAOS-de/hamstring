@@ -10,7 +10,7 @@ from confluent_kafka import KafkaException, KafkaError
 from src.base.data_classes.batch import Batch
 from src.base.kafka_handler import ExactlyOnceKafkaConsumeHandler
 
-CONSUMER_GROUP_ID = "default_gid"
+CONSUMER_GROUP_ID = "default_gid.test_topic"
 
 
 class TestInit(unittest.TestCase):
@@ -47,6 +47,7 @@ class TestInit(unittest.TestCase):
             "enable.auto.commit": False,
             "auto.offset.reset": "earliest",
             "enable.partition.eof": True,
+            "max.poll.interval.ms": 1800000,
         }
 
         sut = ExactlyOnceKafkaConsumeHandler(topics="test_topic")
@@ -77,9 +78,12 @@ class TestInit(unittest.TestCase):
         "src.base.kafka_handler.KafkaConsumeHandler._all_topics_created",
         return_value=True,
     )
+    @patch("src.base.retry.time.sleep", return_value=None)
     @patch("src.base.kafka_handler.AdminClient")
     @patch("src.base.kafka_handler.Consumer")
-    def test_init_fail(self, mock_consumer, mock_admin_client, mock_all_topics_created):
+    def test_init_retries_until_subscribe_succeeds(
+        self, mock_consumer, mock_admin_client, mock_sleep, mock_all_topics_created
+    ):
         mock_consumer_instance = Mock()
         mock_consumer.return_value = mock_consumer_instance
 
@@ -89,18 +93,18 @@ class TestInit(unittest.TestCase):
             "enable.auto.commit": False,
             "auto.offset.reset": "earliest",
             "enable.partition.eof": True,
+            "max.poll.interval.ms": 1800000,
         }
 
-        with patch.object(
-            mock_consumer_instance, "subscribe", side_effect=KafkaException
-        ):
-            with self.assertRaises(KafkaException):
-                sut = ExactlyOnceKafkaConsumeHandler(topics="test_topic")
+        mock_consumer_instance.subscribe.side_effect = [KafkaException(), None]
 
-                self.assertEqual(mock_consumer_instance, sut.consumer)
+        sut = ExactlyOnceKafkaConsumeHandler(topics="test_topic")
 
-                mock_consumer.assert_called_once_with(expected_conf)
-                mock_consumer_instance.assign.assert_called_once()
+        self.assertEqual(mock_consumer_instance, sut.consumer)
+        self.assertEqual(2, mock_consumer.call_count)
+        mock_consumer.assert_any_call(expected_conf)
+        self.assertEqual(2, mock_consumer_instance.subscribe.call_count)
+        mock_sleep.assert_called()
 
 
 class TestConsume(unittest.TestCase):
@@ -162,7 +166,8 @@ class TestConsume(unittest.TestCase):
 
     def test_consumer_raises_other_error(self):
         other_error = Mock()
-        other_error.code.return_value = KafkaError._ALL_BROKERS_DOWN
+        other_error.retriable.return_value = False
+        other_error.code.return_value = 123456
 
         msg = Mock()
         msg.error.return_value = other_error
@@ -192,8 +197,12 @@ class TestConsume(unittest.TestCase):
         except StopIteration:
             pass
 
-        self.sut.consumer.commit.assert_called_once()
+        self.sut.consumer.commit.assert_not_called()
         self.assertEqual((key, value, topic), result)
+
+        self.sut.commit()
+
+        self.sut.consumer.commit.assert_called_once_with(msg)
 
     def test_consumer_raises_keyboard_interrupt(self):
         self.sut.consumer.poll.side_effect = [KeyboardInterrupt]
@@ -406,6 +415,36 @@ class TestConsumeAsObject(unittest.TestCase):
 
         self.assertEqual(result[0], key)
         self.assertIsInstance(result[1], Batch)
+
+    def test_consume_as_object_valid_data_with_nested_request_windows(self):
+        key = "valid_key"
+        batch_schema = marshmallow_dataclass.class_schema(Batch)()
+        value = batch_schema.dumps(
+            {
+                "batch_id": uuid.uuid4(),
+                "batch_tree_row_id": uuid.uuid4(),
+                "begin_timestamp": datetime.datetime.now(),
+                "end_timestamp": datetime.datetime.now(),
+                "data": [
+                    [
+                        {"domain_name": "one.example.org"},
+                        {"domain_name": "two.example.org"},
+                    ]
+                ],
+            }
+        )
+        topic = "test_topic"
+
+        with patch(
+            "src.base.kafka_handler.ExactlyOnceKafkaConsumeHandler.consume"
+        ) as mock_consume:
+            mock_consume.return_value = [key, value, topic]
+
+            result = self.sut.consume_as_object()
+
+        self.assertEqual(result[0], key)
+        self.assertIsInstance(result[1], Batch)
+        self.assertEqual("one.example.org", result[1].data[0][0]["domain_name"])
 
     def test_consume_as_object_invalid_data(self):
         key = "invalid_key"

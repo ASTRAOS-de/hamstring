@@ -38,10 +38,11 @@ class TestInit(unittest.TestCase):
 
         expected_conf = {
             "bootstrap.servers": "127.0.0.1:9999,127.0.0.2:9998,127.0.0.3:9997",
-            "group.id": "test_group_id",
+            "group.id": "test_group_id.test_topic",
             "enable.auto.commit": False,
             "auto.offset.reset": "earliest",
             "enable.partition.eof": True,
+            "max.poll.interval.ms": 1800000,
         }
 
         # Act
@@ -113,7 +114,8 @@ class TestConsume(unittest.TestCase):
 
     def test_consumer_raises_other_error(self):
         other_error = Mock()
-        other_error.code.return_value = KafkaError._ALL_BROKERS_DOWN
+        other_error.retriable.return_value = False
+        other_error.code.return_value = 123456
 
         msg = Mock()
         msg.error.return_value = other_error

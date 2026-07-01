@@ -1,6 +1,6 @@
 services:
   logserver:
-    image:  ghcr.io/hamstring-ndr/hamstring-logserver:v2.0.0
+    image:  ghcr.io/astraos-de/hamstring-logserver:v2.2.0-dev
     restart: "unless-stopped"
     networks:
       hamstring:
@@ -10,7 +10,7 @@ services:
     environment:
       - GROUP_ID=log_storage
   logcollector:
-    image:  ghcr.io/hamstring-ndr/hamstring-logcollector:v2.0.0
+    image:  ghcr.io/astraos-de/hamstring-logcollector:v2.2.0-dev
     restart: "unless-stopped"
     volumes:
       - ../../../config.yaml:/app/config.yaml
@@ -20,7 +20,7 @@ services:
       - GROUP_ID=log_collection
 
   prefilter:
-    image: ghcr.io/hamstring-ndr/hamstring-prefilter:v2.0.0
+    image: ghcr.io/astraos-de/hamstring-prefilter:v2.2.0-dev
     restart: "unless-stopped"
     volumes:
       - ../../../config.yaml:/app/config.yaml
@@ -33,7 +33,7 @@ services:
       - GROUP_ID=log_filtering
 
   inspector:
-    image:  ghcr.io/hamstring-ndr/hamstring-inspector:v2.0.0
+    image:  ghcr.io/astraos-de/hamstring-inspector:v2.2.0-dev
     restart: "unless-stopped"
     volumes:
       - ../../../config.yaml:/app/config.yaml
@@ -54,7 +54,7 @@ services:
       - NUMBER_OF_INSTANCES=1
 
   detector:
-    image:  ghcr.io/hamstring-ndr/hamstring-detector:v2.0.0
+    image:  ghcr.io/astraos-de/hamstring-detector:v2.2.0-dev
     restart: "unless-stopped"
     volumes:
       - ../../../config.yaml:/app/config.yaml
@@ -66,8 +66,29 @@ services:
     environment:
       - GROUP_ID=data_analysis
 
+  detector-gpu:
+    image:  ghcr.io/astraos-de/hamstring-detector:v2.2.0-dev
+    restart: "unless-stopped"
+    volumes:
+      - ../../../config.yaml:/app/config.yaml
+    networks:
+      hamstring:
+    deploy:
+      mode: "replicated"
+      replicas: 1
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    environment:
+      - GROUP_ID=data_analysis
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
   alerter:
-    image:  ghcr.io/hamstring-ndr/hamstring-alerter:v2.0.0
+    image:  ghcr.io/astraos-de/hamstring-alerter:v2.2.0-dev
     restart: "unless-stopped"
     volumes:
       - ../../../config.yaml:/app/config.yaml

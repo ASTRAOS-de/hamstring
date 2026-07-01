@@ -1,4 +1,6 @@
 import unittest
+import uuid
+from datetime import datetime
 from typing import Optional
 from unittest.mock import patch, Mock
 
@@ -72,6 +74,23 @@ class TestInit(unittest.TestCase):
         self.assertIsNone(sut.timer)
         self.assertIsNotNone(sut.lock)
         self.assertEqual({key: [] for key in sut.tables}, sut.batch)
+
+    @patch("src.base.retry.time.sleep", return_value=None)
+    def test_retries_until_clickhouse_is_available(self, mock_sleep):
+        client = Mock()
+        with patch(
+            "src.monitoring.clickhouse_batch_sender.clickhouse_connect"
+        ) as mock_clickhouse_connect:
+            mock_clickhouse_connect.get_client.side_effect = [
+                RuntimeError("clickhouse unavailable"),
+                client,
+            ]
+
+            sut = ClickHouseBatchSender()
+
+        self.assertEqual(client, sut._client)
+        self.assertEqual(2, mock_clickhouse_connect.get_client.call_count)
+        mock_sleep.assert_called()
 
 
 class TestDel(unittest.TestCase):
@@ -161,6 +180,31 @@ class TestAdd(unittest.TestCase):
         # Assert
         mock_insert.assert_called_once_with(test_table_name)
 
+    def test_batch_tree_parent_none_is_stored_as_empty_string(self):
+        # Arrange
+        test_data = {
+            "batch_row_id": "root",
+            "batch_id": uuid.UUID("5236b147-5b0d-44a8-981f-bd7da8c54733"),
+            "parent_batch_row_id": None,
+            "instance_name": "collector",
+            "stage": "log_collection.batch_handler",
+            "status": "completed",
+            "timestamp": datetime(2026, 6, 8, 14, 1, 24),
+        }
+
+        # Act
+        with patch(
+            "src.monitoring.clickhouse_batch_sender.ClickHouseBatchSender._start_timer"
+        ):
+            self.sut.add("batch_tree", test_data)
+
+        # Assert
+        self.assertEqual("", test_data["parent_batch_row_id"])
+        self.assertEqual(
+            "",
+            self.sut.batch["batch_tree"][0][2],
+        )
+
 
 class TestInsert(unittest.TestCase):
     def setUp(self):
@@ -186,7 +230,33 @@ class TestInsert(unittest.TestCase):
             ["one", "two", "three"],
             column_names=["col_1", "col_2"],
         )
-        self.assertEquals([], self.sut.batch[test_table_name])
+        self.assertEqual([], self.sut.batch[test_table_name])
+
+    @patch("src.base.retry.time.sleep", return_value=None)
+    def test_filled_batch_retries_without_dropping_rows(self, mock_sleep):
+        # Arrange
+        test_table_name = "test_table"
+        first_client = Mock()
+        second_client = Mock()
+        first_client.insert.side_effect = RuntimeError("clickhouse unavailable")
+
+        self.sut.tables = {
+            test_table_name: Table(test_table_name, {"col_1": str, "col_2": str})
+        }
+        self.sut.batch = {test_table_name: ["one", "two", "three"]}
+        self.sut._client = first_client
+
+        with patch.object(self.sut, "_connect_client", return_value=second_client):
+            self.sut.insert(test_table_name)
+
+        first_client.insert.assert_called_once()
+        second_client.insert.assert_called_once_with(
+            test_table_name,
+            ["one", "two", "three"],
+            column_names=["col_1", "col_2"],
+        )
+        self.assertEqual([], self.sut.batch[test_table_name])
+        mock_sleep.assert_called()
 
     def test_empty_batch(self):
         # Arrange
@@ -203,7 +273,7 @@ class TestInsert(unittest.TestCase):
 
         # Assert
         self.sut._client.insert.assert_not_called()
-        self.assertEquals([], self.sut.batch[test_table_name])
+        self.assertEqual([], self.sut.batch[test_table_name])
 
 
 class TestInsertAll(unittest.TestCase):

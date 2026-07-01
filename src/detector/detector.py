@@ -8,19 +8,31 @@ import tempfile
 import asyncio
 import numpy as np
 import requests
+import marshmallow_dataclass
 from numpy import median
 from abc import ABC, abstractmethod
 import importlib
+from typing import Any
 
 sys.path.append(os.getcwd())
 from src.base.clickhouse_kafka_sender import ClickHouseKafkaSender
+from src.base.data_classes.batch import Batch
 from src.base.utils import setup_config, generate_collisions_resistant_uuid
+from src.base.acceleration import (
+    apply_model_acceleration,
+    resolve_acceleration_config,
+)
 from src.base.kafka_handler import (
     ExactlyOnceKafkaConsumeHandler,
     ExactlyOnceKafkaProduceHandler,
     KafkaMessageFetchException,
 )
 from src.base.log_config import get_logger
+from src.base.execution import (
+    create_pipeline_executor,
+    run_thread_worker_pool,
+    start_pipeline_worker_replicas,
+)
 
 module_name = "data_analysis.detector"
 logger = get_logger(module_name)
@@ -31,15 +43,80 @@ config = setup_config()
 INSPECTORS = config["pipeline"]["data_inspection"]
 DETECTORS = config["pipeline"]["data_analysis"]
 
+PIPELINE_TOPIC_PREFIXES = config["environment"]["kafka_topics_prefix"]["pipeline"]
+INSPECTOR_TO_DETECTOR_TOPIC_PREFIX = PIPELINE_TOPIC_PREFIXES["inspector_to_detector"]
+DETECTOR_TO_ALERTER_TOPIC_PREFIX = PIPELINE_TOPIC_PREFIXES["detector_to_alerter"]
+DETECTOR_TO_DETECTOR_TOPIC_PREFIX = PIPELINE_TOPIC_PREFIXES.get(
+    "detector_to_detector", "pipeline-detector_to_detector"
+)
 
-CONSUME_TOPIC_PREFIX = config["environment"]["kafka_topics_prefix"]["pipeline"][
-    "inspector_to_detector"
-]
-PRODUCE_TOPIC_PREFIX = config["environment"]["kafka_topics_prefix"]["pipeline"][
-    "detector_to_alerter"
-]
+# Backwards-compatible aliases for tests and external imports.
+CONSUME_TOPIC_PREFIX = INSPECTOR_TO_DETECTOR_TOPIC_PREFIX
+PRODUCE_TOPIC_PREFIX = DETECTOR_TO_ALERTER_TOPIC_PREFIX
 
 PLUGIN_PATH = "src.detector.plugins"
+
+
+def _normalize_topic_suffixes(topic_suffixes) -> list[str]:
+    if topic_suffixes is None:
+        return []
+    if isinstance(topic_suffixes, str):
+        return [
+            suffix.strip() for suffix in topic_suffixes.split(",") if suffix.strip()
+        ]
+    if isinstance(topic_suffixes, (list, tuple, set)):
+        return [str(suffix).strip() for suffix in topic_suffixes if str(suffix).strip()]
+    return [str(topic_suffixes).strip()]
+
+
+def build_alerter_topics(detector_config: dict) -> list[str]:
+    if detector_config.get("send_to_alerter") is False:
+        return []
+
+    topic_suffixes = detector_config.get("produce_topics", "")
+    topic_suffixes = _normalize_topic_suffixes(topic_suffixes)
+    if not topic_suffixes:
+        topic_suffixes = ["generic"]
+
+    return [
+        f"{DETECTOR_TO_ALERTER_TOPIC_PREFIX}-{topic_suffix}"
+        for topic_suffix in topic_suffixes
+    ]
+
+
+def build_downstream_detector_topics(detector_config: dict) -> list[str]:
+    detector_names = []
+    for config_key in ("next_detectors", "produce_detector_topics"):
+        detector_names.extend(
+            _normalize_topic_suffixes(detector_config.get(config_key))
+        )
+
+    return [
+        f"{DETECTOR_TO_DETECTOR_TOPIC_PREFIX}-{detector_name}"
+        for detector_name in dict.fromkeys(detector_names)
+    ]
+
+
+def detector_consumes_from_detector(detector_config: dict) -> bool:
+    consume_from = str(detector_config.get("consume_from", "")).strip().lower()
+    if consume_from:
+        return consume_from == "detector"
+
+    detector_source_keys = (
+        "upstream_detector_name",
+        "source_detector_name",
+        "input_detector_name",
+    )
+    if any(detector_config.get(source_key) for source_key in detector_source_keys):
+        return True
+
+    return not detector_config.get("inspector_name")
+
+
+def build_detector_consume_topic(detector_config: dict) -> str:
+    if detector_consumes_from_detector(detector_config):
+        return f"{DETECTOR_TO_DETECTOR_TOPIC_PREFIX}-{detector_config['name']}"
+    return f"{INSPECTOR_TO_DETECTOR_TOPIC_PREFIX}-{detector_config['name']}"
 
 
 class WrongChecksum(Exception):  # pragma: no cover
@@ -61,7 +138,13 @@ class DetectorAbstractBase(ABC):  # pragma: no cover
     """
 
     @abstractmethod
-    def __init__(self, detector_config, consume_topic, produce_topics=None) -> None:
+    def __init__(
+        self,
+        detector_config,
+        consume_topic,
+        produce_topics=None,
+        downstream_detector_topics=None,
+    ) -> None:
         pass
 
     @abstractmethod
@@ -89,7 +172,13 @@ class DetectorBase(DetectorAbstractBase):
     that provide model-specific prediction logic.
     """
 
-    def __init__(self, detector_config, consume_topic, produce_topics=None) -> None:
+    def __init__(
+        self,
+        detector_config,
+        consume_topic,
+        produce_topics=None,
+        downstream_detector_topics=None,
+    ) -> None:
         """
         Initialize the detector with configuration and Kafka topic settings.
 
@@ -107,14 +196,34 @@ class DetectorBase(DetectorAbstractBase):
         self.model = self.model_name
         self.checksum = detector_config["checksum"]
         self.threshold = detector_config["threshold"]
+        self.use_scaler = (
+            detector_config["use_scaler"]
+            if "use_scaler" in detector_config.keys()
+            else False
+        )
+        self.acceleration = resolve_acceleration_config(
+            config["pipeline"],
+            detector_config,
+            component_name=f"{module_name}.{self.name}",
+            logger=logger,
+        )
 
         self.consume_topic = consume_topic
         if produce_topics is None:
-            self.produce_topics = [f"{PRODUCE_TOPIC_PREFIX}-generic"]
+            self.produce_topics = [f"{DETECTOR_TO_ALERTER_TOPIC_PREFIX}-generic"]
         elif isinstance(produce_topics, str):
-            self.produce_topics = [produce_topics]
+            self.produce_topics = _normalize_topic_suffixes(produce_topics)
         else:
             self.produce_topics = produce_topics
+
+        if downstream_detector_topics is None:
+            self.downstream_detector_topics = []
+        elif isinstance(downstream_detector_topics, str):
+            self.downstream_detector_topics = _normalize_topic_suffixes(
+                downstream_detector_topics
+            )
+        else:
+            self.downstream_detector_topics = downstream_detector_topics
         self.suspicious_batch_id = None
         self.key = None
         self.messages = []
@@ -247,6 +356,40 @@ class DetectorBase(DetectorAbstractBase):
 
         return h.hexdigest()
 
+    def get_model_download_url(self):
+        """
+        Generate the complete URL for downloading the Domainator detection model.
+
+        Constructs the URL using the base URL from configuration and appends the
+        specific model filename with checksum for verification.
+
+        Returns:
+            str: Fully qualified URL where the model can be downloaded.
+        """
+        self.model_base_url = (
+            self.model_base_url[:-1]
+            if self.model_base_url[-1] == "/"
+            else self.model_base_url
+        )
+        return f"{self.model_base_url}/files/?p=%2F{self.model_name}%2F{self.checksum}%2F{self.model_name}.pickle&dl=1"
+
+    def get_scaler_download_url(self):
+        """
+        Generate the complete URL for downloading the Domainator detection models scaler.
+
+        Constructs the URL using the base URL from configuration and appends the
+        specific model filename with checksum for verification.
+
+        Returns:
+            str: Fully qualified URL where the model can be downloaded.
+        """
+        self.model_base_url = (
+            self.model_base_url[:-1]
+            if self.model_base_url[-1] == "/"
+            else self.model_base_url
+        )
+        return f"{self.model_base_url}/files/?p=%2F{self.model_name}%2F{self.checksum}%2Fscaler.pickle&dl=1"
+
     def _get_model(self):
         """
         Download and validate the detection model.
@@ -268,7 +411,9 @@ class DetectorBase(DetectorAbstractBase):
             requests.HTTPError: If there's an error downloading the model.
         """
         logger.info(f"Get model: {self.model_name} with checksum {self.checksum}")
-        scaler_download_url = self.get_scaler_download_url()
+        scaler_download_url = (
+            self.get_scaler_download_url() if self.use_scaler else None
+        )
 
         if not os.path.isfile(self.model_path):
             model_download_url = self.get_model_download_url()
@@ -305,22 +450,22 @@ class DetectorBase(DetectorAbstractBase):
         with open(self.model_path, "rb") as input_file:
             clf = pickle.load(input_file)
 
+        clf = apply_model_acceleration(clf, self.acceleration, logger=logger)
+
         return clf, scaler
 
     def detect(self) -> None:
         """
         Process messages to detect malicious requests.
 
-        This method applies the detection model to each message in the current batch,
-        identifies potential threats based on the model's predictions, and collects
-        warnings for further processing.
-
-        The detection uses a threshold to determine if a prediction indicates
-        malicious activity, and only warnings exceeding this threshold are retained.
+        This method has to be overwritten in the child classes for detectors.
+        The implementation below is tried to be generic. If a detector needs a different approach (e.g. predict on more than one message, buffer messages, etc.)
+        then just overwrite the method and append to `self.warnings` a warning if a given messag is to be regarded malicious.
 
         Note:
-            This method relies on the implementation of ``predict``of the rspective subclass
+
         """
+        logger.info("general")
         logger.info("Start detecting malicious requests.")
         for message in self.messages:
             y_pred = self.predict(message)
@@ -333,8 +478,6 @@ class DetectorBase(DetectorAbstractBase):
                 warning = {
                     "request": message,
                     "probability": float(y_pred[0][1]),
-                    # TODO: what is the use of this? not even json serializabel ?
-                    # "model": self.model,
                     "name": self.name,
                     "sha256": self.checksum,
                 }
@@ -360,12 +503,14 @@ class DetectorBase(DetectorAbstractBase):
         The method updates multiple database tables to maintain the pipeline's
         state tracking and provides detailed information about detected threats.
         """
-        logger.info("Store alert.")
         row_id = generate_collisions_resistant_uuid()
+        downstream_messages = []
         if len(self.warnings) > 0:
+            logger.info("Begin warning computation...")
             overall_score = median(
                 [warning["probability"] for warning in self.warnings]
             )
+            downstream_messages = self._get_downstream_messages()
             alert = {
                 "overall_score": overall_score,
                 "result": self.warnings,
@@ -375,17 +520,21 @@ class DetectorBase(DetectorAbstractBase):
                 "detector_name": self.name,
             }
 
-            logger.info(f"Producing alert to Kafka: {alert}")
+            if self.produce_topics:
+                kafka_alert = self._build_kafka_alert(alert)
+                logger.debug(f"Producing compact alert to Kafka: {kafka_alert}")
 
-            if self.kafka_produce_handler is None:
-                self.kafka_produce_handler = ExactlyOnceKafkaProduceHandler()
+                if self.kafka_produce_handler is None:
+                    self.kafka_produce_handler = ExactlyOnceKafkaProduceHandler()
 
-            for topic in self.produce_topics:
-                self.kafka_produce_handler.produce(
-                    topic=topic,
-                    data=json.dumps(alert),
-                    key=self.key,
-                )
+                for topic in self.produce_topics:
+                    self.kafka_produce_handler.produce(
+                        topic=topic,
+                        data=json.dumps(kafka_alert),
+                        key=self.key,
+                    )
+            else:
+                logger.info("No alerter topics configured. Skipping alert output.")
 
             self.alerts.insert(
                 dict(
@@ -393,10 +542,8 @@ class DetectorBase(DetectorAbstractBase):
                     alert_timestamp=datetime.datetime.now(),
                     suspicious_batch_id=self.suspicious_batch_id,
                     overall_score=overall_score,
-                    domain_names=json.dumps(
-                        [warning["request"] for warning in self.warnings]
-                    ),
-                    result=json.dumps(self.warnings),
+                    domain_names=json.dumps(self._get_warning_requests()),
+                    result=json.dumps(self._build_persisted_warnings()),
                 )
             )
 
@@ -413,11 +560,7 @@ class DetectorBase(DetectorAbstractBase):
                 )
             )
 
-            logline_ids = set()
-            for message in self.messages:
-                logline_ids.add(message["logline_id"])
-
-            for logline_id in logline_ids:
+            for logline_id in self._get_message_logline_ids():
                 self.logline_timestamps.insert(
                     dict(
                         logline_id=logline_id,
@@ -443,11 +586,7 @@ class DetectorBase(DetectorAbstractBase):
                 )
             )
 
-            logline_ids = set()
-            for message in self.messages:
-                logline_ids.add(message["logline_id"])
-
-            for logline_id in logline_ids:
+            for logline_id in self._get_message_logline_ids():
                 self.logline_timestamps.insert(
                     dict(
                         logline_id=logline_id,
@@ -470,6 +609,9 @@ class DetectorBase(DetectorAbstractBase):
             )
         )
 
+        if downstream_messages:
+            self._send_detector_batch(row_id, downstream_messages)
+
         self.fill_levels.insert(
             dict(
                 timestamp=datetime.datetime.now(),
@@ -478,6 +620,208 @@ class DetectorBase(DetectorAbstractBase):
                 entry_count=0,
             )
         )
+
+    def _send_detector_batch(self, parent_row_id, messages) -> None:
+        if not self.downstream_detector_topics:
+            return
+
+        logger.debug(
+            f"Producing detector output to Kafka topics: {self.downstream_detector_topics}"
+        )
+        data_to_send = {
+            "batch_tree_row_id": parent_row_id,
+            "batch_id": self.suspicious_batch_id,
+            "begin_timestamp": self.begin_timestamp,
+            "end_timestamp": self.end_timestamp,
+            "data": messages,
+        }
+        batch_schema = marshmallow_dataclass.class_schema(Batch)()
+
+        if self.kafka_produce_handler is None:
+            self.kafka_produce_handler = ExactlyOnceKafkaProduceHandler()
+
+        for topic in self.downstream_detector_topics:
+            self.kafka_produce_handler.produce(
+                topic=topic,
+                data=batch_schema.dumps(data_to_send),
+                key=self.key,
+            )
+
+    def _build_persisted_warnings(self) -> list[dict]:
+        return [
+            self._normalize_warning_for_storage(warning) for warning in self.warnings
+        ]
+
+    def _normalize_warning_for_storage(self, warning: dict) -> dict:
+        raw_detector_output = {
+            key: value for key, value in warning.items() if key != "request"
+        }
+        request = warning.get("request")
+        request_messages = (
+            self._flatten_messages(request) if request is not None else []
+        )
+        detector_name = warning.get("detector_name") or warning.get("name") or self.name
+        score = warning.get("score", warning.get("probability"))
+        domains = self._extract_warning_domains(warning)
+        logline_ids = self._extract_message_values(request_messages, "logline_id")
+        server_message_ids = self._extract_message_values(
+            request_messages, "server_message_id"
+        )
+
+        normalized_warning = {
+            "detector_name": detector_name,
+            "name": detector_name,
+            "score": score,
+            "probability": score,
+            "predicted_class": warning.get("predicted_class", ""),
+            "attributes": warning.get("attributes", []),
+            "domains": domains,
+            "domain_names": domains,
+            "logline_ids": logline_ids,
+            "server_message_ids": server_message_ids,
+            "request_count": len(request_messages),
+            "raw_detector_output": raw_detector_output,
+            "request": request,
+        }
+
+        for optional_field in ("model", "sha256", "class_probabilities"):
+            if optional_field in warning:
+                normalized_warning[optional_field] = warning[optional_field]
+
+        return normalized_warning
+
+    @staticmethod
+    def _extract_message_values(messages: list, field_name: str) -> list[str]:
+        return sorted(
+            {
+                str(message[field_name])
+                for message in messages
+                if isinstance(message, dict) and field_name in message
+            }
+        )
+
+    def _get_warning_requests(self) -> list[str]:
+        domains = []
+        for warning in self.warnings:
+            domains.extend(self._extract_warning_domains(warning))
+        return sorted(set(domains))
+
+    def _extract_warning_domains(self, warning) -> list[str]:
+        warnings = self.warnings
+
+        if warning is not None:
+            warnings = warning
+
+        if isinstance(warnings, str):
+            try:
+                warnings = json.loads(warnings)
+            except json.JSONDecodeError:
+                return [warnings]
+
+        domains: list[str] = []
+        stack: list[Any] = [warnings]
+
+        while stack:
+            item = stack.pop()
+
+            if isinstance(item, str):
+                try:
+                    stack.append(json.loads(item))
+                except json.JSONDecodeError:
+                    domains.append(item)
+
+            elif isinstance(item, list):
+                stack.extend(reversed(item))
+
+            elif isinstance(item, dict):
+                # If request/request_domain contains nested objects, descend into it
+                if "request" in item:
+                    stack.append(item["request"])
+                    continue
+
+                if "request_domain" in item:
+                    stack.append(item["request_domain"])
+                    continue
+
+                # Actual DNS warning object
+                if "domain_name" in item:
+                    domains.append(item["domain_name"])
+
+                for field_name in ("domains", "domain_names"):
+                    field_value = item.get(field_name)
+                    if isinstance(field_value, list):
+                        domains.extend(
+                            domain for domain in field_value if isinstance(domain, str)
+                        )
+
+        return sorted(set(domains))
+
+    def _build_kafka_alert(self, alert: dict) -> dict:
+        compact_alert = dict(alert)
+        compact_alert["result"] = [
+            self._compact_warning_for_kafka(warning)
+            for warning in alert.get("result", [])
+        ]
+        return compact_alert
+
+    def _compact_warning_for_kafka(self, warning: dict) -> dict:
+        compact_warning = {
+            key: value for key, value in warning.items() if key != "request"
+        }
+        request = warning.get("request")
+        if request is None:
+            return compact_warning
+
+        request_messages = self._flatten_messages(request)
+        compact_warning["request_count"] = len(request_messages)
+        compact_warning["domain_names"] = sorted(
+            {
+                message["domain_name"]
+                for message in request_messages
+                if isinstance(message, dict) and "domain_name" in message
+            }
+        )[:50]
+        compact_warning["logline_ids"] = sorted(
+            {
+                message["logline_id"]
+                for message in request_messages
+                if isinstance(message, dict) and "logline_id" in message
+            }
+        )[:100]
+        compact_warning["server_message_ids"] = sorted(
+            {
+                message["server_message_id"]
+                for message in request_messages
+                if isinstance(message, dict) and "server_message_id" in message
+            }
+        )[:100]
+        return compact_warning
+
+    def _flatten_messages(self, messages) -> list:
+        flattened_messages = []
+        pending_messages = [messages]
+        while pending_messages:
+            message = pending_messages.pop()
+            if isinstance(message, list):
+                pending_messages.extend(message)
+            else:
+                flattened_messages.append(message)
+        return flattened_messages
+
+    def _get_message_logline_ids(self) -> set:
+        return {
+            message["logline_id"]
+            for message in self._flatten_messages(self.messages)
+            if isinstance(message, dict) and "logline_id" in message
+        }
+
+    def _get_downstream_messages(self) -> list:
+        messages = [
+            warning["request"] for warning in self.warnings if "request" in warning
+        ]
+        if messages:
+            return messages
+        return self.messages
 
     # TODO: test bootstrap!
     def bootstrap_detector_instance(self):
@@ -504,6 +848,7 @@ class DetectorBase(DetectorAbstractBase):
                 self.detect()
                 logger.debug("Send warnings")
                 self.send_warning()
+                self.kafka_consume_handler.commit()
             except KafkaMessageFetchException as e:  # pragma: no cover
                 logger.debug(e)
             except IOError as e:
@@ -525,7 +870,59 @@ class DetectorBase(DetectorAbstractBase):
         allowing it to operate concurrently with other components in the system.
         """
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, self.bootstrap_detector_instance)
+        executor = create_pipeline_executor(config, module_name, self.name)
+        try:
+            await loop.run_in_executor(executor, self.bootstrap_detector_instance)
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
+
+
+def build_detector_worker(
+    detector_config,
+    consume_topic,
+    produce_topics,
+    downstream_detector_topics,
+    worker_id=None,
+):
+    class_name = detector_config["detector_class_name"]
+    plugin_module_name = f"{PLUGIN_PATH}.{detector_config['detector_module_name']}"
+    plugin_module = importlib.import_module(plugin_module_name)
+    detector_class = getattr(plugin_module, class_name)
+    worker = detector_class(
+        detector_config=detector_config,
+        consume_topic=consume_topic,
+        produce_topics=produce_topics,
+        downstream_detector_topics=downstream_detector_topics,
+    )
+    worker.worker_id = worker_id
+    return worker
+
+
+def run_detector_worker_process(
+    process_index,
+    threads_per_process,
+    detector_config,
+    consume_topic,
+    produce_topics,
+    downstream_detector_topics,
+):
+    def worker_factory(worker_id):
+        return build_detector_worker(
+            detector_config=detector_config,
+            consume_topic=consume_topic,
+            produce_topics=produce_topics,
+            downstream_detector_topics=downstream_detector_topics,
+            worker_id=worker_id,
+        )
+
+    run_thread_worker_pool(
+        worker_factory=worker_factory,
+        target_name="bootstrap_detector_instance",
+        module_name=module_name,
+        instance_name=detector_config["name"],
+        process_index=process_index,
+        threads_per_process=threads_per_process,
+    )
 
 
 async def main():  # pragma: no cover
@@ -543,26 +940,50 @@ async def main():  # pragma: no cover
 
     tasks = []
     for detector_config in DETECTORS:
-        consume_topic = f"{CONSUME_TOPIC_PREFIX}-{detector_config['name']}"
-        produce_topics_str = detector_config.get("produce_topics", "")
-        if produce_topics_str:
-            produce_topics = [
-                f"{PRODUCE_TOPIC_PREFIX}-{t.strip()}"
-                for t in produce_topics_str.split(",")
-            ]
-        else:
-            produce_topics = [f"{PRODUCE_TOPIC_PREFIX}-generic"]
+        consume_topic = build_detector_consume_topic(detector_config)
+        produce_topics = build_alerter_topics(detector_config)
+        downstream_detector_topics = build_downstream_detector_topics(detector_config)
+        logger.info(
+            "Detector %s configured with consume topic %s, alerter topics %s and downstream detector topics %s",
+            detector_config["name"],
+            consume_topic,
+            produce_topics,
+            downstream_detector_topics,
+        )
 
-        class_name = detector_config["detector_class_name"]
-        module_name = f"{PLUGIN_PATH}.{detector_config['detector_module_name']}"
-        module = importlib.import_module(module_name)
-        DetectorClass = getattr(module, class_name)
-        detector = DetectorClass(
+        def worker_factory(
+            worker_id,
             detector_config=detector_config,
             consume_topic=consume_topic,
             produce_topics=produce_topics,
+            downstream_detector_topics=downstream_detector_topics,
+        ):
+            return build_detector_worker(
+                detector_config=detector_config,
+                consume_topic=consume_topic,
+                produce_topics=produce_topics,
+                downstream_detector_topics=downstream_detector_topics,
+                worker_id=worker_id,
+            )
+
+        tasks.append(
+            asyncio.create_task(
+                start_pipeline_worker_replicas(
+                    config=config,
+                    module_name=module_name,
+                    instance_name=detector_config["name"],
+                    worker_factory=worker_factory,
+                    target_name="bootstrap_detector_instance",
+                    process_entrypoint=run_detector_worker_process,
+                    process_args=(
+                        detector_config,
+                        consume_topic,
+                        produce_topics,
+                        downstream_detector_topics,
+                    ),
+                )
+            )
         )
-        tasks.append(asyncio.create_task(detector.start()))
     await asyncio.gather(*tasks)
 
 

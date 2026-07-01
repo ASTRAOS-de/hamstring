@@ -1,0 +1,4 @@
+Train
+=====
+
+.. automodule:: src.train

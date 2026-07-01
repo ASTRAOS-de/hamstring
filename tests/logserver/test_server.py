@@ -48,6 +48,7 @@ class TestStart(unittest.IsolatedAsyncioTestCase):
             consume_topic="consume-topic", produce_topics=["topic1", "topic2"]
         )
 
+    @patch("src.logserver.server.create_pipeline_executor")
     @patch("src.logserver.server.LogServer.fetch_from_kafka")
     @patch("src.logserver.server.asyncio.get_running_loop")
     @patch("src.logserver.server.ClickHouseKafkaSender")
@@ -56,7 +57,10 @@ class TestStart(unittest.IsolatedAsyncioTestCase):
         mock_clickhouse,
         mock_get_running_loop,
         mock_fetch_from_kafka,
+        mock_create_pipeline_executor,
     ):
+        mock_executor = MagicMock()
+        mock_create_pipeline_executor.return_value = mock_executor
         mock_loop = MagicMock()
         mock_loop.run_in_executor = AsyncMock(return_value=None)
         mock_get_running_loop.return_value = mock_loop
@@ -66,8 +70,9 @@ class TestStart(unittest.IsolatedAsyncioTestCase):
 
         # Assert
         mock_loop.run_in_executor.assert_awaited_once_with(
-            None, self.sut.fetch_from_kafka
+            mock_executor, self.sut.fetch_from_kafka
         )
+        mock_executor.shutdown.assert_called_once_with(wait=False, cancel_futures=True)
 
 
 class TestSend(unittest.TestCase):
@@ -89,13 +94,16 @@ class TestSend(unittest.TestCase):
         message = "test_message"
         sut = LogServer(consume_topic="consume_topic1", produce_topics=["test_topic"])
 
+        message_id = uuid.UUID("bd72ccb4-0ef2-4100-aa22-e787122d6875")
+
         # Act
-        sut.send(uuid.uuid4(), message)
+        sut.send(message_id, message)
 
         # Assert
         mock_kafka_produce_handler_instance.produce.assert_called_once_with(
             topic="test_topic",
             data=message,
+            key=str(message_id),
         )
 
 
@@ -149,6 +157,7 @@ class TestFetchFromKafka(unittest.IsolatedAsyncioTestCase):
         mock_send.assert_called_once_with(
             UUID("bd72ccb4-0ef2-4100-aa22-e787122d6875"), "value1"
         )
+        mock_consume_handler.commit.assert_called_once()
 
 
 # class TestFetchFromFile(unittest.IsolatedAsyncioTestCase):
@@ -201,7 +210,9 @@ class TestFetchFromKafka(unittest.IsolatedAsyncioTestCase):
 
 class TestMain(unittest.IsolatedAsyncioTestCase):
     @patch("src.logserver.server.logger")
-    @patch("src.logserver.server.LogServer")
+    @patch(
+        "src.logserver.server.start_pipeline_worker_replicas", new_callable=AsyncMock
+    )
     @patch("asyncio.create_task")
     @patch("asyncio.run")
     @patch("src.logserver.server.SENSOR_PROTOCOLS", ["dns"])
@@ -212,35 +223,39 @@ class TestMain(unittest.IsolatedAsyncioTestCase):
         [{"name": "test-collector", "protocol_base": "dns"}],
     )
     async def test_main(
-        self, mock_asyncio_run, mock_asyncio_create_task, mock_instance, mock_logger
+        self,
+        mock_asyncio_run,
+        mock_asyncio_create_task,
+        mock_start_workers,
+        mock_logger,
     ):
         # Arrange
-        mock_instance_obj = MagicMock()
-        mock_instance.return_value = mock_instance_obj
-        mock_instance_obj.start = AsyncMock()
         mock_asyncio_create_task.side_effect = lambda coro: coro
 
         # Act
         await main()
 
         # Assert
-        mock_instance_obj.start.assert_called_once()
+        mock_start_workers.assert_awaited_once()
         args, kwargs = mock_asyncio_create_task.call_args_list[0]
         expected_call = args[0]
         mock_asyncio_create_task.assert_called_once_with(expected_call)
 
     @patch("src.logserver.server.SENSOR_PROTOCOLS", ["dns", "http"])
     @patch("src.logserver.server.logger")
-    @patch("src.logserver.server.LogServer")
+    @patch(
+        "src.logserver.server.start_pipeline_worker_replicas", new_callable=AsyncMock
+    )
     @patch("asyncio.create_task")
     @patch("asyncio.run")
     async def test_main_multiple_protocols(
-        self, mock_asyncio_run, mock_asyncio_create_task, mock_instance, mock_logger
+        self,
+        mock_asyncio_run,
+        mock_asyncio_create_task,
+        mock_start_workers,
+        mock_logger,
     ):
         # Arrange
-        mock_instance_obj = MagicMock()
-        mock_instance.return_value = mock_instance_obj
-        mock_instance_obj.start = AsyncMock()
         mock_asyncio_create_task.side_effect = lambda coro: coro
 
         mock_asyncio_run.side_effect = RuntimeError("simulated failure")
@@ -251,6 +266,7 @@ class TestMain(unittest.IsolatedAsyncioTestCase):
         args, kwargs = mock_asyncio_create_task.call_args_list[0]
         expected_call = args[0]
         assert mock_asyncio_create_task.call_count == 2
+        assert mock_start_workers.await_count == 2
 
 
 if __name__ == "__main__":

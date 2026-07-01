@@ -35,6 +35,30 @@ class ServerLogsTimestamps:
 
 
 @dataclass
+class ServerLogToLogline:
+    message_id: uuid.UUID = field(
+        metadata={"marshmallow_field": marshmallow.fields.UUID()}
+    )
+    logline_id: uuid.UUID = field(
+        metadata={"marshmallow_field": marshmallow.fields.UUID()}
+    )
+
+
+@dataclass
+class ServerLogTerminalEvents:
+    message_id: uuid.UUID = field(
+        metadata={"marshmallow_field": marshmallow.fields.UUID()}
+    )
+    stage: str = field(metadata={"marshmallow_field": marshmallow.fields.String()})
+    status: str = field(metadata={"marshmallow_field": marshmallow.fields.String()})
+    timestamp: datetime.datetime = field(
+        metadata={
+            "marshmallow_field": marshmallow.fields.DateTime("%Y-%m-%d %H:%M:%S.%f")
+        }
+    )
+
+
+@dataclass
 class FailedLoglines:
     message_text: str = field(
         metadata={"marshmallow_field": marshmallow.fields.String()}
@@ -215,6 +239,8 @@ class FillLevels:
 TABLE_NAME_TO_TYPE = {
     "server_logs": ServerLogs,
     "server_logs_timestamps": ServerLogsTimestamps,
+    "server_log_to_logline": ServerLogToLogline,
+    "server_log_terminal_events": ServerLogTerminalEvents,
     "failed_loglines": FailedLoglines,
     "logline_to_batches": LoglineToBatches,
     "loglines": Loglines,

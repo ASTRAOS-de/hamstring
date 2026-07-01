@@ -16,6 +16,11 @@ from src.base.kafka_handler import (
     KafkaMessageFetchException,
 )
 from src.base.log_config import get_logger
+from src.base.execution import (
+    create_pipeline_executor,
+    run_thread_worker_pool,
+    start_pipeline_worker_replicas,
+)
 from src.base.utils import (
     setup_config,
     get_zeek_sensor_topic_base_names,
@@ -305,6 +310,7 @@ class Prefilter:
             self.get_and_fill_data()
             self.check_data_relevance_using_rules()
             self.send_filtered_data()
+            self.kafka_consume_handler.commit()
 
     async def start(self):  # pragma: no cover
         """Starts the ``Prefilter`` processing loop.
@@ -323,9 +329,61 @@ class Prefilter:
             "Prefilter started:\n"
             f"    ⤷  receiving on Kafka topic '{self.consume_topic}'"
         )
-        await loop.run_in_executor(None, self.bootstrap_prefiltering_process)
+        executor = create_pipeline_executor(config, module_name, self.name)
+        try:
+            await loop.run_in_executor(executor, self.bootstrap_prefiltering_process)
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
         logger.info("Closing down Prefilter...")
         self.clear_data()
+
+
+def build_prefilter_worker(
+    validation_config,
+    consume_topic,
+    produce_topics,
+    relevance_function_name,
+    prefilter_name,
+    worker_id=None,
+):
+    worker = Prefilter(
+        validation_config=validation_config,
+        consume_topic=consume_topic,
+        produce_topics=produce_topics,
+        relevance_function_name=relevance_function_name,
+    )
+    worker.name = prefilter_name
+    worker.worker_id = worker_id
+    return worker
+
+
+def run_prefilter_worker_process(
+    process_index,
+    threads_per_process,
+    validation_config,
+    consume_topic,
+    produce_topics,
+    relevance_function_name,
+    prefilter_name,
+):
+    def worker_factory(worker_id):
+        return build_prefilter_worker(
+            validation_config=validation_config,
+            consume_topic=consume_topic,
+            produce_topics=produce_topics,
+            relevance_function_name=relevance_function_name,
+            prefilter_name=prefilter_name,
+            worker_id=worker_id,
+        )
+
+    run_thread_worker_pool(
+        worker_factory=worker_factory,
+        target_name="bootstrap_prefiltering_process",
+        module_name=module_name,
+        instance_name=prefilter_name,
+        process_index=process_index,
+        threads_per_process=threads_per_process,
+    )
 
 
 async def main() -> None:
@@ -356,14 +414,43 @@ async def main() -> None:
             for inspector in INSPECTORS
             if prefilter["name"] == inspector["prefilter_name"]
         ]
-        prefilter_instance = Prefilter(
+
+        def worker_factory(
+            worker_id,
             validation_config=validation_config,
             consume_topic=consume_topic,
             produce_topics=produce_topics,
             relevance_function_name=relevance_function_name,
+            prefilter_name=prefilter["name"],
+        ):
+            return build_prefilter_worker(
+                validation_config=validation_config,
+                consume_topic=consume_topic,
+                produce_topics=produce_topics,
+                relevance_function_name=relevance_function_name,
+                prefilter_name=prefilter_name,
+                worker_id=worker_id,
+            )
+
+        tasks.append(
+            asyncio.create_task(
+                start_pipeline_worker_replicas(
+                    config=config,
+                    module_name=module_name,
+                    instance_name=prefilter["name"],
+                    worker_factory=worker_factory,
+                    target_name="bootstrap_prefiltering_process",
+                    process_entrypoint=run_prefilter_worker_process,
+                    process_args=(
+                        validation_config,
+                        consume_topic,
+                        produce_topics,
+                        relevance_function_name,
+                        prefilter["name"],
+                    ),
+                )
+            )
         )
-        prefilter_instance.name = prefilter["name"]
-        tasks.append(asyncio.create_task(prefilter_instance.start()))
     await asyncio.gather(*tasks)
 
 

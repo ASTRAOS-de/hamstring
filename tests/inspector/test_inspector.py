@@ -643,24 +643,30 @@ class TestMainFunction(unittest.IsolatedAsyncioTestCase):
         ]
 
     @patch("src.inspector.inspector.logger")
-    @patch("src.inspector.plugins.no_inspector.NoInspector")
+    @patch(
+        "src.inspector.inspector.start_pipeline_worker_replicas",
+        new_callable=AsyncMock,
+    )
     @patch("asyncio.create_task")
     @patch("asyncio.run")
     async def test_main_succesful_start(
-        self, mock_asyncio_run, mock_asyncio_create_task, mock_inspector, mock_logger
+        self,
+        mock_asyncio_run,
+        mock_asyncio_create_task,
+        mock_start_workers,
+        mock_logger,
     ):
         # Arrange
-        mock_inspector_instance = MagicMock()
-        mock_inspector_instance.start = AsyncMock()
-        mock_inspector.return_value = mock_inspector_instance
         mock_asyncio_create_task.side_effect = lambda coro: coro
 
         # Act
-        with patch("src.inspector.inspector.INSPECTORS", self.inspectors):
+        with patch("src.inspector.inspector.INSPECTORS", self.inspectors), patch(
+            "src.inspector.inspector.config", {}, create=True
+        ):
             await main()
 
         # Assert
-        mock_inspector_instance.start.assert_called_once()
+        mock_start_workers.assert_awaited_once()
 
 
 if __name__ == "__main__":
