@@ -53,6 +53,10 @@
 
 ## Getting Started
 
+### Requirements
+
+HAMSTRING currently supports Python 3.12 through 3.14.
+
 #### Run **HAMSTRING** using Docker Compose:
 ```sh
 HOST_IP=127.0.0.1 docker compose -f docker/docker-compose.yml --profile prod up
