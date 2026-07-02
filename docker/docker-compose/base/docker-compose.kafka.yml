@@ -1,133 +1,90 @@
-services:
-  zookeeper:
-    image: confluentinc/cp-zookeeper:7.9.3
-    container_name: zookeeper
-    restart: "unless-stopped"
-    networks:
-      - hamstring
-    environment:
-      ZOOKEEPER_CLIENT_PORT: 2181
-      ZOOKEEPER_TICK_TIME: 2000
-      ZOOKEEPER_SERVER_ID: 1
-    volumes:
-      - zk-data:/var/lib/zookeeper/data
-      - zk-txn-logs:/var/lib/zookeeper/log
-    healthcheck:
-      test: ["CMD-SHELL", "curl -s localhost:8080/commands | grep ruok"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
+x-kafka-broker-env: &kafka-broker-env
+  CLUSTER_ID: "${KAFKA_CLUSTER_ID:-MkU3OEVBNTcwNTJENDM2Qk}"
+  KAFKA_PROCESS_ROLES: broker,controller
+  KAFKA_CONTROLLER_QUORUM_VOTERS: "${KAFKA_CONTROLLER_QUORUM_VOTERS:-1@kafka1:29093,2@kafka2:29093,3@kafka3:29093}"
+  KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+  KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT,CONTROLLER:PLAINTEXT
+  KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
+  KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+  KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
+  KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
+  KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+  KAFKA_LOG_RETENTION_HOURS: 4
+  KAFKA_LOG_RETENTION_BYTES: 10737418240
+  KAFKA_LOG_SEGMENT_BYTES: 1073741824
+  KAFKA_LOG_CLEANUP_POLICY: delete
 
+services:
   kafka1:
-    image: confluentinc/cp-kafka:7.9.3
+    image: "${KAFKA_IMAGE:-confluentinc/cp-kafka:8.2.2}"
     container_name: kafka1
     restart: "unless-stopped"
     networks:
       - hamstring
     ports:
       - "8097:8097"
-    depends_on:
-      zookeeper:
-        condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost 19092"]
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:19092 >/dev/null 2>&1"]
       interval: 30s
       timeout: 10s
       retries: 10
     environment:
-      KAFKA_BROKER_ID: 1
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka1:19092,EXTERNAL://${HOST_IP}:8097
-      KAFKA_LISTENERS: INTERNAL://0.0.0.0:19092,EXTERNAL://0.0.0.0:8097
-      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
-      KAFKA_AUTHORIZER_CLASS_NAME: kafka.security.authorizer.AclAuthorizer
-      KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: "true"
-      KAFKA_LOG_RETENTION_HOURS: 4
-      KAFKA_LOG_RETENTION_BYTES: 10737418240
-      KAFKA_LOG_SEGMENT_BYTES: 1073741824
-      KAFKA_LOG_CLEANUP_POLICY: delete
+      <<: *kafka-broker-env
+      KAFKA_NODE_ID: 1
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka1:19092,EXTERNAL://${HOST_IP:-localhost}:8097
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:19092,EXTERNAL://0.0.0.0:8097,CONTROLLER://0.0.0.0:29093
     volumes:
-      - kafka-data1:/var/lib/kafka/data
+      - kafka-broker-data1:/var/lib/kafka/data
 
   kafka2:
-    image: confluentinc/cp-kafka:7.9.3
+    image: "${KAFKA_IMAGE:-confluentinc/cp-kafka:8.2.2}"
     container_name: kafka2
     restart: "unless-stopped"
     networks:
       - hamstring
     ports:
       - "8098:8098"
-    depends_on:
-      zookeeper:
-        condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost 19093"]
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:19093 >/dev/null 2>&1"]
       interval: 30s
       timeout: 10s
       retries: 10
     environment:
-      KAFKA_BROKER_ID: 2
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka2:19093,EXTERNAL://${HOST_IP}:8098
-      KAFKA_LISTENERS: INTERNAL://0.0.0.0:19093,EXTERNAL://0.0.0.0:8098
-      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      <<: *kafka-broker-env
+      KAFKA_NODE_ID: 2
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka2:19093,EXTERNAL://${HOST_IP:-localhost}:8098
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:19093,EXTERNAL://0.0.0.0:8098,CONTROLLER://0.0.0.0:29093
       KAFKA_LOG4J_LOGGERS: "kafka.controller=INFO,kafka.producer.async.DefaultEventHandler=INFO,state.change.logger=INFO"
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
-      KAFKA_AUTHORIZER_CLASS_NAME: kafka.security.authorizer.AclAuthorizer
-      KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: "true"
-      KAFKA_LOG_RETENTION_HOURS: 4
-      KAFKA_LOG_RETENTION_BYTES: 10737418240
-      KAFKA_LOG_SEGMENT_BYTES: 1073741824
-      KAFKA_LOG_CLEANUP_POLICY: delete
     volumes:
-      - kafka-data2:/var/lib/kafka/data
+      - kafka-broker-data2:/var/lib/kafka/data
 
   kafka3:
-    image: confluentinc/cp-kafka:7.9.3
+    image: "${KAFKA_IMAGE:-confluentinc/cp-kafka:8.2.2}"
     container_name: kafka3
     restart: "unless-stopped"
     networks:
       - hamstring
     ports:
       - "8099:8099"
-    depends_on:
-      zookeeper:
-        condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "nc -z localhost 19094"]
+      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:19094 >/dev/null 2>&1"]
       interval: 30s
       timeout: 10s
       retries: 10
     environment:
-      KAFKA_BROKER_ID: 3
-      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: INTERNAL:PLAINTEXT,EXTERNAL:PLAINTEXT
-      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka3:19094,EXTERNAL://${HOST_IP}:8099
-      KAFKA_LISTENERS: INTERNAL://0.0.0.0:19094,EXTERNAL://0.0.0.0:8099
-      KAFKA_INTER_BROKER_LISTENER_NAME: INTERNAL
-      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      <<: *kafka-broker-env
+      KAFKA_NODE_ID: 3
+      KAFKA_ADVERTISED_LISTENERS: INTERNAL://kafka3:19094,EXTERNAL://${HOST_IP:-localhost}:8099
+      KAFKA_LISTENERS: INTERNAL://0.0.0.0:19094,EXTERNAL://0.0.0.0:8099,CONTROLLER://0.0.0.0:29093
       KAFKA_LOG4J_LOGGERS: "kafka.controller=INFO,kafka.producer.async.DefaultEventHandler=INFO,state.change.logger=INFO"
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
-      KAFKA_AUTHORIZER_CLASS_NAME: kafka.security.authorizer.AclAuthorizer
-      KAFKA_ALLOW_EVERYONE_IF_NO_ACL_FOUND: "true"
-      KAFKA_LOG_RETENTION_HOURS: 4
-      KAFKA_LOG_RETENTION_BYTES: 10737418240
-      KAFKA_LOG_SEGMENT_BYTES: 1073741824
-      KAFKA_LOG_CLEANUP_POLICY: delete
     volumes:
-      - kafka-data3:/var/lib/kafka/data
+      - kafka-broker-data3:/var/lib/kafka/data
 
 networks:
   hamstring:
     external: true
+
+volumes:
+  kafka-broker-data1:
+  kafka-broker-data2:
+  kafka-broker-data3:

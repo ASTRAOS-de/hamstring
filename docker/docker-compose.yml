@@ -1,33 +1,19 @@
 services:
-  zookeeper:
-    extends:
-      file: "docker-compose/base/docker-compose.kafka.yml"
-      service: zookeeper
-
   kafka1:
     extends:
       file: "docker-compose/base/docker-compose.kafka.yml"
       service: kafka1
-    depends_on:
-      zookeeper:
-        condition: service_healthy
 
   kafka2:
     extends:
       file: "docker-compose/base/docker-compose.kafka.yml"
       service: kafka2
-    depends_on:
-      zookeeper:
-        condition: service_healthy
 
 
   kafka3:
     extends:
       file: "docker-compose/base/docker-compose.kafka.yml"
       service: kafka3
-    depends_on:
-      zookeeper:
-        condition: service_healthy
   clickhouse-server:
     extends:
       file: "docker-compose/base/docker-compose.clickhouse.yml"
@@ -305,8 +291,6 @@ networks:
 volumes:
   ch_data:
   ch_logs:
-  kafka-data1:
-  kafka-data2:
-  kafka-data3:
-  zk-data:
-  zk-txn-logs:
+  kafka-broker-data1:
+  kafka-broker-data2:
+  kafka-broker-data3:

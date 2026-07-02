@@ -47,6 +47,7 @@ class TestInit(unittest.TestCase):
         mock_producer_instance.init_transactions.assert_called_once()
 
     @patch("src.base.retry.time.sleep", return_value=None)
+    @patch("src.base.kafka_handler.HOSTNAME", "default_tid")
     @patch("src.base.kafka_handler.uuid")
     @patch("src.base.kafka_handler.logger")
     @patch(
