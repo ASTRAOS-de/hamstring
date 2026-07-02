@@ -1,45 +1,5 @@
 # Compose file to deploy directly with docker stack deploy.
 ---
-version: "3.8"
-
-x-kafka-wait-env: &kafka-wait-env
-  KAFKA_BOOTSTRAP_SERVERS: "${KAFKA_BOOTSTRAP_SERVERS:-kafka1:19092,kafka2:19093,kafka3:19094}"
-  KAFKA_WAIT_INTERVAL_SECONDS: "${KAFKA_WAIT_INTERVAL_SECONDS:-5}"
-
-x-wait-for-kafka-entrypoint: &wait-for-kafka-entrypoint
-  - /venv/bin/python3
-  - -c
-  - |
-    import os
-    import runpy
-    import sys
-    import time
-
-    from confluent_kafka.admin import AdminClient
-
-    bootstrap_servers = os.environ.get(
-        "KAFKA_BOOTSTRAP_SERVERS",
-        "kafka1:19092,kafka2:19093,kafka3:19094",
-    )
-    wait_interval = float(os.environ.get("KAFKA_WAIT_INTERVAL_SECONDS", "5"))
-    script = sys.argv[1]
-
-    while True:
-        try:
-            AdminClient({"bootstrap.servers": bootstrap_servers}).list_topics(
-                timeout=10
-            )
-            break
-        except Exception as exception:
-            print(
-                f"Waiting for Kafka metadata at {bootstrap_servers}: {exception}",
-                flush=True,
-            )
-            time.sleep(wait_interval)
-
-    sys.argv = sys.argv[1:]
-    runpy.run_path(script, run_name="__main__")
-
 services:
   zookeeper:
     image: "${ZOOKEEPER_IMAGE:-confluentinc/cp-zookeeper:7.9.3}"
@@ -259,15 +219,13 @@ services:
         condition: any
 
   monitoring_agent:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-monitoring:${HAMSTRING_IMAGE_TAG:-v2.2.0-dev}"
-    entrypoint: *wait-for-kafka-entrypoint
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-monitoring:${HAMSTRING_IMAGE_TAG:-v2.2.0}"
     command: ["src/monitoring/monitoring_agent.py"]
     networks:
       - hamstring
     volumes:
       - "${HAMSTRING_ROOT:-../..}/config.yaml:/app/config.yaml"
     environment:
-      <<: *kafka-wait-env
       GROUP_ID: "${MONITORING_AGENT_GROUP_ID:-monitoring_agent}"
       HAMSTRING_CONFIG_CHECKSUM: "${HAMSTRING_CONFIG_CHECKSUM:-d9bc812b76c2b58c633b412a6c07f981f3c4d787}"
     deploy:
@@ -275,8 +233,7 @@ services:
         condition: any
 
   logserver:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-logserver:${HAMSTRING_IMAGE_TAG:-v2.2.0-dev}"
-    entrypoint: *wait-for-kafka-entrypoint
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-logserver:${HAMSTRING_IMAGE_TAG:-v2.2.0}"
     command: ["src/logserver/server.py"]
     networks:
       - hamstring
@@ -284,7 +241,6 @@ services:
       - "${HAMSTRING_ROOT:-../..}/docker/default.txt:/opt/file.txt"
       - "${HAMSTRING_ROOT:-../..}/config.yaml:/app/config.yaml"
     environment:
-      <<: *kafka-wait-env
       GROUP_ID: "${LOGSERVER_GROUP_ID:-log_storage}"
       HAMSTRING_CONFIG_CHECKSUM: "${HAMSTRING_CONFIG_CHECKSUM:-d9bc812b76c2b58c633b412a6c07f981f3c4d787}"
     deploy:
@@ -292,15 +248,13 @@ services:
         condition: any
 
   logcollector:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-logcollector:${HAMSTRING_IMAGE_TAG:-v2.2.0-dev}"
-    entrypoint: *wait-for-kafka-entrypoint
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-logcollector:${HAMSTRING_IMAGE_TAG:-v2.2.0}"
     command: ["src/logcollector/collector.py"]
     networks:
       - hamstring
     volumes:
       - "${HAMSTRING_ROOT:-../..}/config.yaml:/app/config.yaml"
     environment:
-      <<: *kafka-wait-env
       GROUP_ID: "${LOGCOLLECTOR_GROUP_ID:-log_collection}"
       HAMSTRING_CONFIG_CHECKSUM: "${HAMSTRING_CONFIG_CHECKSUM:-d9bc812b76c2b58c633b412a6c07f981f3c4d787}"
     deploy:
@@ -308,15 +262,13 @@ services:
         condition: any
 
   prefilter:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-prefilter:${HAMSTRING_IMAGE_TAG:-v2.2.0-dev}"
-    entrypoint: *wait-for-kafka-entrypoint
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-prefilter:${HAMSTRING_IMAGE_TAG:-v2.2.0}"
     command: ["src/prefilter/prefilter.py"]
     networks:
       - hamstring
     volumes:
       - "${HAMSTRING_ROOT:-../..}/config.yaml:/app/config.yaml"
     environment:
-      <<: *kafka-wait-env
       GROUP_ID: "${PREFILTER_GROUP_ID:-log_filtering}"
       HAMSTRING_CONFIG_CHECKSUM: "${HAMSTRING_CONFIG_CHECKSUM:-d9bc812b76c2b58c633b412a6c07f981f3c4d787}"
     deploy:
@@ -326,15 +278,13 @@ services:
         condition: any
 
   inspector:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-inspector:${HAMSTRING_IMAGE_TAG:-v2.2.0-dev}"
-    entrypoint: *wait-for-kafka-entrypoint
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-inspector:${HAMSTRING_IMAGE_TAG:-v2.2.0}"
     command: ["src/inspector/inspector.py"]
     networks:
       - hamstring
     volumes:
       - "${HAMSTRING_ROOT:-../..}/config.yaml:/app/config.yaml"
     environment:
-      <<: *kafka-wait-env
       GROUP_ID: "${INSPECTOR_GROUP_ID:-data_inspection}"
       NUMBER_OF_INSTANCES: "${INSPECTOR_NUMBER_OF_INSTANCES:-1}"
       HAMSTRING_CONFIG_CHECKSUM: "${HAMSTRING_CONFIG_CHECKSUM:-d9bc812b76c2b58c633b412a6c07f981f3c4d787}"
@@ -352,15 +302,13 @@ services:
         condition: any
 
   detector:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-detector:${HAMSTRING_IMAGE_TAG:-v2.2.0-dev}"
-    entrypoint: *wait-for-kafka-entrypoint
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-detector:${HAMSTRING_IMAGE_TAG:-v2.2.0}"
     command: ["src/detector/detector.py"]
     networks:
       - hamstring
     volumes:
       - "${HAMSTRING_ROOT:-../..}/config.yaml:/app/config.yaml"
     environment:
-      <<: *kafka-wait-env
       GROUP_ID: "${DETECTOR_GROUP_ID:-data_analysis}"
       NVIDIA_DRIVER_CAPABILITIES: "${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}"
       NVIDIA_VISIBLE_DEVICES: "${NVIDIA_VISIBLE_DEVICES:-all}"
@@ -379,8 +327,7 @@ services:
         condition: any
 
   alerter:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-alerter:${HAMSTRING_IMAGE_TAG:-v2.2.0-dev}"
-    entrypoint: *wait-for-kafka-entrypoint
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-alerter:${HAMSTRING_IMAGE_TAG:-v2.2.0}"
     command: ["src/alerter/alerter.py"]
     networks:
       - hamstring
@@ -388,7 +335,6 @@ services:
       - "${HAMSTRING_ROOT:-../..}/config.yaml:/app/config.yaml"
       - "${HAMSTRING_ROOT:-../..}/docker/logs:/opt/logs"
     environment:
-      <<: *kafka-wait-env
       GROUP_ID: "${ALERTER_GROUP_ID:-data_alerting}"
       HAMSTRING_CONFIG_CHECKSUM: "${HAMSTRING_CONFIG_CHECKSUM:-d9bc812b76c2b58c633b412a6c07f981f3c4d787}"
     deploy:
