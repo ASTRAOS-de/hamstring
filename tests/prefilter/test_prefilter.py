@@ -72,7 +72,6 @@ class TestBootstrapPrefilteringProcess(unittest.TestCase):
 
         # Verify logger calls
         expected_log_calls = [
-            call("I am test_topic"),
             call(
                 "test_topic Received message:\n    ⤷  Contains data field of 2 message(s) with subnet_id: '127.0.0.0_24'."
             ),

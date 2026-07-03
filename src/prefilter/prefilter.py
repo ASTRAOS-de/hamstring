@@ -305,7 +305,6 @@ class Prefilter:
         3. Sends the filtered data to inspectors
 
         """
-        logger.info(f"I am {self.consume_topic}")
         while True:
             self.get_and_fill_data()
             self.check_data_relevance_using_rules()
