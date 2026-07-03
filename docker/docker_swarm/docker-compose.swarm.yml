@@ -19,8 +19,7 @@ x-kafka-broker-env: &kafka-broker-env
 services:
   kafka1:
     image: "${KAFKA_IMAGE:-confluentinc/cp-kafka:8.2.2}"
-    networks:
-      - hamstring
+    networks: [hamstring]
     ports:
       - target: 8097
         published: "${KAFKA1_EXTERNAL_PORT:-8097}"
@@ -33,19 +32,13 @@ services:
       KAFKA_LISTENERS: INTERNAL://0.0.0.0:19092,EXTERNAL://0.0.0.0:8097,CONTROLLER://0.0.0.0:29093
     volumes:
       - kafka-broker-data1:/var/lib/kafka/data
-    healthcheck:
-      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:19092 >/dev/null 2>&1"]
-      interval: 30s
-      timeout: 10s
-      retries: 10
     deploy:
       restart_policy:
         condition: any
 
   kafka2:
     image: "${KAFKA_IMAGE:-confluentinc/cp-kafka:8.2.2}"
-    networks:
-      - hamstring
+    networks: [hamstring]
     ports:
       - target: 8098
         published: "${KAFKA2_EXTERNAL_PORT:-8098}"
@@ -59,19 +52,13 @@ services:
       KAFKA_LOG4J_LOGGERS: "${KAFKA_LOG4J_LOGGERS:-kafka.controller=INFO,kafka.producer.async.DefaultEventHandler=INFO,state.change.logger=INFO}"
     volumes:
       - kafka-broker-data2:/var/lib/kafka/data
-    healthcheck:
-      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:19093 >/dev/null 2>&1"]
-      interval: 30s
-      timeout: 10s
-      retries: 10
     deploy:
       restart_policy:
         condition: any
 
   kafka3:
     image: "${KAFKA_IMAGE:-confluentinc/cp-kafka:8.2.2}"
-    networks:
-      - hamstring
+    networks: [hamstring]
     ports:
       - target: 8099
         published: "${KAFKA3_EXTERNAL_PORT:-8099}"
@@ -85,11 +72,6 @@ services:
       KAFKA_LOG4J_LOGGERS: "${KAFKA_LOG4J_LOGGERS:-kafka.controller=INFO,kafka.producer.async.DefaultEventHandler=INFO,state.change.logger=INFO}"
     volumes:
       - kafka-broker-data3:/var/lib/kafka/data
-    healthcheck:
-      test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:19094 >/dev/null 2>&1"]
-      interval: 30s
-      timeout: 10s
-      retries: 10
     deploy:
       restart_policy:
         condition: any
@@ -98,6 +80,9 @@ services:
     image: "${CLICKHOUSE_IMAGE:-clickhouse/clickhouse-server:26.5-alpine}"
     networks:
       - hamstring
+    environment:
+      CLICKHOUSE_USER: "${CLICKHOUSE_USER:-default}"
+      CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-hamstring}"
     ports:
       - target: 8123
         published: "${CLICKHOUSE_HTTP_PORT:-8123}"
@@ -121,7 +106,7 @@ services:
         condition: any
 
   grafana:
-    image: "${GRAFANA_IMAGE:-grafana/grafana:13.1.0-debian}"
+    image: "${GRAFANA_IMAGE:-grafana/grafana:13.0.3-slim}"
     networks:
       - hamstring
     ports:
@@ -137,10 +122,13 @@ services:
       GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER:-admin}"
       GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-admin}"
       GF_INSTALL_PLUGINS: "${GRAFANA_INSTALL_PLUGINS:-grafana-clickhouse-datasource}"
+      CLICKHOUSE_USER: "${CLICKHOUSE_USER:-default}"
+      CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-hamstring}"
     healthcheck:
       test: ["CMD-SHELL", "nc -z localhost 3000"]
       interval: 10s
-      timeout: 5s
+      timeout: 30s
+      start_period: 120s
       retries: 3
     deploy:
       restart_policy:
@@ -188,6 +176,8 @@ services:
     environment:
       GROUP_ID: "${MONITORING_AGENT_GROUP_ID:-monitoring_agent}"
       HAMSTRING_CONFIG_CHECKSUM: "${HAMSTRING_CONFIG_CHECKSUM:-d9bc812b76c2b58c633b412a6c07f981f3c4d787}"
+      CLICKHOUSE_USER: "${CLICKHOUSE_USER:-default}"
+      CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-hamstring}"
     deploy:
       restart_policy:
         condition: any
@@ -329,10 +319,6 @@ networks:
   hamstring:
     driver: overlay
     attachable: true
-    ipam:
-      driver: default
-      config:
-        - subnet: "${HAMSTRING_SUBNET:-172.27.0.0/16}"
 
 volumes:
   ch_data:

@@ -19,3 +19,5 @@ services:
       - hamstring
     environment:
       - GROUP_ID=monitoring_agent
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-hamstring}
