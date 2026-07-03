@@ -6,6 +6,9 @@ services:
       - ../../create_tables:/docker-entrypoint-initdb.d
       - ch_data:/var/lib/clickhouse/
       - ch_logs:/var/log/clickhouse-server/
+    environment:
+      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
+      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-hamstring}
     networks:
       - hamstring
     restart: "unless-stopped"

@@ -9,8 +9,10 @@ datasources:
 
       protocol: native
 
-      username: default
+      username: ${CLICKHOUSE_USER}
       tlsSkipVerify: false
+    secureJsonData:
+      password: ${CLICKHOUSE_PASSWORD}
 
   - name: prometheus
     type: prometheus

@@ -19,10 +19,20 @@ CONFIG = setup_config()
 CLICKHOUSE_HOSTNAME = CONFIG["environment"]["monitoring"]["clickhouse_server"][
     "hostname"
 ]
+CLICKHOUSE_USERNAME = os.getenv("CLICKHOUSE_USER", "default")
+CLICKHOUSE_PASSWORD = os.getenv("CLICKHOUSE_PASSWORD", "hamstring")
 BATCH_SIZE = CONFIG["pipeline"]["monitoring"]["clickhouse_connector"]["batch_size"]
 BATCH_TIMEOUT = CONFIG["pipeline"]["monitoring"]["clickhouse_connector"][
     "batch_timeout"
 ]
+
+
+def create_clickhouse_client():
+    return clickhouse_connect.get_client(
+        host=CLICKHOUSE_HOSTNAME,
+        username=CLICKHOUSE_USERNAME,
+        password=CLICKHOUSE_PASSWORD,
+    )
 
 
 @dataclass
@@ -227,7 +237,7 @@ class ClickHouseBatchSender:
 
     def _connect_client(self):
         return retry_forever(
-            lambda: clickhouse_connect.get_client(host=CLICKHOUSE_HOSTNAME),
+            create_clickhouse_client,
             "ClickHouse client connection",
         )
 
