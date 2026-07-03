@@ -51,7 +51,7 @@ def prepare_all_tables():
             sql_content = _load_contents(file_path)
 
             with retry_forever(
-                lambda: clickhouse_connect.get_client(host=CLICKHOUSE_HOSTNAME),
+                create_clickhouse_client,
                 "ClickHouse table preparation connection",
                 retry_config=RETRY_CONFIG,
             ) as client:
