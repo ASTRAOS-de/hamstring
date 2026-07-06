@@ -1,6 +1,6 @@
 services:
   prometheus:
-    image: prom/prometheus
+    image: "${PROMETHEUS_IMAGE_REPOSITORY:-prom/prometheus}:${PROMETHEUS_IMAGE_TAG:-latest}"
     container_name: prometheus
     ports:
       - "9088:9090"

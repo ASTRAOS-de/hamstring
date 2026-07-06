@@ -16,9 +16,19 @@ x-kafka-broker-env: &kafka-broker-env
   KAFKA_LOG_SEGMENT_BYTES: "${KAFKA_LOG_SEGMENT_BYTES:-1073741824}"
   KAFKA_LOG_CLEANUP_POLICY: "${KAFKA_LOG_CLEANUP_POLICY:-delete}"
 
+x-hamstring-kafka-wait-env: &hamstring-kafka-wait-env
+  HAMSTRING_WAIT_FOR: kafka
+  HAMSTRING_WAIT_INITIAL_DELAY_SECONDS: "${HAMSTRING_WAIT_INITIAL_DELAY_SECONDS:-30}"
+  HAMSTRING_WAIT_TIMEOUT_SECONDS: "${HAMSTRING_WAIT_TIMEOUT_SECONDS:-180}"
+
+x-hamstring-kafka-clickhouse-wait-env: &hamstring-kafka-clickhouse-wait-env
+  HAMSTRING_WAIT_FOR: kafka,clickhouse
+  HAMSTRING_WAIT_INITIAL_DELAY_SECONDS: "${HAMSTRING_WAIT_INITIAL_DELAY_SECONDS:-30}"
+  HAMSTRING_WAIT_TIMEOUT_SECONDS: "${HAMSTRING_WAIT_TIMEOUT_SECONDS:-180}"
+
 services:
   kafka1:
-    image: "${KAFKA_IMAGE:-confluentinc/cp-kafka:8.2.2}"
+    image: "${KAFKA_IMAGE_REPOSITORY:-confluentinc/cp-kafka}:${KAFKA_IMAGE_TAG:-8.2.2}"
     networks: [hamstring]
     ports:
       - target: 8097
@@ -33,11 +43,14 @@ services:
     volumes:
       - kafka-broker-data1:/var/lib/kafka/data
     deploy:
+      placement:
+        constraints:
+          - "${KAFKA1_PLACEMENT_CONSTRAINT:-node.platform.os == linux}"
       restart_policy:
         condition: any
 
   kafka2:
-    image: "${KAFKA_IMAGE:-confluentinc/cp-kafka:8.2.2}"
+    image: "${KAFKA_IMAGE_REPOSITORY:-confluentinc/cp-kafka}:${KAFKA_IMAGE_TAG:-8.2.2}"
     networks: [hamstring]
     ports:
       - target: 8098
@@ -53,11 +66,14 @@ services:
     volumes:
       - kafka-broker-data2:/var/lib/kafka/data
     deploy:
+      placement:
+        constraints:
+          - "${KAFKA2_PLACEMENT_CONSTRAINT:-node.platform.os == linux}"
       restart_policy:
         condition: any
 
   kafka3:
-    image: "${KAFKA_IMAGE:-confluentinc/cp-kafka:8.2.2}"
+    image: "${KAFKA_IMAGE_REPOSITORY:-confluentinc/cp-kafka}:${KAFKA_IMAGE_TAG:-8.2.2}"
     networks: [hamstring]
     ports:
       - target: 8099
@@ -73,11 +89,14 @@ services:
     volumes:
       - kafka-broker-data3:/var/lib/kafka/data
     deploy:
+      placement:
+        constraints:
+          - "${KAFKA3_PLACEMENT_CONSTRAINT:-node.platform.os == linux}"
       restart_policy:
         condition: any
 
   clickhouse-server:
-    image: "${CLICKHOUSE_IMAGE:-clickhouse/clickhouse-server:26.5-alpine}"
+    image: "${CLICKHOUSE_IMAGE_REPOSITORY:-clickhouse/clickhouse-server}:${CLICKHOUSE_IMAGE_TAG:-26.5-alpine}"
     networks:
       - hamstring
     environment:
@@ -102,11 +121,14 @@ services:
       timeout: 5s
       retries: 3
     deploy:
+      placement:
+        constraints:
+          - "${CLICKHOUSE_PLACEMENT_CONSTRAINT:-node.platform.os == linux}"
       restart_policy:
         condition: any
 
   grafana:
-    image: "${GRAFANA_IMAGE:-grafana/grafana:13.0.3-slim}"
+    image: "${GRAFANA_IMAGE_REPOSITORY:-grafana/grafana}:${GRAFANA_IMAGE_TAG:-13.0.3-slim}"
     networks:
       - hamstring
     ports:
@@ -131,11 +153,14 @@ services:
       start_period: 120s
       retries: 3
     deploy:
+      placement:
+        constraints:
+          - "${GRAFANA_PLACEMENT_CONSTRAINT:-node.platform.os == linux}"
       restart_policy:
         condition: any
 
   prometheus:
-    image: "${PROMETHEUS_IMAGE:-prom/prometheus}"
+    image: "${PROMETHEUS_IMAGE_REPOSITORY:-prom/prometheus}:${PROMETHEUS_IMAGE_TAG:-latest}"
     networks:
       - hamstring
     ports:
@@ -143,14 +168,19 @@ services:
         published: "${PROMETHEUS_PORT:-9088}"
         protocol: tcp
         mode: ingress
-    volumes:
-      - "${HAMSTRING_ROOT:-../..}/docker/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml"
+    configs:
+      - source: prometheus_config
+        target: /etc/prometheus/prometheus.yml
+        mode: 0444
     deploy:
+      placement:
+        constraints:
+          - "${PROMETHEUS_PLACEMENT_CONSTRAINT:-node.platform.os == linux}"
       restart_policy:
         condition: any
 
   kafka-exporter:
-    image: "${KAFKA_EXPORTER_IMAGE:-danielqsj/kafka-exporter}"
+    image: "${KAFKA_EXPORTER_IMAGE_REPOSITORY:-danielqsj/kafka-exporter}:${KAFKA_EXPORTER_IMAGE_TAG:-latest}"
     command:
       - --kafka.server=kafka1:19092
       - --kafka.server=kafka2:19093
@@ -163,78 +193,98 @@ services:
         protocol: tcp
         mode: ingress
     deploy:
+      placement:
+        constraints:
+          - "${KAFKA_EXPORTER_PLACEMENT_CONSTRAINT:-node.platform.os == linux}"
       restart_policy:
         condition: any
 
   monitoring_agent:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-monitoring:${HAMSTRING_IMAGE_TAG:-v2.2.0}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-monitoring:${HAMSTRING_MONITORING_IMAGE_TAG:-v2.2.0}"
     command: ["src/monitoring/monitoring_agent.py"]
     networks:
       - hamstring
     volumes:
       - "${HAMSTRING_ROOT:-../..}/config.yaml:/app/config.yaml"
     environment:
+      <<: *hamstring-kafka-clickhouse-wait-env
       GROUP_ID: "${MONITORING_AGENT_GROUP_ID:-monitoring_agent}"
       HAMSTRING_CONFIG_CHECKSUM: "${HAMSTRING_CONFIG_CHECKSUM:-d9bc812b76c2b58c633b412a6c07f981f3c4d787}"
       CLICKHOUSE_USER: "${CLICKHOUSE_USER:-default}"
       CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-hamstring}"
     deploy:
+      placement:
+        constraints:
+          - "${MONITORING_AGENT_PLACEMENT_CONSTRAINT:-node.platform.os == linux}"
       restart_policy:
         condition: any
 
   logserver:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-logserver:${HAMSTRING_IMAGE_TAG:-v2.2.0}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-logserver:${HAMSTRING_LOGSERVER_IMAGE_TAG:-v2.2.0}"
     command: ["src/logserver/server.py"]
     networks:
       - hamstring
     volumes:
-      - "${HAMSTRING_ROOT:-../..}/docker/default.txt:/opt/file.txt"
+      - "${LOGSERVER_INPUT_PATH:-../../docker/default_input}:/opt/file.txt:ro"
       - "${HAMSTRING_ROOT:-../..}/config.yaml:/app/config.yaml"
     environment:
+      <<: *hamstring-kafka-wait-env
       GROUP_ID: "${LOGSERVER_GROUP_ID:-log_storage}"
       HAMSTRING_CONFIG_CHECKSUM: "${HAMSTRING_CONFIG_CHECKSUM:-d9bc812b76c2b58c633b412a6c07f981f3c4d787}"
     deploy:
+      placement:
+        constraints:
+          - "${LOGSERVER_PLACEMENT_CONSTRAINT:-node.platform.os == linux}"
       restart_policy:
         condition: any
 
   logcollector:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-logcollector:${HAMSTRING_IMAGE_TAG:-v2.2.0}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-logcollector:${HAMSTRING_LOGCOLLECTOR_IMAGE_TAG:-v2.2.0}"
     command: ["src/logcollector/collector.py"]
     networks:
       - hamstring
     volumes:
       - "${HAMSTRING_ROOT:-../..}/config.yaml:/app/config.yaml"
     environment:
+      <<: *hamstring-kafka-wait-env
       GROUP_ID: "${LOGCOLLECTOR_GROUP_ID:-log_collection}"
       HAMSTRING_CONFIG_CHECKSUM: "${HAMSTRING_CONFIG_CHECKSUM:-d9bc812b76c2b58c633b412a6c07f981f3c4d787}"
     deploy:
+      placement:
+        constraints:
+          - "${LOGCOLLECTOR_PLACEMENT_CONSTRAINT:-node.platform.os == linux}"
       restart_policy:
         condition: any
 
   prefilter:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-prefilter:${HAMSTRING_IMAGE_TAG:-v2.2.0}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-prefilter:${HAMSTRING_PREFILTER_IMAGE_TAG:-v2.2.0}"
     command: ["src/prefilter/prefilter.py"]
     networks:
       - hamstring
     volumes:
       - "${HAMSTRING_ROOT:-../..}/config.yaml:/app/config.yaml"
     environment:
+      <<: *hamstring-kafka-wait-env
       GROUP_ID: "${PREFILTER_GROUP_ID:-log_filtering}"
       HAMSTRING_CONFIG_CHECKSUM: "${HAMSTRING_CONFIG_CHECKSUM:-d9bc812b76c2b58c633b412a6c07f981f3c4d787}"
     deploy:
       mode: replicated
       replicas: ${PREFILTER_REPLICAS:-1}
+      placement:
+        constraints:
+          - "${PREFILTER_PLACEMENT_CONSTRAINT:-node.platform.os == linux}"
       restart_policy:
         condition: any
 
   inspector:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-inspector:${HAMSTRING_IMAGE_TAG:-v2.2.0}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-inspector:${HAMSTRING_INSPECTOR_IMAGE_TAG:-v2.2.0}"
     command: ["src/inspector/inspector.py"]
     networks:
       - hamstring
     volumes:
       - "${HAMSTRING_ROOT:-../..}/config.yaml:/app/config.yaml"
     environment:
+      <<: *hamstring-kafka-wait-env
       GROUP_ID: "${INSPECTOR_GROUP_ID:-data_inspection}"
       NUMBER_OF_INSTANCES: "${INSPECTOR_NUMBER_OF_INSTANCES:-1}"
       HAMSTRING_CONFIG_CHECKSUM: "${HAMSTRING_CONFIG_CHECKSUM:-d9bc812b76c2b58c633b412a6c07f981f3c4d787}"
@@ -248,17 +298,21 @@ services:
         reservations:
           cpus: "${INSPECTOR_CPU_RESERVATION:-1}"
           memory: "${INSPECTOR_MEMORY_RESERVATION:-256M}"
+      placement:
+        constraints:
+          - "${INSPECTOR_PLACEMENT_CONSTRAINT:-node.platform.os == linux}"
       restart_policy:
         condition: any
 
   detector:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-detector:${HAMSTRING_IMAGE_TAG:-v2.2.0}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-detector:${HAMSTRING_DETECTOR_IMAGE_TAG:-v2.2.0}"
     command: ["src/detector/detector.py"]
     networks:
       - hamstring
     volumes:
       - "${HAMSTRING_ROOT:-../..}/config.yaml:/app/config.yaml"
     environment:
+      <<: *hamstring-kafka-wait-env
       GROUP_ID: "${DETECTOR_GROUP_ID:-data_analysis}"
       NVIDIA_DRIVER_CAPABILITIES: "${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}"
       NVIDIA_VISIBLE_DEVICES: "${NVIDIA_VISIBLE_DEVICES:-all}"
@@ -273,28 +327,35 @@ services:
       #       - discrete_resource_spec:
       #           kind: NVIDIA-GPU
       #           value: 1
+      placement:
+        constraints:
+          - "${DETECTOR_PLACEMENT_CONSTRAINT:-node.platform.os == linux}"
       restart_policy:
         condition: any
 
   alerter:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-alerter:${HAMSTRING_IMAGE_TAG:-v2.2.0}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-alerter:${HAMSTRING_ALERTER_IMAGE_TAG:-v2.2.0}"
     command: ["src/alerter/alerter.py"]
     networks:
       - hamstring
     volumes:
       - "${HAMSTRING_ROOT:-../..}/config.yaml:/app/config.yaml"
-      - "${HAMSTRING_ROOT:-../..}/docker/logs:/opt/logs"
+      - alerter_logs:/opt/logs
     environment:
+      <<: *hamstring-kafka-wait-env
       GROUP_ID: "${ALERTER_GROUP_ID:-data_alerting}"
       HAMSTRING_CONFIG_CHECKSUM: "${HAMSTRING_CONFIG_CHECKSUM:-d9bc812b76c2b58c633b412a6c07f981f3c4d787}"
     deploy:
       mode: replicated
       replicas: ${ALERTER_REPLICAS:-1}
+      placement:
+        constraints:
+          - "${ALERTER_PLACEMENT_CONSTRAINT:-node.platform.os == linux}"
       restart_policy:
         condition: any
 
   zeek:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-zeek:${HAMSTRING_IMAGE_TAG:-2.0.1}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-zeek:${HAMSTRING_ZEEK_IMAGE_TAG:-2.0.1}"
     cap_add:
       - NET_ADMIN
     networks:
@@ -309,6 +370,9 @@ services:
     deploy:
       mode: replicated
       replicas: ${ZEEK_REPLICAS:-1}
+      placement:
+        constraints:
+          - "${ZEEK_PLACEMENT_CONSTRAINT:-node.platform.os == linux}"
       restart_policy:
         condition: any
 
@@ -321,10 +385,15 @@ networks:
     attachable: true
 
 volumes:
+  alerter_logs:
   ch_data:
   ch_logs:
   kafka-broker-data1:
   kafka-broker-data2:
   kafka-broker-data3:
+
+configs:
+  prometheus_config:
+    file: "${PROMETHEUS_CONFIG_FILE:-../../docker/prometheus/prometheus.yml}"
 
 # code: language=yaml

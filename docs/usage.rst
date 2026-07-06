@@ -12,21 +12,20 @@ Usage
 Getting Started
 ---------------
 
-To use HAMSTRING, just use the provided ``docker-compose.yml`` to quickly bootstrap your environment:
+To use HAMSTRING, use the provided ``docker-compose.yml`` with either the production or development profile:
 
 .. code-block:: console
 
-   $ HOST_IP=127.0.0.1 docker compose -f docker/docker-compose.yml up
+   $ HOST_IP=127.0.0.1 docker compose -f docker/docker-compose.yml --profile prod up
 
-If you want to run containers individually, use:
+For local development builds, use the development profile:
 
 .. code-block:: console
 
-   $ HOST_IP=127.0.0.1 docker compose -f docker/docker-compose.kafka.yml up
-   $ docker run ...
+   $ HOST_IP=127.0.0.1 docker compose -f docker/docker-compose.yml --profile dev up
 
-
-Make sure you set the environment variable ``HOST_IP`` to your host's IP address, so that the services can communicate with each other.
+Set ``HOST_IP`` to the host address that external Kafka clients should use. The default
+``localhost`` works for single-host local runs.
 
 Scaling With Docker Compose
 ---------------------------

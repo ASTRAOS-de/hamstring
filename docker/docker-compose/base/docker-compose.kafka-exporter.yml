@@ -1,6 +1,6 @@
 services:
   kafka-exporter:
-    image: danielqsj/kafka-exporter:latest
+    image: "${KAFKA_EXPORTER_IMAGE_REPOSITORY:-danielqsj/kafka-exporter}:${KAFKA_EXPORTER_IMAGE_TAG:-latest}"
     container_name: kafka-exporter
     ports:
       - "9308:9308"

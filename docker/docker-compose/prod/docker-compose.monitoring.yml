@@ -1,23 +1,13 @@
 services:
   monitoring_agent:
-    image: ghcr.io/astraos-de/hamstring-monitoring:v2.2.0
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-monitoring:${HAMSTRING_MONITORING_IMAGE_TAG:-v2.2.0}"
     restart: "unless-stopped"
     volumes:
       - ../../../config.yaml:/app/config.yaml
-    depends_on:
-      kafka1:
-        condition: service_healthy
-      kafka2:
-        condition: service_healthy
-      kafka3:
-        condition: service_healthy
-      clickhouse-server:
-        condition: service_healthy
-      grafana:
-        condition: service_healthy
     networks:
       - hamstring
     environment:
       - GROUP_ID=monitoring_agent
+      - HAMSTRING_WAIT_FOR=kafka,clickhouse
       - CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
       - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-hamstring}
