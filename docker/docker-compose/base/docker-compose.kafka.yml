@@ -16,7 +16,7 @@ x-kafka-broker-env: &kafka-broker-env
 
 services:
   kafka1:
-    image: "${KAFKA_IMAGE:-confluentinc/cp-kafka:8.2.2}"
+    image: "${KAFKA_IMAGE_REPOSITORY:-confluentinc/cp-kafka}:${KAFKA_IMAGE_TAG:-8.2.2}"
     container_name: kafka1
     restart: "unless-stopped"
     networks:
@@ -37,7 +37,7 @@ services:
       - kafka-broker-data1:/var/lib/kafka/data
 
   kafka2:
-    image: "${KAFKA_IMAGE:-confluentinc/cp-kafka:8.2.2}"
+    image: "${KAFKA_IMAGE_REPOSITORY:-confluentinc/cp-kafka}:${KAFKA_IMAGE_TAG:-8.2.2}"
     container_name: kafka2
     restart: "unless-stopped"
     networks:
@@ -59,7 +59,7 @@ services:
       - kafka-broker-data2:/var/lib/kafka/data
 
   kafka3:
-    image: "${KAFKA_IMAGE:-confluentinc/cp-kafka:8.2.2}"
+    image: "${KAFKA_IMAGE_REPOSITORY:-confluentinc/cp-kafka}:${KAFKA_IMAGE_TAG:-8.2.2}"
     container_name: kafka3
     restart: "unless-stopped"
     networks:

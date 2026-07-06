@@ -1,6 +1,6 @@
 services:
   grafana:
-    image: grafana/grafana:13.0.3-slim
+    image: "${GRAFANA_IMAGE_REPOSITORY:-grafana/grafana}:${GRAFANA_IMAGE_TAG:-13.0.3-slim}"
     container_name: grafana
     networks:
       - hamstring

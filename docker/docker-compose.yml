@@ -47,69 +47,30 @@ services:
     extends:
       file: "docker-compose/dev/docker-compose.monitoring.yml"
       service: monitoring_agent
-    depends_on:
-      kafka1:
-        condition: service_healthy
-      kafka2:
-        condition: service_healthy
-      kafka3:
-        condition: service_healthy
-      clickhouse-server:
-        condition: service_healthy
     profiles: ["dev", "dev-gpu"]
 
   monitoring_agent:
     extends:
       file: "docker-compose/prod/docker-compose.monitoring.yml"
       service: monitoring_agent
-    depends_on:
-      kafka1:
-        condition: service_healthy
-      kafka2:
-        condition: service_healthy
-      kafka3:
-        condition: service_healthy
-      clickhouse-server:
-        condition: service_healthy
     profiles: ["prod", "prod-gpu"]
 
   logserver-dev:
     extends:
       file: "docker-compose/dev/docker-compose.pipeline.yml"
       service: logserver
-    depends_on:
-      kafka1:
-        condition: service_healthy
-      kafka2:
-        condition: service_healthy
-      kafka3:
-        condition: service_healthy
     profiles: ["dev", "dev-gpu"]
 
   logserver:
     extends:
       file: "docker-compose/prod/docker-compose.pipeline.yml"
       service: logserver
-    depends_on:
-      kafka1:
-        condition: service_healthy
-      kafka2:
-        condition: service_healthy
-      kafka3:
-        condition: service_healthy
     profiles: ["prod", "prod-gpu"]
 
   logcollector-dev:
     extends:
       file: "docker-compose/dev/docker-compose.pipeline.yml"
       service: logcollector
-    depends_on:
-      kafka1:
-        condition: service_healthy
-      kafka2:
-        condition: service_healthy
-      kafka3:
-        condition: service_healthy
     profiles: ["dev", "dev-gpu"]
 
 
@@ -117,65 +78,30 @@ services:
     extends:
       file: "docker-compose/prod/docker-compose.pipeline.yml"
       service: logcollector
-    depends_on:
-      kafka1:
-        condition: service_healthy
-      kafka2:
-        condition: service_healthy
-      kafka3:
-        condition: service_healthy
     profiles: ["prod", "prod-gpu"]
 
   prefilter-dev:
     extends:
       file: "docker-compose/dev/docker-compose.pipeline.yml"
       service: prefilter
-    depends_on:
-      kafka1:
-        condition: service_healthy
-      kafka2:
-        condition: service_healthy
-      kafka3:
-        condition: service_healthy
     profiles: ["dev", "dev-gpu"]
 
   prefilter:
     extends:
       file: "docker-compose/prod/docker-compose.pipeline.yml"
       service: prefilter
-    depends_on:
-      kafka1:
-        condition: service_healthy
-      kafka2:
-        condition: service_healthy
-      kafka3:
-        condition: service_healthy
     profiles: ["prod", "prod-gpu"]
 
   inspector-dev:
     extends:
       file: "docker-compose/dev/docker-compose.pipeline.yml"
       service: inspector
-    depends_on:
-      kafka1:
-        condition: service_healthy
-      kafka2:
-        condition: service_healthy
-      kafka3:
-        condition: service_healthy
     profiles: ["dev", "dev-gpu"]
 
   inspector:
     extends:
       file: "docker-compose/prod/docker-compose.pipeline.yml"
       service: inspector
-    depends_on:
-      kafka1:
-        condition: service_healthy
-      kafka2:
-        condition: service_healthy
-      kafka3:
-        condition: service_healthy
     profiles: ["prod", "prod-gpu"]
 
 
@@ -183,82 +109,40 @@ services:
     extends:
       file: "docker-compose/dev/docker-compose.pipeline.yml"
       service: detector
-    depends_on:
-      kafka1:
-        condition: service_healthy
-      kafka2:
-        condition: service_healthy
-      kafka3:
-        condition: service_healthy
     profiles: ["dev"]
 
   detector-dev-gpu:
     extends:
       file: "docker-compose/dev/docker-compose.pipeline.yml"
       service: detector-gpu
-    depends_on:
-      kafka1:
-        condition: service_healthy
-      kafka2:
-        condition: service_healthy
-      kafka3:
-        condition: service_healthy
     profiles: ["dev-gpu"]
 
   detector:
     extends:
       file: "docker-compose/prod/docker-compose.pipeline.yml"
       service: detector
-    depends_on:
-      kafka1:
-        condition: service_healthy
-      kafka2:
-        condition: service_healthy
-      kafka3:
-        condition: service_healthy
     profiles: ["prod"]
 
   detector-gpu:
     extends:
       file: "docker-compose/prod/docker-compose.pipeline.yml"
       service: detector-gpu
-    depends_on:
-      kafka1:
-        condition: service_healthy
-      kafka2:
-        condition: service_healthy
-      kafka3:
-        condition: service_healthy
     profiles: ["prod-gpu"]
 
   alerter-dev:
     extends:
       file: "docker-compose/dev/docker-compose.pipeline.yml"
       service: alerter
-    depends_on:
-      kafka1:
-        condition: service_healthy
-      kafka2:
-        condition: service_healthy
-      kafka3:
-        condition: service_healthy
     profiles: ["dev", "dev-gpu"]
 
   alerter:
     extends:
       file: "docker-compose/prod/docker-compose.pipeline.yml"
       service: alerter
-    depends_on:
-      kafka1:
-        condition: service_healthy
-      kafka2:
-        condition: service_healthy
-      kafka3:
-        condition: service_healthy
     profiles: ["prod", "prod-gpu"]
 
   zeek:
-    image: ghcr.io/astraos-de/hamstring-zeek:2.0.1
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-zeek:${HAMSTRING_ZEEK_IMAGE_TAG:-2.0.1}"
     cap_add:
       - NET_ADMIN
     network_mode: host

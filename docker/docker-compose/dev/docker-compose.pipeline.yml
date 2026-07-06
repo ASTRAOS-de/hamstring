@@ -4,10 +4,10 @@ services:
       context: ../../..
       dockerfile: docker/dockerfiles/Dockerfile.logserver
     volumes:
-      - "${MOUNT_PATH:?MOUNT_PATH not set}:/opt/file.txt"
       - ../../../config.yaml:/app/config.yaml
     environment:
       - GROUP_ID=log_storage
+      - HAMSTRING_WAIT_FOR=kafka
     deploy:
       mode: "replicated"
       replicas: 1
@@ -28,6 +28,7 @@ services:
       hamstring:
     environment:
       - GROUP_ID=log_collection
+      - HAMSTRING_WAIT_FOR=kafka
   prefilter:
     build:
       context: ../../..
@@ -42,6 +43,7 @@ services:
       replicas: 1
     environment:
       - GROUP_ID=log_filtering
+      - HAMSTRING_WAIT_FOR=kafka
   inspector:
     build:
       context: ../../..
@@ -65,6 +67,7 @@ services:
     environment:
       - GROUP_ID=data_inspection
       - NUMBER_OF_INSTANCES=1
+      - HAMSTRING_WAIT_FOR=kafka
   detector:
     build:
       context: ../../..
@@ -79,6 +82,7 @@ services:
       replicas: 1
     environment:
       - GROUP_ID=data_analysis
+      - HAMSTRING_WAIT_FOR=kafka
 
   detector-gpu:
     build:
@@ -100,6 +104,7 @@ services:
               capabilities: [gpu]
     environment:
       - GROUP_ID=data_analysis
+      - HAMSTRING_WAIT_FOR=kafka
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
@@ -110,7 +115,7 @@ services:
     restart: "unless-stopped"
     volumes:
       - ../../../config.yaml:/app/config.yaml
-      - ../../../logs:/opt/logs
+      - "${ALERTER_LOGS_PATH:-../../../logs}:/opt/logs"
     networks:
       hamstring:
     deploy:
@@ -118,3 +123,4 @@ services:
       replicas: 1
     environment:
       - GROUP_ID=data_alerting
+      - HAMSTRING_WAIT_FOR=kafka
