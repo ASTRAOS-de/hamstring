@@ -64,7 +64,9 @@ def get_kafka_endpoints(config: dict) -> list[tuple[str, int]]:
 
 
 def get_clickhouse_endpoint(config: dict) -> tuple[str, int]:
-    env_endpoints = parse_host_port_list(os.getenv("HAMSTRING_CLICKHOUSE_WAIT_ENDPOINT"))
+    env_endpoints = parse_host_port_list(
+        os.getenv("HAMSTRING_CLICKHOUSE_WAIT_ENDPOINT")
+    )
     if env_endpoints:
         return env_endpoints[0]
 
@@ -128,7 +130,9 @@ def wait_for_dependencies(dependencies: list[str]) -> None:
     config = setup_config()
     timeout_seconds = int(os.getenv("HAMSTRING_WAIT_TIMEOUT_SECONDS", "180"))
     interval_seconds = float(os.getenv("HAMSTRING_WAIT_INTERVAL_SECONDS", "2"))
-    initial_delay_seconds = float(os.getenv("HAMSTRING_WAIT_INITIAL_DELAY_SECONDS", "30"))
+    initial_delay_seconds = float(
+        os.getenv("HAMSTRING_WAIT_INITIAL_DELAY_SECONDS", "30")
+    )
 
     if initial_delay_seconds > 0:
         logger.info(
