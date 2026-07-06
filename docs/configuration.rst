@@ -116,6 +116,67 @@ Pipeline Configuration
 The following parameters control the behavior of each stage of the HAMSTRING pipeline, including the
 functionality of the modules.
 
+``pipeline.acceleration``
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Controls optional hardware acceleration for modules that support accelerated execution. Values from
+``default`` are used unless a configured inspector or detector overrides them with its own
+``acceleration`` block.
+
+.. list-table:: Acceleration options
+   :header-rows: 1
+   :widths: 30 20 50
+
+   * - Parameter
+     - Default Value
+     - Description
+   * - ``enabled``
+     - ``true``
+     - Enables accelerated execution where a module supports it.
+   * - ``fallback_to_cpu``
+     - ``true``
+     - Allows a module to continue on CPU if the requested accelerator is unavailable.
+   * - ``log_device``
+     - ``true``
+     - Logs the selected acceleration device during startup.
+   * - ``default.device``
+     - ``auto``
+     - Default device selection. Use ``auto`` for automatic detection, or a module-supported device name.
+   * - ``default.backend``
+     - ``auto``
+     - Default acceleration backend. Use ``auto`` for module-specific automatic backend selection.
+   * - ``default.batch_size``
+     - ``auto``
+     - Default accelerated inference batch size.
+
+``pipeline.resilience``
+^^^^^^^^^^^^^^^^^^^^^^^
+
+Controls retry behavior around transient startup and infrastructure errors.
+
+.. list-table:: Retry options
+   :header-rows: 1
+   :widths: 30 20 50
+
+   * - Parameter
+     - Default Value
+     - Description
+   * - ``retry.initial_delay_seconds``
+     - ``1.0``
+     - Delay before the first retry.
+   * - ``retry.max_delay_seconds``
+     - ``30.0``
+     - Maximum delay between retries.
+   * - ``retry.backoff_multiplier``
+     - ``2.0``
+     - Multiplier used for exponential backoff.
+   * - ``retry.jitter_seconds``
+     - ``0.25``
+     - Random jitter added to retry delays.
+   * - ``retry.log_every_attempts``
+     - ``5``
+     - Log every nth retry attempt while a dependency is still unavailable.
+
 ``pipeline.scaling``
 ^^^^^^^^^^^^^^^^^^^^
 
@@ -330,7 +391,8 @@ With this example and the hybrid detector config shown above, the detector start
      - ``"/opt/file.txt"``
      - Path of the input file, to which data is appended during usage.
 
-       Keep this setting unchanged when using Docker; modify the ``MOUNT_PATH`` in ``docker/.env`` instead.
+       Keep this setting unchanged when using Docker. Mount a different host file with
+       ``LOGSERVER_INPUT_PATH`` instead.
 
 ``pipeline.log_collection``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -466,6 +528,9 @@ To entirely skip the anomaly detection phase, you can set ``inspector_module_nam
    * - send_to_alerter
      - ``true``
      - Set to ``false`` to disable the detector-to-alerter Kafka output while still allowing detector-to-detector forwarding.
+   * - acceleration
+     - See ``pipeline.acceleration``
+     - Optional per-detector acceleration override.
 
 
 ``pipeline.alerting``
@@ -487,12 +552,35 @@ To entirely skip the anomaly detection phase, you can set ``inspector_module_nam
    * - log_file_path
      - ``"/opt/logs/alerts.txt"``
      - Local file path where alerts will be appended if ``log_to_file`` is enabled.
+   * - log_rotation.enabled
+     - ``true``
+     - Enables rotation for the alert log file.
+   * - log_rotation.retention_days
+     - ``7``
+     - Number of days to retain rotated alert log files.
    * - external_kafka_topic
      - ``"hamstring_alerts"``
      - Name of the external Kafka topic where alerts will be sent if ``log_to_kafka`` is enabled.
    * - plugins
      - ``[]``
      - List of custom alerter plugins to execute. Each plugin must specify ``name``, ``alerter_module_name``, and ``alerter_class_name``.
+
+``pipeline.monitoring``
+^^^^^^^^^^^^^^^^^^^^^^^
+
+.. list-table:: ``monitoring`` Parameters
+   :header-rows: 1
+   :widths: 30 20 50
+
+   * - Parameter
+     - Default Value
+     - Description
+   * - clickhouse_connector.batch_size
+     - ``50``
+     - Number of monitoring rows written to ClickHouse in one batch.
+   * - clickhouse_connector.batch_timeout
+     - ``2.0``
+     - Maximum time in seconds before a partial monitoring batch is written.
 
 ``pipeline.zeek``
 ^^^^^^^^^^^^^^^^^
@@ -530,8 +618,9 @@ The following parameters control the infrastructure of the software.
      - Default Value
      - Description
    * - kafka_brokers
-     - ``hostname: kafka1, port: 8097, node_ip: 0.0.0.0``, ``hostname: kafka2, port: 8098, node_ip: 0.0.0.0``, ``hostname: kafka3, port: 8099, node_ip: 0.0.0.0``
-     - Hostnames and ports of the Kafka brokers, given as list. The node ip is crucial and needs to be set to the actual IP of the system where the Kafka broker will be running on.
+     - ``hostname: kafka1, internal_port: 19092, external_port: 8097, node_ip: 127.0.0.1``, ``hostname: kafka2, internal_port: 19093, external_port: 8098, node_ip: 127.0.0.1``, ``hostname: kafka3, internal_port: 19094, external_port: 8099, node_ip: 127.0.0.1``
+     - Kafka broker endpoints. Containers use ``hostname`` and ``internal_port`` on the Docker network;
+       host-network clients use ``node_ip`` and ``external_port``.
    * - kafka_topics_prefix
      - Not given here
      - Kafka topic name prefixes given as strings. These prefix name are used to construct the actual topic names based on the instance name (e.g. a collector instance name) that produces for the given stage.
@@ -554,3 +643,384 @@ The following parameters control the infrastructure of the software.
    * - monitoring.clickhouse_server.hostname
      - ``clickhouse-server``
      - Hostname of the ClickHouse server. Used by Grafana.
+   * - monitoring.clickhouse_server.http_port
+     - ``8123``
+     - Optional HTTP port used by the container entrypoint when waiting for ClickHouse. If omitted,
+       HAMSTRING uses ``8123``.
+
+Deployment Environment Variables
+................................
+
+The Docker Compose and Docker Swarm files expose the following environment variables. Values shown here
+are the defaults used when no override is provided.
+
+Service readiness
+^^^^^^^^^^^^^^^^^
+
+HAMSTRING application images use ``src.base.service_entrypoint`` as their container entrypoint. The
+entrypoint waits for selected infrastructure before starting the module script.
+
+.. list-table:: Readiness variables
+   :header-rows: 1
+   :widths: 30 25 45
+
+   * - Variable
+     - Default
+     - Description
+   * - ``HAMSTRING_WAIT_FOR``
+     - unset
+     - Comma-separated dependencies to wait for. Supported values are ``kafka`` and ``clickhouse``.
+       Compose and Swarm set ``kafka`` for pipeline modules and ``kafka,clickhouse`` for the
+       monitoring agent.
+   * - ``HAMSTRING_WAIT_INITIAL_DELAY_SECONDS``
+     - ``30``
+     - Delay before dependency checks start.
+   * - ``HAMSTRING_WAIT_TIMEOUT_SECONDS``
+     - ``180``
+     - Maximum wait time per dependency endpoint.
+   * - ``HAMSTRING_WAIT_INTERVAL_SECONDS``
+     - ``2``
+     - Delay between readiness attempts.
+   * - ``HAMSTRING_KAFKA_WAIT_ENDPOINTS``
+     - from ``environment.kafka_brokers``
+     - Optional comma-separated ``host:port`` list overriding the Kafka endpoints used by the
+       readiness check.
+   * - ``HAMSTRING_CLICKHOUSE_WAIT_ENDPOINT``
+     - from ``environment.monitoring.clickhouse_server``
+     - Optional ``host:port`` endpoint overriding the ClickHouse readiness check.
+
+Application service variables
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. list-table:: Application service variables
+   :header-rows: 1
+   :widths: 30 25 45
+
+   * - Variable
+     - Default
+     - Description
+   * - ``GROUP_ID``
+     - service-specific
+     - Kafka consumer group for the service. Compose and Swarm set service defaults such as
+       ``log_storage``, ``log_collection``, ``log_filtering``, ``data_inspection``,
+       ``data_analysis``, ``data_alerting``, and ``monitoring_agent``.
+   * - ``MONITORING_AGENT_GROUP_ID``
+     - ``monitoring_agent``
+     - Swarm override for the monitoring agent ``GROUP_ID``.
+   * - ``LOGSERVER_GROUP_ID``
+     - ``log_storage``
+     - Swarm override for the logserver ``GROUP_ID``.
+   * - ``LOGCOLLECTOR_GROUP_ID``
+     - ``log_collection``
+     - Swarm override for the logcollector ``GROUP_ID``.
+   * - ``PREFILTER_GROUP_ID``
+     - ``log_filtering``
+     - Swarm override for the prefilter ``GROUP_ID``.
+   * - ``INSPECTOR_GROUP_ID``
+     - ``data_inspection``
+     - Swarm override for the inspector ``GROUP_ID``.
+   * - ``DETECTOR_GROUP_ID``
+     - ``data_analysis``
+     - Swarm override for the detector ``GROUP_ID``.
+   * - ``ALERTER_GROUP_ID``
+     - ``data_alerting``
+     - Swarm override for the alerter ``GROUP_ID``.
+   * - ``NUMBER_OF_INSTANCES``
+     - ``1``
+     - Replica count hint used by Kafka topic creation. Set this to the Docker service replica count
+       when scaling a consumer service.
+   * - ``INSPECTOR_NUMBER_OF_INSTANCES``
+     - ``1``
+     - Swarm override for inspector ``NUMBER_OF_INSTANCES``.
+   * - ``KAFKA_TOPIC_PARTITIONS``
+     - ``12``
+     - Default partition count requested for new HAMSTRING Kafka topics.
+   * - ``KAFKA_TOPIC_REPLICATION_FACTOR``
+     - from ``environment.kafka_topics.replication_factor``
+     - Replication factor requested for new HAMSTRING Kafka topics. At runtime this is capped to the
+       configured broker count.
+   * - ``KAFKA_TOPIC_MIN_PARTITIONS``
+     - ``1``
+     - Runtime lower bound for topic partition creation and expansion.
+   * - ``HAMSTRING_CONFIG_CHECKSUM``
+     - current compose value
+     - Optional deployment marker used to force Swarm service updates when ``config.yaml`` changes.
+   * - ``NVIDIA_VISIBLE_DEVICES``
+     - ``all``
+     - GPU device selection for detector services that use GPU acceleration.
+   * - ``NVIDIA_DRIVER_CAPABILITIES``
+     - ``compute,utility``
+     - NVIDIA runtime capabilities for GPU detector services.
+   * - ``ZEEK_CONTAINER_NAME``
+     - ``zeek``
+     - Container name passed to the Zeek image.
+
+Image variables
+^^^^^^^^^^^^^^^
+
+.. list-table:: Image variables
+   :header-rows: 1
+   :widths: 35 25 40
+
+   * - Variable
+     - Default
+     - Description
+   * - ``HAMSTRING_IMAGE_REGISTRY``
+     - ``ghcr.io/astraos-de``
+     - Registry used for HAMSTRING application images.
+   * - ``HAMSTRING_MONITORING_IMAGE_TAG``
+     - ``v2.2.0``
+     - Tag for ``hamstring-monitoring``.
+   * - ``HAMSTRING_LOGSERVER_IMAGE_TAG``
+     - ``v2.2.0``
+     - Tag for ``hamstring-logserver``.
+   * - ``HAMSTRING_LOGCOLLECTOR_IMAGE_TAG``
+     - ``v2.2.0``
+     - Tag for ``hamstring-logcollector``.
+   * - ``HAMSTRING_PREFILTER_IMAGE_TAG``
+     - ``v2.2.0``
+     - Tag for ``hamstring-prefilter``.
+   * - ``HAMSTRING_INSPECTOR_IMAGE_TAG``
+     - ``v2.2.0``
+     - Tag for ``hamstring-inspector``.
+   * - ``HAMSTRING_DETECTOR_IMAGE_TAG``
+     - ``v2.2.0``
+     - Tag for ``hamstring-detector``.
+   * - ``HAMSTRING_ALERTER_IMAGE_TAG``
+     - ``v2.2.0``
+     - Tag for ``hamstring-alerter``.
+   * - ``HAMSTRING_ZEEK_IMAGE_TAG``
+     - ``2.0.1``
+     - Tag for ``hamstring-zeek``.
+   * - ``KAFKA_IMAGE_REPOSITORY``
+     - ``confluentinc/cp-kafka``
+     - Kafka image repository.
+   * - ``KAFKA_IMAGE_TAG``
+     - ``8.2.2``
+     - Kafka image tag.
+   * - ``CLICKHOUSE_IMAGE_REPOSITORY``
+     - ``clickhouse/clickhouse-server``
+     - ClickHouse image repository.
+   * - ``CLICKHOUSE_IMAGE_TAG``
+     - ``26.5-alpine``
+     - ClickHouse image tag.
+   * - ``GRAFANA_IMAGE_REPOSITORY``
+     - ``grafana/grafana``
+     - Grafana image repository.
+   * - ``GRAFANA_IMAGE_TAG``
+     - ``13.0.3-slim``
+     - Grafana image tag.
+   * - ``PROMETHEUS_IMAGE_REPOSITORY``
+     - ``prom/prometheus``
+     - Prometheus image repository.
+   * - ``PROMETHEUS_IMAGE_TAG``
+     - ``latest``
+     - Prometheus image tag.
+   * - ``KAFKA_EXPORTER_IMAGE_REPOSITORY``
+     - ``danielqsj/kafka-exporter``
+     - Kafka exporter image repository.
+   * - ``KAFKA_EXPORTER_IMAGE_TAG``
+     - ``latest``
+     - Kafka exporter image tag.
+
+Infrastructure variables
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. list-table:: Infrastructure variables
+   :header-rows: 1
+   :widths: 35 25 40
+
+   * - Variable
+     - Default
+     - Description
+   * - ``HOST_IP``
+     - ``localhost``
+     - Host advertised by Kafka for external listeners in Docker Compose.
+   * - ``KAFKA_EXTERNAL_HOST``
+     - ``localhost``
+     - Host advertised by Kafka for external listeners in Docker Swarm.
+   * - ``KAFKA1_EXTERNAL_PORT``
+     - ``8097``
+     - Published external port for Kafka broker 1.
+   * - ``KAFKA2_EXTERNAL_PORT``
+     - ``8098``
+     - Published external port for Kafka broker 2.
+   * - ``KAFKA3_EXTERNAL_PORT``
+     - ``8099``
+     - Published external port for Kafka broker 3.
+   * - ``KAFKA_CLUSTER_ID``
+     - ``MkU3OEVBNTcwNTJENDM2Qk``
+     - Kafka KRaft cluster id.
+   * - ``KAFKA_CONTROLLER_QUORUM_VOTERS``
+     - ``1@kafka1:29093,2@kafka2:29093,3@kafka3:29093``
+     - Kafka KRaft controller voter list.
+   * - ``KAFKA_AUTO_CREATE_TOPICS_ENABLE``
+     - ``false``
+     - Kafka broker auto-topic-creation setting.
+   * - ``KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR``
+     - ``3``
+     - Kafka transaction state topic replication factor.
+   * - ``KAFKA_TRANSACTION_STATE_LOG_MIN_ISR``
+     - ``2``
+     - Kafka transaction state topic minimum in-sync replicas.
+   * - ``KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR``
+     - ``3``
+     - Kafka offsets topic replication factor.
+   * - ``KAFKA_LOG_RETENTION_HOURS``
+     - ``4``
+     - Kafka log retention in hours.
+   * - ``KAFKA_LOG_RETENTION_BYTES``
+     - ``10737418240``
+     - Kafka log retention size.
+   * - ``KAFKA_LOG_SEGMENT_BYTES``
+     - ``1073741824``
+     - Kafka log segment size.
+   * - ``KAFKA_LOG_CLEANUP_POLICY``
+     - ``delete``
+     - Kafka log cleanup policy.
+   * - ``KAFKA_LOG4J_LOGGERS``
+     - Kafka controller defaults
+     - Optional Kafka log category configuration for brokers 2 and 3.
+   * - ``CLICKHOUSE_USER``
+     - ``default``
+     - ClickHouse user used by ClickHouse, Grafana, and the monitoring agent.
+   * - ``CLICKHOUSE_PASSWORD``
+     - ``hamstring``
+     - ClickHouse password used by ClickHouse, Grafana, and the monitoring agent.
+   * - ``CLICKHOUSE_HTTP_PORT``
+     - ``8123``
+     - Published ClickHouse HTTP port in Swarm.
+   * - ``CLICKHOUSE_NATIVE_PORT``
+     - ``9000``
+     - Published ClickHouse native client port in Swarm.
+   * - ``GRAFANA_PORT``
+     - ``3000``
+     - Published Grafana port in Swarm.
+   * - ``GRAFANA_ADMIN_USER``
+     - ``admin``
+     - Grafana admin username.
+   * - ``GRAFANA_ADMIN_PASSWORD``
+     - ``admin``
+     - Grafana admin password.
+   * - ``GRAFANA_INSTALL_PLUGINS``
+     - ``grafana-clickhouse-datasource``
+     - Grafana plugins installed at startup.
+   * - ``PROMETHEUS_PORT``
+     - ``9088``
+     - Published Prometheus port in Swarm.
+   * - ``PROMETHEUS_CONFIG_FILE``
+     - ``../../docker/prometheus/prometheus.yml``
+     - Prometheus config file used for the Swarm config object.
+   * - ``KAFKA_EXPORTER_PORT``
+     - ``9308``
+     - Published Kafka exporter port in Swarm.
+
+Path and mount variables
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. list-table:: Path variables
+   :header-rows: 1
+   :widths: 35 25 40
+
+   * - Variable
+     - Default
+     - Description
+   * - ``HAMSTRING_ROOT``
+     - ``../..``
+     - Base path for Swarm bind mounts to ``config.yaml`` and provisioning files.
+   * - ``LOGSERVER_INPUT_PATH``
+     - ``docker/default_input``
+     - Host file mounted to ``/opt/file.txt`` for the logserver. The exact relative default differs
+       between Compose fragments and the Swarm file but resolves to ``docker/default_input`` from the
+       repository.
+   * - ``ALERTER_LOGS_PATH``
+     - ``/opt/logs`` in prod, ``../../../logs`` in dev
+     - Host directory mounted to ``/opt/logs`` by Docker Compose. The Swarm stack uses a named volume
+       instead.
+
+Swarm scheduling variables
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Docker Swarm placement constraints default to ``node.platform.os == linux``. Set the corresponding
+variable to pin a service to a labeled node, for example
+``KAFKA1_PLACEMENT_CONSTRAINT='node.labels.kafka1 == true'``.
+
+.. list-table:: Swarm placement and replica variables
+   :header-rows: 1
+   :widths: 35 25 40
+
+   * - Variable
+     - Default
+     - Description
+   * - ``KAFKA1_PLACEMENT_CONSTRAINT``
+     - ``node.platform.os == linux``
+     - Placement constraint for Kafka broker 1.
+   * - ``KAFKA2_PLACEMENT_CONSTRAINT``
+     - ``node.platform.os == linux``
+     - Placement constraint for Kafka broker 2.
+   * - ``KAFKA3_PLACEMENT_CONSTRAINT``
+     - ``node.platform.os == linux``
+     - Placement constraint for Kafka broker 3.
+   * - ``CLICKHOUSE_PLACEMENT_CONSTRAINT``
+     - ``node.platform.os == linux``
+     - Placement constraint for ClickHouse.
+   * - ``GRAFANA_PLACEMENT_CONSTRAINT``
+     - ``node.platform.os == linux``
+     - Placement constraint for Grafana.
+   * - ``PROMETHEUS_PLACEMENT_CONSTRAINT``
+     - ``node.platform.os == linux``
+     - Placement constraint for Prometheus.
+   * - ``KAFKA_EXPORTER_PLACEMENT_CONSTRAINT``
+     - ``node.platform.os == linux``
+     - Placement constraint for Kafka exporter.
+   * - ``MONITORING_AGENT_PLACEMENT_CONSTRAINT``
+     - ``node.platform.os == linux``
+     - Placement constraint for the monitoring agent.
+   * - ``LOGSERVER_PLACEMENT_CONSTRAINT``
+     - ``node.platform.os == linux``
+     - Placement constraint for the logserver.
+   * - ``LOGCOLLECTOR_PLACEMENT_CONSTRAINT``
+     - ``node.platform.os == linux``
+     - Placement constraint for the logcollector.
+   * - ``PREFILTER_PLACEMENT_CONSTRAINT``
+     - ``node.platform.os == linux``
+     - Placement constraint for the prefilter.
+   * - ``INSPECTOR_PLACEMENT_CONSTRAINT``
+     - ``node.platform.os == linux``
+     - Placement constraint for the inspector.
+   * - ``DETECTOR_PLACEMENT_CONSTRAINT``
+     - ``node.platform.os == linux``
+     - Placement constraint for the detector.
+   * - ``ALERTER_PLACEMENT_CONSTRAINT``
+     - ``node.platform.os == linux``
+     - Placement constraint for the alerter.
+   * - ``ZEEK_PLACEMENT_CONSTRAINT``
+     - ``node.platform.os == linux``
+     - Placement constraint for Zeek.
+   * - ``PREFILTER_REPLICAS``
+     - ``1``
+     - Swarm replica count for the prefilter service.
+   * - ``INSPECTOR_REPLICAS``
+     - ``1``
+     - Swarm replica count for the inspector service.
+   * - ``DETECTOR_REPLICAS``
+     - ``1``
+     - Swarm replica count for the detector service.
+   * - ``ALERTER_REPLICAS``
+     - ``1``
+     - Swarm replica count for the alerter service.
+   * - ``ZEEK_REPLICAS``
+     - ``1``
+     - Swarm replica count for the Zeek service.
+   * - ``INSPECTOR_CPU_LIMIT``
+     - ``2``
+     - Swarm CPU limit for the inspector.
+   * - ``INSPECTOR_MEMORY_LIMIT``
+     - ``512M``
+     - Swarm memory limit for the inspector.
+   * - ``INSPECTOR_CPU_RESERVATION``
+     - ``1``
+     - Swarm CPU reservation for the inspector.
+   * - ``INSPECTOR_MEMORY_RESERVATION``
+     - ``256M``
+     - Swarm memory reservation for the inspector.
