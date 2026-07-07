@@ -232,6 +232,8 @@ services:
       GROUP_ID: "${LOGSERVER_GROUP_ID:-log_storage}"
       HAMSTRING_CONFIG_CHECKSUM: "${HAMSTRING_CONFIG_CHECKSUM:-d9bc812b76c2b58c633b412a6c07f981f3c4d787}"
     deploy:
+      mode: replicated
+      replicas: ${LOGSERVER_REPLICAS:-1}
       placement:
         constraints:
           - "${LOGSERVER_PLACEMENT_CONSTRAINT:-node.platform.os == linux}"
@@ -250,6 +252,8 @@ services:
       GROUP_ID: "${LOGCOLLECTOR_GROUP_ID:-log_collection}"
       HAMSTRING_CONFIG_CHECKSUM: "${HAMSTRING_CONFIG_CHECKSUM:-d9bc812b76c2b58c633b412a6c07f981f3c4d787}"
     deploy:
+      mode: replicated
+      replicas: ${LOGCOLLECTOR_REPLICAS:-1}
       placement:
         constraints:
           - "${LOGCOLLECTOR_PLACEMENT_CONSTRAINT:-node.platform.os == linux}"
