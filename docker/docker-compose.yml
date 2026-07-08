@@ -142,12 +142,14 @@ services:
     profiles: ["prod", "prod-gpu"]
 
   zeek:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-zeek:${HAMSTRING_ZEEK_IMAGE_TAG:-2.0.1}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-zeek:${HAMSTRING_ZEEK_IMAGE_TAG:-2.0.4}"
     cap_add:
       - NET_ADMIN
+      - NET_RAW
     network_mode: host
     environment:
       - CONTAINER_NAME=zeek
+      - HAMSTRING_ZEEK_KAFKA_WAIT_INTERVAL_SECONDS=${HAMSTRING_ZEEK_KAFKA_WAIT_INTERVAL_SECONDS:-5}
     volumes:
       - ../config.yaml:/opt/config.yaml
       - ../data/test_pcaps/:/opt/static_files

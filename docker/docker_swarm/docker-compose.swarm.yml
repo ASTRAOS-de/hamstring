@@ -357,11 +357,11 @@ services:
           - "${ALERTER_PLACEMENT_CONSTRAINT:-node.platform.os == linux}"
       restart_policy:
         condition: any
-
   zeek:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-zeek:${HAMSTRING_ZEEK_IMAGE_TAG:-2.0.1}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-zeek:${HAMSTRING_ZEEK_IMAGE_TAG:-2.0.4}"
     cap_add:
       - NET_ADMIN
+      - NET_RAW
     networks:
       - host
     volumes:
@@ -371,6 +371,7 @@ services:
       # Kafka endpoints for host-networked Zeek come from config.yaml:
       # environment.kafka_brokers[*].node_ip/external_port.
       CONTAINER_NAME: "${ZEEK_CONTAINER_NAME:-zeek}"
+      HAMSTRING_ZEEK_KAFKA_WAIT_INTERVAL_SECONDS: "${HAMSTRING_ZEEK_KAFKA_WAIT_INTERVAL_SECONDS:-5}"
     deploy:
       mode: replicated
       replicas: ${ZEEK_REPLICAS:-1}
