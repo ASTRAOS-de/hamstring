@@ -282,7 +282,7 @@ pipeline:
   zeek:
     sensors:
       zeek:
-        static_analysis: true
+        static_analysis: false
         protocols:
           - dns
         interfaces:
