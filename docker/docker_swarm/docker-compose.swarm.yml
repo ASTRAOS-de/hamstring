@@ -200,7 +200,7 @@ services:
         condition: any
 
   monitoring_agent:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-monitoring:${HAMSTRING_MONITORING_IMAGE_TAG:-v2.2.0}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-monitoring:${HAMSTRING_MONITORING_IMAGE_TAG:-v2.2.1}"
     command: ["src/monitoring/monitoring_agent.py"]
     networks:
       - hamstring
@@ -220,7 +220,7 @@ services:
         condition: any
 
   logserver:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-logserver:${HAMSTRING_LOGSERVER_IMAGE_TAG:-v2.2.0}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-logserver:${HAMSTRING_LOGSERVER_IMAGE_TAG:-v2.2.1}"
     command: ["src/logserver/server.py"]
     networks:
       - hamstring
@@ -241,7 +241,7 @@ services:
         condition: any
 
   logcollector:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-logcollector:${HAMSTRING_LOGCOLLECTOR_IMAGE_TAG:-v2.2.0}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-logcollector:${HAMSTRING_LOGCOLLECTOR_IMAGE_TAG:-v2.2.1}"
     command: ["src/logcollector/collector.py"]
     networks:
       - hamstring
@@ -261,7 +261,7 @@ services:
         condition: any
 
   prefilter:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-prefilter:${HAMSTRING_PREFILTER_IMAGE_TAG:-v2.2.0}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-prefilter:${HAMSTRING_PREFILTER_IMAGE_TAG:-v2.2.1}"
     command: ["src/prefilter/prefilter.py"]
     networks:
       - hamstring
@@ -281,7 +281,7 @@ services:
         condition: any
 
   inspector:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-inspector:${HAMSTRING_INSPECTOR_IMAGE_TAG:-v2.2.0}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-inspector:${HAMSTRING_INSPECTOR_IMAGE_TAG:-v2.2.1}"
     command: ["src/inspector/inspector.py"]
     networks:
       - hamstring
@@ -309,7 +309,7 @@ services:
         condition: any
 
   detector:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-detector:${HAMSTRING_DETECTOR_IMAGE_TAG:-v2.2.0}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-detector:${HAMSTRING_DETECTOR_IMAGE_TAG:-v2.2.1}"
     command: ["src/detector/detector.py"]
     networks:
       - hamstring
@@ -338,7 +338,7 @@ services:
         condition: any
 
   alerter:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-alerter:${HAMSTRING_ALERTER_IMAGE_TAG:-v2.2.0}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-alerter:${HAMSTRING_ALERTER_IMAGE_TAG:-v2.2.1}"
     command: ["src/alerter/alerter.py"]
     networks:
       - hamstring
