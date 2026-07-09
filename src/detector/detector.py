@@ -241,15 +241,24 @@ class DetectorBase(DetectorAbstractBase):
         self.kafka_produce_handler = None
 
         self.model, self.scaler = self._get_model()
+        self.monitoring_kafka_producer = ClickHouseKafkaSender.create_shared_producer()
 
         # databases
-        self.batch_tree = ClickHouseKafkaSender("batch_tree")
-        self.suspicious_batch_timestamps = ClickHouseKafkaSender(
-            "suspicious_batch_timestamps"
+        self.batch_tree = ClickHouseKafkaSender(
+            "batch_tree", self.monitoring_kafka_producer
         )
-        self.alerts = ClickHouseKafkaSender("alerts")
-        self.logline_timestamps = ClickHouseKafkaSender("logline_timestamps")
-        self.fill_levels = ClickHouseKafkaSender("fill_levels")
+        self.suspicious_batch_timestamps = ClickHouseKafkaSender(
+            "suspicious_batch_timestamps", self.monitoring_kafka_producer
+        )
+        self.alerts = ClickHouseKafkaSender(
+            "alerts", self.monitoring_kafka_producer
+        )
+        self.logline_timestamps = ClickHouseKafkaSender(
+            "logline_timestamps", self.monitoring_kafka_producer
+        )
+        self.fill_levels = ClickHouseKafkaSender(
+            "fill_levels", self.monitoring_kafka_producer
+        )
 
         self.fill_levels.insert(
             dict(

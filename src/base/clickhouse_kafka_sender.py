@@ -24,7 +24,15 @@ class ClickHouseKafkaSender:
     serialization for the specified ClickHouse table.
     """
 
-    def __init__(self, table_name: str):
+    @staticmethod
+    def create_shared_producer() -> SimpleKafkaProduceHandler:
+        return SimpleKafkaProduceHandler()
+
+    def __init__(
+        self,
+        table_name: str,
+        kafka_producer: SimpleKafkaProduceHandler | None = None,
+    ):
         """
         Args:
             table_name (str): Name of the ClickHouse table to send insert operations for.
@@ -33,7 +41,7 @@ class ClickHouseKafkaSender:
             KeyError: If the specified table name is not found in TABLE_NAME_TO_TYPE mapping.
         """
         self.table_name = table_name
-        self.kafka_producer = SimpleKafkaProduceHandler()
+        self.kafka_producer = kafka_producer or SimpleKafkaProduceHandler()
         self.data_schema = marshmallow_dataclass.class_schema(
             TABLE_NAME_TO_TYPE.get(table_name)
         )()

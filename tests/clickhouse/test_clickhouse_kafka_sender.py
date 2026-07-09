@@ -21,6 +21,21 @@ class TestInit(unittest.TestCase):
         self.assertEqual(mock_produce_handler_instance, sut.kafka_producer)
         mock_produce_handler.assert_called_once()
 
+    @patch("src.base.clickhouse_kafka_sender.marshmallow_dataclass")
+    @patch("src.base.clickhouse_kafka_sender.SimpleKafkaProduceHandler")
+    def test_init_uses_provided_producer(self, mock_produce_handler, mock_marshmallow):
+        # Arrange
+        table_name = "test_table"
+        kafka_producer = object()
+
+        # Act
+        sut = ClickHouseKafkaSender(table_name, kafka_producer)
+
+        # Assert
+        self.assertEqual(table_name, sut.table_name)
+        self.assertIs(kafka_producer, sut.kafka_producer)
+        mock_produce_handler.assert_not_called()
+
 
 class TestInsert(unittest.TestCase):
     @patch("src.base.clickhouse_kafka_sender.marshmallow_dataclass")

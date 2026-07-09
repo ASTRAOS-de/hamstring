@@ -8,7 +8,9 @@ import uuid
 
 sys.path.append(os.getcwd())
 from src.base.clickhouse_kafka_sender import ClickHouseKafkaSender
-from src.base.kafka_handler import ExactlyOnceKafkaConsumeHandler
+from src.base.kafka_handler import (
+    ExactlyOnceKafkaConsumeHandler,
+)
 from src.base.logline_handler import LoglineHandler
 from src.base import utils
 from src.base.execution import (
@@ -69,20 +71,33 @@ class LogCollector:
         self.kafka_consume_handler = ExactlyOnceKafkaConsumeHandler(consume_topic)
         self.batch_configuration = utils.get_batch_configuration(collector_name)
         self.loglines = asyncio.Queue()
+        self.monitoring_kafka_producer = ClickHouseKafkaSender.create_shared_producer()
         self.batch_handler = BufferedBatchSender(
-            produce_topics=produce_topics, collector_name=collector_name
+            produce_topics=produce_topics,
+            collector_name=collector_name,
+            monitoring_kafka_producer=self.monitoring_kafka_producer,
         )
         self.logline_handler = LoglineHandler(validation_config)
 
         # databases
-        self.failed_protocol_loglines = ClickHouseKafkaSender("failed_loglines")
-        self.protocol_loglines = ClickHouseKafkaSender("loglines")
-        self.logline_timestamps = ClickHouseKafkaSender("logline_timestamps")
-        self.server_log_to_logline = ClickHouseKafkaSender("server_log_to_logline")
-        self.server_log_terminal_events = ClickHouseKafkaSender(
-            "server_log_terminal_events"
+        self.failed_protocol_loglines = ClickHouseKafkaSender(
+            "failed_loglines", self.monitoring_kafka_producer
         )
-        self.fill_levels = ClickHouseKafkaSender("fill_levels")
+        self.protocol_loglines = ClickHouseKafkaSender(
+            "loglines", self.monitoring_kafka_producer
+        )
+        self.logline_timestamps = ClickHouseKafkaSender(
+            "logline_timestamps", self.monitoring_kafka_producer
+        )
+        self.server_log_to_logline = ClickHouseKafkaSender(
+            "server_log_to_logline", self.monitoring_kafka_producer
+        )
+        self.server_log_terminal_events = ClickHouseKafkaSender(
+            "server_log_terminal_events", self.monitoring_kafka_producer
+        )
+        self.fill_levels = ClickHouseKafkaSender(
+            "fill_levels", self.monitoring_kafka_producer
+        )
 
         self.fill_levels.insert(
             dict(
