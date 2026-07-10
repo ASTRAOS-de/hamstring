@@ -33,17 +33,32 @@ class BufferedBatch:
     chronological processing. Tracks batch metadata including IDs, timestamps, and fill levels for monitoring.
     """
 
-    def __init__(self, collector_name):
+    def __init__(
+        self,
+        collector_name,
+        monitoring_kafka_producer=None,
+    ):
         self.name = f"buffered-batch-for-{collector_name}"
         self.batch = {}  # Batch for the latest messages coming in
         self.buffer = {}  # Former batch with previous messages
         self.batch_id = {}  # Batch ID per key
+        self.monitoring_kafka_producer = (
+            monitoring_kafka_producer or ClickHouseKafkaSender.create_shared_producer()
+        )
 
         # databases
-        self.logline_to_batches = ClickHouseKafkaSender("logline_to_batches")
-        self.batch_timestamps = ClickHouseKafkaSender("batch_timestamps")
-        self.fill_levels = ClickHouseKafkaSender("fill_levels")
-        self.batch_tree = ClickHouseKafkaSender("batch_tree")
+        self.logline_to_batches = ClickHouseKafkaSender(
+            "logline_to_batches", self.monitoring_kafka_producer
+        )
+        self.batch_timestamps = ClickHouseKafkaSender(
+            "batch_timestamps", self.monitoring_kafka_producer
+        )
+        self.fill_levels = ClickHouseKafkaSender(
+            "fill_levels", self.monitoring_kafka_producer
+        )
+        self.batch_tree = ClickHouseKafkaSender(
+            "batch_tree", self.monitoring_kafka_producer
+        )
         self.fill_levels.insert(
             dict(
                 timestamp=datetime.datetime.now(),
@@ -431,16 +446,26 @@ class BufferedBatchSender:
     via Kafka and tracks message timestamps for monitoring and debugging purposes.
     """
 
-    def __init__(self, produce_topics, collector_name):
+    def __init__(
+        self,
+        produce_topics,
+        collector_name,
+        monitoring_kafka_producer=None,
+    ):
         self.topics = produce_topics
         self.batch_configuration = get_batch_configuration(collector_name)
         self.timer = None
-        self.batch = BufferedBatch(collector_name)
+        self.monitoring_kafka_producer = (
+            monitoring_kafka_producer or ClickHouseKafkaSender.create_shared_producer()
+        )
+        self.batch = BufferedBatch(collector_name, self.monitoring_kafka_producer)
 
         self.kafka_produce_handler = ExactlyOnceKafkaProduceHandler()
 
         # databases
-        self.logline_timestamps = ClickHouseKafkaSender("logline_timestamps")
+        self.logline_timestamps = ClickHouseKafkaSender(
+            "logline_timestamps", self.monitoring_kafka_producer
+        )
 
     def __del__(self):
         timer = getattr(self, "timer", None)

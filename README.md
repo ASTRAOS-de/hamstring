@@ -65,6 +65,23 @@ HOST_IP=127.0.0.1 docker compose -f docker/docker-compose.yml --profile prod up
 ```sh
 HOST_IP=127.0.0.1 docker compose -f docker/docker-compose.yml --profile dev up
 ```
+
+#### Deploy **HAMSTRING** with Docker Swarm:
+Use the Swarm stack file when you want to use Hamstring in a production grade environment,
+as it provides scaling and error handling capabilities:
+
+```sh
+docker swarm init --advertise-addr <manager-ip>
+HAMSTRING_ROOT="$PWD" docker stack deploy -c docker/docker_swarm/docker-compose.swarm.yml hamstring
+```
+Set `--advertise-addr` to the manager IP address that worker nodes and published
+services should use.
+Set image tags, replica counts, ports, and placement constraints through
+environment variables such as `HAMSTRING_IMAGE_REGISTRY`,
+`HAMSTRING_DETECTOR_IMAGE_TAG`, `DETECTOR_REPLICAS`, `GRAFANA_PORT`, and
+`DETECTOR_PLACEMENT_CONSTRAINT`. Remove the stack with
+`docker stack rm hamstring`.
+
 <p align="center">
   <img src="./assets/hamstring_terminal.gif" alt="Terminal example"/>
 </p>

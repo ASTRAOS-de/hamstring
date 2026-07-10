@@ -377,6 +377,24 @@ flag and keep ``NUMBER_OF_INSTANCES`` aligned with the replica count:
 With this example and the hybrid detector config shown above, the detector starts
 ``2 Docker replicas * 2 processes * 4 threads_per_process = 16`` Kafka consumers.
 
+For Docker Swarm, deploy the dedicated stack file instead of the local Compose
+profiles:
+
+.. code-block:: console
+
+   $ docker swarm init --advertise-addr <manager-ip>
+   $ HAMSTRING_ROOT="$PWD" docker stack deploy -c docker/docker_swarm/docker-compose.swarm.yml hamstring
+
+Set ``--advertise-addr`` to the manager IP address that worker nodes and
+published services should use.
+
+The Swarm file reads replica counts such as ``LOGSERVER_REPLICAS``,
+``LOGCOLLECTOR_REPLICAS``, ``PREFILTER_REPLICAS``, ``INSPECTOR_REPLICAS``,
+``DETECTOR_REPLICAS``, ``ALERTER_REPLICAS``, and ``ZEEK_REPLICAS``. It also
+accepts image tags, published ports, and placement constraints through
+environment variables, for example ``HAMSTRING_DETECTOR_IMAGE_TAG``,
+``GRAFANA_PORT``, and ``DETECTOR_PLACEMENT_CONSTRAINT``.
+
 ``pipeline.log_storage``
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
