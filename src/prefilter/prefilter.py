@@ -83,12 +83,21 @@ class Prefilter:
         self.logline_handler = LoglineHandler(validation_config)
         self.kafka_consume_handler = ExactlyOnceKafkaConsumeHandler(self.consume_topic)
         self.kafka_produce_handler = ExactlyOnceKafkaProduceHandler()
+        self.monitoring_kafka_producer = ClickHouseKafkaSender.create_shared_producer()
 
         # databases
-        self.batch_tree = ClickHouseKafkaSender("batch_tree")
-        self.batch_timestamps = ClickHouseKafkaSender("batch_timestamps")
-        self.logline_timestamps = ClickHouseKafkaSender("logline_timestamps")
-        self.fill_levels = ClickHouseKafkaSender("fill_levels")
+        self.batch_tree = ClickHouseKafkaSender(
+            "batch_tree", self.monitoring_kafka_producer
+        )
+        self.batch_timestamps = ClickHouseKafkaSender(
+            "batch_timestamps", self.monitoring_kafka_producer
+        )
+        self.logline_timestamps = ClickHouseKafkaSender(
+            "logline_timestamps", self.monitoring_kafka_producer
+        )
+        self.fill_levels = ClickHouseKafkaSender(
+            "fill_levels", self.monitoring_kafka_producer
+        )
 
         self.fill_levels.insert(
             dict(

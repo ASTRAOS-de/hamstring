@@ -27,6 +27,31 @@ For local development builds, use the development profile:
 Set ``HOST_IP`` to the host address that external Kafka clients should use. The default
 ``localhost`` works for single-host local runs.
 
+Docker Swarm Deployment
+-----------------------
+
+Use ``docker/docker_swarm/docker-compose.swarm.yml`` when deploying HAMSTRING as
+a Swarm stack. Swarm honors the ``deploy`` sections for replicas, restart
+policies, resource limits, and placement constraints:
+
+.. code-block:: console
+
+   $ docker swarm init --advertise-addr <manager-ip>
+   $ HAMSTRING_ROOT="$PWD" docker stack deploy -c docker/docker_swarm/docker-compose.swarm.yml hamstring
+
+Set ``--advertise-addr`` to the manager IP address that worker nodes and
+published services should use.
+
+Configure the stack with environment variables before deployment. Common options
+include ``HAMSTRING_IMAGE_REGISTRY`` and per-service image tags, replica counts
+such as ``LOGCOLLECTOR_REPLICAS`` and ``DETECTOR_REPLICAS``, published ports such
+as ``GRAFANA_PORT`` and ``PROMETHEUS_PORT``, and placement constraints such as
+``DETECTOR_PLACEMENT_CONSTRAINT``. Remove the stack with:
+
+.. code-block:: console
+
+   $ docker stack rm hamstring
+
 Scaling With Docker Compose
 ---------------------------
 

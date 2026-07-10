@@ -54,10 +54,15 @@ class LogServer:
 
         self.kafka_consume_handler = ExactlyOnceKafkaConsumeHandler(consume_topic)
         self.kafka_produce_handler = ExactlyOnceKafkaProduceHandler()
+        self.monitoring_kafka_producer = ClickHouseKafkaSender.create_shared_producer()
 
         # databases
-        self.server_logs = ClickHouseKafkaSender("server_logs")
-        self.server_logs_timestamps = ClickHouseKafkaSender("server_logs_timestamps")
+        self.server_logs = ClickHouseKafkaSender(
+            "server_logs", self.monitoring_kafka_producer
+        )
+        self.server_logs_timestamps = ClickHouseKafkaSender(
+            "server_logs_timestamps", self.monitoring_kafka_producer
+        )
 
     async def start(self) -> None:
         """Starts the tasks to both fetch messages from Kafka and read them from the input file."""
