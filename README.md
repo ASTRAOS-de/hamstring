@@ -67,7 +67,7 @@ HOST_IP=127.0.0.1 docker compose -f docker/docker-compose.yml --profile dev up
 ```
 
 #### Deploy **HAMSTRING** with Docker Swarm:
-Use the Swarm stack file when you want to use Hamstring in a production grade environment, 
+Use the Swarm stack file when you want to use Hamstring in a production grade environment,
 as it provides scaling and error handling capabilities:
 
 ```sh

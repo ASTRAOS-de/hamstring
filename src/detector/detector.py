@@ -250,9 +250,7 @@ class DetectorBase(DetectorAbstractBase):
         self.suspicious_batch_timestamps = ClickHouseKafkaSender(
             "suspicious_batch_timestamps", self.monitoring_kafka_producer
         )
-        self.alerts = ClickHouseKafkaSender(
-            "alerts", self.monitoring_kafka_producer
-        )
+        self.alerts = ClickHouseKafkaSender("alerts", self.monitoring_kafka_producer)
         self.logline_timestamps = ClickHouseKafkaSender(
             "logline_timestamps", self.monitoring_kafka_producer
         )
