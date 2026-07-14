@@ -517,6 +517,80 @@ class SimpleKafkaProduceHandler(KafkaProduceHandler):
         self._with_producer_retry(f"Kafka produce to {topic}", operation)
 
 
+class BufferedKafkaProduceHandler(SimpleKafkaProduceHandler):
+    """An asynchronous Kafka producer with bounded local backpressure.
+
+    This producer is intended for high-volume, non-critical telemetry such as
+    the monitoring events eventually written to ClickHouse.  Unlike
+    :class:`SimpleKafkaProduceHandler`, it does not wait for a broker
+    acknowledgement after every record.  librdkafka batches records in the
+    background and delivery callbacks are served by ``poll(0)`` calls made
+    while more telemetry is being queued.
+
+    If Kafka cannot keep up, the bounded local queue eventually fills.  At that
+    point ``produce`` waits for delivery reports instead of allocating
+    unbounded memory or discarding monitoring records.
+    """
+
+    _QUEUE_POLL_TIMEOUT_SECONDS = 0.1
+
+    def __init__(self):
+        """Create a batched producer with a bounded in-memory queue."""
+        self.brokers = ",".join(
+            [
+                f"{broker['hostname']}:{broker['internal_port']}"
+                for broker in KAFKA_BROKERS
+            ]
+        )
+        conf = {
+            "bootstrap.servers": self.brokers,
+            "enable.idempotence": False,
+            "acks": "1",
+            "message.max.bytes": 1000000000,
+            "linger.ms": 10,
+            "batch.num.messages": 1000,
+            "queue.buffering.max.messages": 10000,
+        }
+        KafkaProduceHandler.__init__(self, conf)
+
+    def produce(self, topic: str, data: str, key: None | str = None) -> None:
+        """Queue telemetry for delivery without flushing the producer.
+
+        The producer queue is deliberately bounded.  ``BufferError`` is normal
+        backpressure, so wait for delivery reports and retry it without
+        recreating the producer.  Other transport failures retain the existing
+        reconnect-and-retry behavior.
+        """
+        if not data:
+            return
+
+        def delivery_callback(err, msg):
+            kafka_delivery_report(err, msg)
+
+        def operation():
+            queue_was_full = False
+            while True:
+                self.producer.poll(0)
+                try:
+                    self.producer.produce(
+                        topic=topic,
+                        key=key,
+                        value=data,
+                        callback=delivery_callback,
+                    )
+                    return
+                except BufferError:
+                    if not queue_was_full:
+                        logger.warning(
+                            "Kafka telemetry producer queue is full; "
+                            "waiting for delivery reports."
+                        )
+                        queue_was_full = True
+                    self.producer.poll(self._QUEUE_POLL_TIMEOUT_SECONDS)
+
+        self._with_producer_retry(f"Buffered Kafka produce to {topic}", operation)
+
+
 class ExactlyOnceKafkaProduceHandler(KafkaProduceHandler):
     """Kafka Producer wrapper with Write-Exactly-Once semantics
 
