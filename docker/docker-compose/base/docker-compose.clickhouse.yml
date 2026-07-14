@@ -4,6 +4,7 @@ services:
     container_name: clickhouse-server
     volumes:
       - ../../create_tables:/docker-entrypoint-initdb.d
+      - ../../clickhouse/config.d/retention.xml:/etc/clickhouse-server/config.d/retention.xml:ro
       - ch_data:/var/lib/clickhouse/
       - ch_logs:/var/log/clickhouse-server/
     environment:
