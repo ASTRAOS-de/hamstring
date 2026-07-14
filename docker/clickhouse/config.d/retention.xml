@@ -1,0 +1,16 @@
+<clickhouse>
+    <!--
+      MergeTree TTL deletion is performed during background merges.  The
+      upstream default can defer a TTL merge for four hours; run eligible TTL
+      merges every 15 minutes so monitoring data is reclaimed promptly.
+    -->
+    <merge_tree>
+        <merge_with_ttl_timeout>900</merge_with_ttl_timeout>
+    </merge_tree>
+
+    <!-- Keep ClickHouse's own diagnostic logs from growing without bound. -->
+    <logger>
+        <size>100M</size>
+        <count>3</count>
+    </logger>
+</clickhouse>

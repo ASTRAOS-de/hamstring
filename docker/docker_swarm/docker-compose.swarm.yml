@@ -11,9 +11,14 @@ x-kafka-broker-env: &kafka-broker-env
   KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "${KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR:-3}"
   KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "${KAFKA_TRANSACTION_STATE_LOG_MIN_ISR:-2}"
   KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "${KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR:-3}"
+  # Retention applies only to closed segments and retention.bytes is per
+  # partition replica.  Frequent, small segments make the retention window
+  # effective and keep the replicated pipeline topics bounded on disk.
   KAFKA_LOG_RETENTION_HOURS: "${KAFKA_LOG_RETENTION_HOURS:-4}"
-  KAFKA_LOG_RETENTION_BYTES: "${KAFKA_LOG_RETENTION_BYTES:-10737418240}"
-  KAFKA_LOG_SEGMENT_BYTES: "${KAFKA_LOG_SEGMENT_BYTES:-1073741824}"
+  KAFKA_LOG_RETENTION_BYTES: "${KAFKA_LOG_RETENTION_BYTES:-16777216}"
+  KAFKA_LOG_SEGMENT_BYTES: "${KAFKA_LOG_SEGMENT_BYTES:-4194304}"
+  KAFKA_LOG_SEGMENT_MS: "${KAFKA_LOG_SEGMENT_MS:-900000}"
+  KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: "${KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS:-300000}"
   KAFKA_LOG_CLEANUP_POLICY: "${KAFKA_LOG_CLEANUP_POLICY:-delete}"
 
 x-hamstring-kafka-wait-env: &hamstring-kafka-wait-env
@@ -113,6 +118,7 @@ services:
         mode: ingress
     volumes:
       - "${HAMSTRING_ROOT:-../..}/docker/create_tables:/docker-entrypoint-initdb.d"
+      - "${HAMSTRING_ROOT:-../..}/docker/clickhouse/config.d/retention.xml:/etc/clickhouse-server/config.d/retention.xml:ro"
       - ch_data:/var/lib/clickhouse/
       - ch_logs:/var/log/clickhouse-server/
     healthcheck:
