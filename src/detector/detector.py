@@ -22,6 +22,7 @@ from src.base.acceleration import (
     apply_model_acceleration,
     resolve_acceleration_config,
 )
+from src.base.eos import EosWorkerContext
 from src.base.kafka_handler import (
     ExactlyOnceKafkaConsumeHandler,
     ExactlyOnceKafkaProduceHandler,
@@ -144,6 +145,7 @@ class DetectorAbstractBase(ABC):  # pragma: no cover
         consume_topic,
         produce_topics=None,
         downstream_detector_topics=None,
+        worker_id="default",
     ) -> None:
         pass
 
@@ -239,6 +241,13 @@ class DetectorBase(DetectorAbstractBase):
 
         self.kafka_consume_handler = ExactlyOnceKafkaConsumeHandler(self.consume_topic)
         self.kafka_produce_handler = None
+        self.eos_context = EosWorkerContext(
+            stage=module_name,
+            consume_topic=consume_topic,
+            instance_name=self.name,
+            worker_id=worker_id,
+        )
+        self.worker_id = self.eos_context.worker_id
 
         self.model, self.scaler = self._get_model()
         self.monitoring_kafka_producer = ClickHouseKafkaSender.create_shared_producer()
@@ -532,7 +541,9 @@ class DetectorBase(DetectorAbstractBase):
                 logger.debug(f"Producing compact alert to Kafka: {kafka_alert}")
 
                 if self.kafka_produce_handler is None:
-                    self.kafka_produce_handler = ExactlyOnceKafkaProduceHandler()
+                    self.kafka_produce_handler = self.eos_context.create_producer(
+                        ExactlyOnceKafkaProduceHandler
+                    )
 
                 for topic in self.produce_topics:
                     self.kafka_produce_handler.produce(
@@ -645,7 +656,9 @@ class DetectorBase(DetectorAbstractBase):
         batch_schema = marshmallow_dataclass.class_schema(Batch)()
 
         if self.kafka_produce_handler is None:
-            self.kafka_produce_handler = ExactlyOnceKafkaProduceHandler()
+            self.kafka_produce_handler = self.eos_context.create_producer(
+                ExactlyOnceKafkaProduceHandler
+            )
 
         for topic in self.downstream_detector_topics:
             self.kafka_produce_handler.produce(
@@ -895,14 +908,13 @@ def build_detector_worker(
     plugin_module_name = f"{PLUGIN_PATH}.{detector_config['detector_module_name']}"
     plugin_module = importlib.import_module(plugin_module_name)
     detector_class = getattr(plugin_module, class_name)
-    worker = detector_class(
+    return detector_class(
         detector_config=detector_config,
         consume_topic=consume_topic,
         produce_topics=produce_topics,
         downstream_detector_topics=downstream_detector_topics,
+        worker_id=worker_id,
     )
-    worker.worker_id = worker_id
-    return worker
 
 
 def run_detector_worker_process(

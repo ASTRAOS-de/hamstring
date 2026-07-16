@@ -4,11 +4,12 @@ import tempfile
 import unittest
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
-from uuid import UUID
 
 import aiofiles
 
 from src.logserver.server import LogServer, main
+from src.base.pipeline_routing import SERVER_MESSAGE_ID_HEADER
+from src.base.kafka_handler import ConsumedKafkaMessage, KafkaProduceRecord
 
 LOG_SERVER_IP_ADDR = "192.168.0.1"
 
@@ -91,7 +92,7 @@ class TestSend(unittest.TestCase):
         mock_produce_handler.return_value = mock_kafka_produce_handler_instance
         mock_consume_handler.return_value = mock_kafka_consume_handler_instance
 
-        message = "test_message"
+        message = '{"src_ip": "192.0.2.10"}'
         sut = LogServer(consume_topic="consume_topic1", produce_topics=["test_topic"])
 
         message_id = uuid.UUID("bd72ccb4-0ef2-4100-aa22-e787122d6875")
@@ -103,7 +104,8 @@ class TestSend(unittest.TestCase):
         mock_kafka_produce_handler_instance.produce.assert_called_once_with(
             topic="test_topic",
             data=message,
-            key=str(message_id),
+            key="192.0.2.10",
+            headers=((SERVER_MESSAGE_ID_HEADER, str(message_id).encode("utf-8")),),
         )
 
 
@@ -116,25 +118,25 @@ class _StopFetching(RuntimeError):
 class TestFetchFromKafka(unittest.IsolatedAsyncioTestCase):
     @patch("src.logserver.server.ExactlyOnceKafkaProduceHandler")
     @patch("src.logserver.server.ExactlyOnceKafkaConsumeHandler")
-    @patch("src.logserver.server.LogServer.send")
     @patch("src.logserver.server.logger")
     @patch("src.logserver.server.ClickHouseKafkaSender")
-    @patch("src.logserver.server.uuid")
     async def test_fetch_from_kafka(
         self,
-        mock_uuid,
         mock_clickhouse,
         mock_logger,
-        mock_send,
         mock_kafka_consume,
         mock_kafka_produce,
     ):
-        mock_uuid_instance = MagicMock()
-        mock_uuid.return_value = mock_uuid_instance
-        mock_uuid.uuid4.return_value = UUID("bd72ccb4-0ef2-4100-aa22-e787122d6875")
         mock_consume_handler = MagicMock()
-        mock_consume_handler.consume.side_effect = [
-            ("key1", "value1", "test-topic"),
+        source_message = ConsumedKafkaMessage(
+            key="key1",
+            value='{"src_ip": "192.0.2.10"}',
+            topic="test-topic",
+            partition=3,
+            offset=10,
+        )
+        mock_consume_handler.consume_batch.side_effect = [
+            [source_message],
             _StopFetching(),
         ]
         mock_kafka_consume.return_value = mock_consume_handler
@@ -154,10 +156,27 @@ class TestFetchFromKafka(unittest.IsolatedAsyncioTestCase):
         with patch.object(self.sut, "fetch_from_kafka", new=fetch_wrapper):
             self.sut.fetch_from_kafka()
 
-        mock_send.assert_called_once_with(
-            UUID("bd72ccb4-0ef2-4100-aa22-e787122d6875"), "value1"
+        expected_message_id = uuid.uuid5(
+            uuid.NAMESPACE_URL, "test-topic:3:10"
         )
-        mock_consume_handler.commit.assert_called_once()
+        mock_kafka_produce.return_value.produce_batch.assert_called_once_with(
+            [
+                KafkaProduceRecord(
+                    topic="test_produce_topic",
+                    data='{"src_ip": "192.0.2.10"}',
+                    key="192.0.2.10",
+                    headers=(
+                        (
+                            SERVER_MESSAGE_ID_HEADER,
+                            str(expected_message_id).encode("utf-8"),
+                        ),
+                    ),
+                )
+            ],
+            consumer=mock_consume_handler.consumer,
+            consumed_messages=[source_message],
+        )
+        mock_consume_handler.commit.assert_not_called()
 
 
 # class TestFetchFromFile(unittest.IsolatedAsyncioTestCase):

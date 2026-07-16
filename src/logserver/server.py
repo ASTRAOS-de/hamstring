@@ -7,9 +7,11 @@ import uuid
 import aiofiles
 
 sys.path.append(os.getcwd())
+from src.base.eos import EosWorkerContext
 from src.base.kafka_handler import (
     ExactlyOnceKafkaConsumeHandler,
     ExactlyOnceKafkaProduceHandler,
+    KafkaProduceRecord,
 )
 from src.base.clickhouse_kafka_sender import ClickHouseKafkaSender
 from src.base.utils import setup_config, get_zeek_sensor_topic_base_names
@@ -47,13 +49,21 @@ class LogServer:
     the next stage.
     """
 
-    def __init__(self, consume_topic, produce_topics) -> None:
+    def __init__(self, consume_topic, produce_topics, worker_id="default") -> None:
 
         self.consume_topic = consume_topic
         self.produce_topics = produce_topics
+        self.eos_context = EosWorkerContext(
+            stage=module_name,
+            consume_topic=consume_topic,
+            worker_id=worker_id,
+        )
+        self.worker_id = self.eos_context.worker_id
 
         self.kafka_consume_handler = ExactlyOnceKafkaConsumeHandler(consume_topic)
-        self.kafka_produce_handler = ExactlyOnceKafkaProduceHandler()
+        self.kafka_produce_handler = self.eos_context.create_producer(
+            ExactlyOnceKafkaProduceHandler
+        )
         self.monitoring_kafka_producer = ClickHouseKafkaSender.create_shared_producer()
 
         # databases
@@ -114,26 +124,70 @@ class LogServer:
         its timestamp ("timestamp_in") is logged.
         """
         while True:
-            key, value, topic = self.kafka_consume_handler.consume()
-            logger.debug(f"From Kafka: '{value}'")
+            messages = self.kafka_consume_handler.consume_batch()
+            if not messages:
+                continue
 
-            message_id = uuid.uuid4()
-            self.server_logs.insert(
-                dict(
-                    message_id=message_id,
-                    timestamp_in=datetime.datetime.now(),
-                    message_text=value,
+            produced_records = []
+            monitoring_records = []
+            for message in messages:
+                if message.value is None:
+                    raise ValueError(
+                        f"Kafka record without a value at {message.topic}"
+                        f"[{message.partition}] offset {message.offset} cannot be "
+                        "forwarded."
+                    )
+                logger.debug(f"From Kafka: '{message.value}'")
+                message_id = uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    f"{message.topic}:{message.partition}:{message.offset}",
                 )
-            )
+                monitoring_records.append((message_id, message.value))
+                produced_records.extend(
+                    self._build_output_records(message_id, message.value)
+                )
 
-            self.send(message_id, value)
-            self.kafka_consume_handler.commit()
+            self.kafka_produce_handler.produce_batch(
+                produced_records,
+                consumer=self.kafka_consume_handler.consumer,
+                consumed_messages=messages,
+            )
+            for message_id, message in monitoring_records:
+                self._record_monitoring_events(message_id, message)
+
+    def _record_monitoring_events(self, message_id: uuid.UUID, message: str) -> None:
+        """Queue monitoring events for a source record."""
+        self.server_logs.insert(
+            dict(
+                message_id=message_id,
+                timestamp_in=datetime.datetime.now(),
+                message_text=message,
+            )
+        )
+        self.server_logs_timestamps.insert(
+            dict(
+                message_id=message_id,
+                event="timestamp_out",
+                event_timestamp=datetime.datetime.now(),
+            )
+        )
+
+    def _build_output_records(
+        self, message_id: uuid.UUID, message: str
+    ) -> list[KafkaProduceRecord]:
+        """Build the fan-out records committed with the source offset batch."""
+        return [
+            KafkaProduceRecord(topic=topic, data=message, key=str(message_id))
+            for topic in self.produce_topics
+        ]
 
 
 def build_logserver_worker(consume_topic, produce_topics, worker_id=None):
-    worker = LogServer(consume_topic=consume_topic, produce_topics=produce_topics)
-    worker.worker_id = worker_id
-    return worker
+    return LogServer(
+        consume_topic=consume_topic,
+        produce_topics=produce_topics,
+        worker_id=worker_id,
+    )
 
 
 def run_logserver_worker_process(

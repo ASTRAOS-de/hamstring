@@ -8,9 +8,8 @@ import uuid
 
 sys.path.append(os.getcwd())
 from src.base.clickhouse_kafka_sender import ClickHouseKafkaSender
-from src.base.kafka_handler import (
-    ExactlyOnceKafkaConsumeHandler,
-)
+from src.base.eos import EosWorkerContext
+from src.base.kafka_handler import ExactlyOnceKafkaConsumeHandler
 from src.base.logline_handler import LoglineHandler
 from src.base import utils
 from src.base.execution import (
@@ -54,7 +53,13 @@ class LogCollector:
     """
 
     def __init__(
-        self, collector_name, protocol, consume_topic, produce_topics, validation_config
+        self,
+        collector_name,
+        protocol,
+        consume_topic,
+        produce_topics,
+        validation_config,
+        worker_id="default",
     ) -> None:
         """Initializes a new LogCollector instance with the specified configuration.
 
@@ -68,6 +73,13 @@ class LogCollector:
         self.collector_name = collector_name
         self.protocol = protocol
         self.consume_topic = consume_topic
+        self.eos_context = EosWorkerContext(
+            stage=module_name,
+            consume_topic=consume_topic,
+            instance_name=collector_name,
+            worker_id=worker_id,
+        )
+        self.worker_id = self.eos_context.worker_id
         self.kafka_consume_handler = ExactlyOnceKafkaConsumeHandler(consume_topic)
         self.batch_configuration = utils.get_batch_configuration(collector_name)
         self.loglines = asyncio.Queue()
@@ -76,6 +88,7 @@ class LogCollector:
             produce_topics=produce_topics,
             collector_name=collector_name,
             monitoring_kafka_producer=self.monitoring_kafka_producer,
+            transactional_id=self.eos_context.transactional_id,
         )
         self.logline_handler = LoglineHandler(validation_config)
 
@@ -303,8 +316,8 @@ def build_logcollector_worker(
         consume_topic=consume_topic,
         produce_topics=produce_topics,
         validation_config=validation_config,
+        worker_id=worker_id,
     )
-    worker.worker_id = worker_id
     return worker
 
 

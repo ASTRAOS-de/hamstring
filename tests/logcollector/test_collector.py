@@ -110,13 +110,11 @@ class TestFetch(unittest.TestCase):
         mock_logline_handler,
     ):
         mock_consume_handler = MagicMock()
-        mock_consume_handler.consume.side_effect = [
-            ("key1", "value1", "topic1"),
-            _StopFetching(),
-        ]
+        source_record = MagicMock(value="value1")
+        source_record.header_text.return_value = "server-message-id"
+        mock_consume_handler.consume_batch.side_effect = [[source_record], _StopFetching()]
         mock_kafka_consume.return_value = mock_consume_handler
-        mock_send_instance = MagicMock()
-        mock_send.return_value = mock_send_instance
+        mock_send.return_value = ("subnet-1", "batched-message")
         self.sut = LogCollector(
             collector_name="my-collector",
             consume_topic="consume-topic",
@@ -124,19 +122,18 @@ class TestFetch(unittest.TestCase):
             protocol="dns",
             validation_config={},
         )
-        original_fetch = self.sut.fetch
+        self.sut.batch_configuration["batch_size"] = 1
+        self.sut._flush_pending_batches = MagicMock()
 
-        def fetch_wrapper(*args, **kwargs):
-            try:
-                original_fetch(*args, **kwargs)
-            except _StopFetching:
-                return
-
-        with patch.object(self.sut, "fetch", new=fetch_wrapper):
+        with self.assertRaises(_StopFetching):
             self.sut.fetch()
 
         mock_send.assert_called_once()
-        mock_consume_handler.commit.assert_called_once()
+        self.sut.batch_handler.add_message_without_dispatch.assert_called_once_with(
+            "subnet-1", "batched-message"
+        )
+        self.sut._flush_pending_batches.assert_called_once()
+        mock_consume_handler.commit.assert_not_called()
 
 
 class TestSend(unittest.TestCase):
@@ -218,17 +215,19 @@ class TestSend(unittest.TestCase):
                 return_value=uuid.UUID("da3aec7f-b355-4a2c-a2f4-2066d49431a5"),
             ),
         ):
-            self.sut.send(
+            subnet_id, batched_message = self.sut.send(
                 timestamp_in=timestamp,
                 message=message,
                 server_message_id="bd72ccb4-0ef2-4100-aa22-e787122d6875",
             )
 
         # Assert
-        self.sut.batch_handler.add_message.assert_called_once_with(
-            "192.168.3.0_24",
-            '{"ts": "2026-02-14 16:38:06.184006", "status_code": "test_status", "src_ip": "192.168.3.141", "record_type": "test_record_type", "logline_id": "da3aec7f-b355-4a2c-a2f4-2066d49431a5", "server_message_id": "bd72ccb4-0ef2-4100-aa22-e787122d6875"}',
+        self.assertEqual("192.168.3.0_24", subnet_id)
+        self.assertEqual(
+            "da3aec7f-b355-4a2c-a2f4-2066d49431a5",
+            json.loads(batched_message)["logline_id"],
         )
+        self.sut.batch_handler.add_message.assert_not_called()
         self.sut.server_log_to_logline.insert.assert_called_once()
         server_log_to_logline = self.sut.server_log_to_logline.insert.call_args.args[0]
         self.assertEqual(
@@ -240,6 +239,35 @@ class TestSend(unittest.TestCase):
             server_log_to_logline["logline_id"],
         )
         self.assertIn("timestamp", server_log_to_logline)
+
+
+class TestKafkaBatchSerialization(unittest.TestCase):
+    def setUp(self):
+        self.sut = object.__new__(LogCollector)
+        self.sut.max_kafka_record_bytes = 60
+        self.schema = MagicMock()
+        self.schema.dumps.side_effect = lambda data: json.dumps(data)
+
+    def test_splits_one_logical_batch_into_broker_safe_records(self):
+        packets = self.sut._serialize_batch_packets(
+            {"batch_id": "batch-1", "data": ["a" * 15, "b" * 15, "c" * 15]},
+            self.schema,
+        )
+
+        self.assertGreater(len(packets), 1)
+        self.assertEqual(
+            ["a" * 15, "b" * 15, "c" * 15],
+            [item for packet in packets for item in json.loads(packet)["data"]],
+        )
+        self.assertTrue(
+            all(len(packet.encode("utf-8")) <= 60 for packet in packets)
+        )
+
+    def test_rejects_one_logline_larger_than_the_record_limit(self):
+        with self.assertRaisesRegex(ValueError, "One logline exceeds"):
+            self.sut._serialize_batch_packets(
+                {"batch_id": "batch-1", "data": ["a" * 100]}, self.schema
+            )
 
 
 class TestGetSubnetId(unittest.TestCase):

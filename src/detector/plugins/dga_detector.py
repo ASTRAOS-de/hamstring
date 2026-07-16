@@ -25,6 +25,7 @@ class DGADetector(DetectorBase):
         consume_topic,
         produce_topics=None,
         downstream_detector_topics=None,
+        worker_id="default",
     ):
         """
         Initialize the DGA detector with configuration parameters.
@@ -39,7 +40,11 @@ class DGADetector(DetectorBase):
         """
         self.model_base_url = detector_config["base_url"]
         super().__init__(
-            detector_config, consume_topic, produce_topics, downstream_detector_topics
+            detector_config,
+            consume_topic,
+            produce_topics,
+            downstream_detector_topics,
+            worker_id,
         )
 
     def predict(self, message):

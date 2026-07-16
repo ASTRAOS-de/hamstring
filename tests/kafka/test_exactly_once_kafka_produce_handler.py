@@ -3,7 +3,34 @@ from unittest.mock import MagicMock, patch
 
 from confluent_kafka import KafkaException
 
-from src.base.kafka_handler import ExactlyOnceKafkaProduceHandler
+from src.base.kafka_handler import (
+    ConsumedKafkaMessage,
+    ExactlyOnceKafkaProduceHandler,
+    KafkaProduceRecord,
+    build_transactional_id,
+)
+from src.base.worker_identity import build_worker_id
+
+
+class TestTransactionalId(unittest.TestCase):
+    def test_build_worker_id_uses_the_process_and_thread_indices(self):
+        self.assertEqual("p1-t2", build_worker_id(process_index=1, thread_index=2))
+
+    @patch.dict(
+        "src.base.kafka_handler.os.environ",
+        {"KAFKA_TRANSACTIONAL_ID_PREFIX": "swarm-node-1-slot-2"},
+        clear=False,
+    )
+    def test_transactional_id_includes_the_worker_identity(self):
+        self.assertEqual(
+            "swarm-node-1-slot-2.log_collection.dns.input-topic.p0-t3",
+            build_transactional_id(
+                stage="log_collection",
+                instance_name="dns",
+                consume_topic="input-topic",
+                worker_id="p0-t3",
+            ),
+        )
 
 
 class TestInit(unittest.TestCase):
@@ -36,6 +63,7 @@ class TestInit(unittest.TestCase):
             "transactional.id": f"test_transactional_id-{mock_uuid.uuid4.return_value}",
             "enable.idempotence": True,
             "message.max.bytes": 1000000000,
+            "transaction.timeout.ms": 30000,
         }
 
         sut = ExactlyOnceKafkaProduceHandler()
@@ -44,7 +72,7 @@ class TestInit(unittest.TestCase):
         self.assertEqual(mock_producer_instance, sut.producer)
 
         mock_producer.assert_called_once_with(expected_conf)
-        mock_producer_instance.init_transactions.assert_called_once()
+        mock_producer_instance.init_transactions.assert_called_once_with(15.0)
 
     @patch("src.base.retry.time.sleep", return_value=None)
     @patch("src.base.kafka_handler.HOSTNAME", "default_tid")
@@ -80,6 +108,7 @@ class TestInit(unittest.TestCase):
             "transactional.id": f"default_tid-{mock_uuid.uuid4.return_value}",
             "enable.idempotence": True,
             "message.max.bytes": 1000000000,
+            "transaction.timeout.ms": 30000,
         }
 
         mock_producer_instance.init_transactions.side_effect = [
@@ -211,8 +240,52 @@ class TestSend(unittest.TestCase):
             callback=mock_kafka_delivery_report,
         )
 
-        mock_producer_instance.abort_transaction.assert_called_once()
+        mock_producer_instance.abort_transaction.assert_called_once_with(15.0)
         mock_producer_instance.begin_transaction.assert_called_once()
+
+    @patch(
+        "src.base.kafka_handler.KAFKA_BROKERS",
+        [{"hostname": "127.0.0.1", "internal_port": 9999}],
+    )
+    @patch("src.base.kafka_handler.Producer")
+    @patch(
+        "src.base.kafka_handler.ExactlyOnceKafkaProduceHandler.commit_transaction_with_retry"
+    )
+    def test_send_batch_commits_source_offsets_with_output(
+        self, mock_commit_transaction_with_retry, mock_producer
+    ):
+        mock_producer_instance = MagicMock()
+        mock_producer.return_value = mock_producer_instance
+        mock_consumer = MagicMock()
+        group_metadata = MagicMock()
+        mock_consumer.consumer_group_metadata.return_value = group_metadata
+        records = [
+            KafkaProduceRecord("output-a", "first", "key-1"),
+            KafkaProduceRecord("output-b", "second", "key-2"),
+        ]
+        consumed_messages = [
+            ConsumedKafkaMessage("key", "one", "input", 1, 4),
+            ConsumedKafkaMessage("key", "two", "input", 1, 7),
+            ConsumedKafkaMessage("key", "three", "input", 2, 3),
+        ]
+
+        sut = ExactlyOnceKafkaProduceHandler(transactional_id="test-batch")
+        sut.produce_batch(records, mock_consumer, consumed_messages)
+
+        self.assertEqual(1, mock_producer_instance.begin_transaction.call_count)
+        self.assertEqual(2, mock_producer_instance.produce.call_count)
+        offsets, metadata = (
+            mock_producer_instance.send_offsets_to_transaction.call_args.args
+        )
+        self.assertEqual(group_metadata, metadata)
+        self.assertEqual(
+            [("input", 1, 8), ("input", 2, 4)],
+            sorted(
+                (offset.topic, offset.partition, offset.offset)
+                for offset in offsets
+            ),
+        )
+        mock_commit_transaction_with_retry.assert_called_once()
 
 
 class TestCommitTransactionWithRetry(unittest.TestCase):
@@ -244,7 +317,7 @@ class TestCommitTransactionWithRetry(unittest.TestCase):
         sut = ExactlyOnceKafkaProduceHandler()
         sut.commit_transaction_with_retry()
 
-        mock_producer_instance.commit_transaction.assert_called_once()
+        mock_producer_instance.commit_transaction.assert_called_once_with(15.0)
         mock_sleep.assert_not_called()
 
     @patch(
@@ -349,7 +422,7 @@ class TestCommitTransactionWithRetry(unittest.TestCase):
         with self.assertRaises(KafkaException) as context:
             sut.commit_transaction_with_retry()
 
-        mock_producer_instance.commit_transaction.assert_called_once()
+        mock_producer_instance.commit_transaction.assert_called_once_with(15.0)
         self.assertEqual(str(context.exception), "Some other error")
         mock_sleep.assert_not_called()
 

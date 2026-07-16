@@ -8,8 +8,8 @@ logger = get_logger(module_name)
 
 # TODO: test this!
 class NoInspector(InspectorBase):
-    def __init__(self, consume_topic, produce_topics, config) -> None:
-        super().__init__(consume_topic, produce_topics, config)
+    def __init__(self, consume_topic, produce_topics, config, worker_id="default") -> None:
+        super().__init__(consume_topic, produce_topics, config, worker_id)
 
     def inspect_anomalies(self) -> None:
         # declare everything to be suspicious

@@ -451,6 +451,7 @@ class BufferedBatchSender:
         produce_topics,
         collector_name,
         monitoring_kafka_producer=None,
+        transactional_id=None,
     ):
         self.topics = produce_topics
         self.batch_configuration = get_batch_configuration(collector_name)
@@ -460,7 +461,10 @@ class BufferedBatchSender:
         )
         self.batch = BufferedBatch(collector_name, self.monitoring_kafka_producer)
 
-        self.kafka_produce_handler = ExactlyOnceKafkaProduceHandler()
+        producer_kwargs = (
+            {"transactional_id": transactional_id} if transactional_id else {}
+        )
+        self.kafka_produce_handler = ExactlyOnceKafkaProduceHandler(**producer_kwargs)
 
         # databases
         self.logline_timestamps = ClickHouseKafkaSender(

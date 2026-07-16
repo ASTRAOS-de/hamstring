@@ -9,6 +9,7 @@ from collections import defaultdict
 sys.path.append(os.getcwd())
 from src.base.clickhouse_kafka_sender import ClickHouseKafkaSender
 from src.base.data_classes.batch import Batch
+from src.base.eos import EosWorkerContext
 from src.base.logline_handler import LoglineHandler
 from src.base.kafka_handler import (
     ExactlyOnceKafkaProduceHandler,
@@ -56,7 +57,13 @@ class Prefilter:
     """
 
     def __init__(
-        self, validation_config, consume_topic, produce_topics, relevance_function_name
+        self,
+        validation_config,
+        consume_topic,
+        produce_topics,
+        relevance_function_name,
+        instance_name=None,
+        worker_id="default",
     ):
         """Initializes a new ``Prefilter`` instance with the specified configuration.
 
@@ -67,9 +74,16 @@ class Prefilter:
             relevance_function_name (str): Name of the relevance function to apply
 
         """
-        self.name = None
+        self.name = instance_name
         self.consume_topic = consume_topic
         self.produce_topics = produce_topics
+        self.eos_context = EosWorkerContext(
+            stage=module_name,
+            consume_topic=consume_topic,
+            instance_name=instance_name,
+            worker_id=worker_id,
+        )
+        self.worker_id = self.eos_context.worker_id
         self.batch_id = None
         self.begin_timestamp = None
         self.end_timestamp = None
@@ -82,7 +96,9 @@ class Prefilter:
 
         self.logline_handler = LoglineHandler(validation_config)
         self.kafka_consume_handler = ExactlyOnceKafkaConsumeHandler(self.consume_topic)
-        self.kafka_produce_handler = ExactlyOnceKafkaProduceHandler()
+        self.kafka_produce_handler = self.eos_context.create_producer(
+            ExactlyOnceKafkaProduceHandler
+        )
         self.monitoring_kafka_producer = ClickHouseKafkaSender.create_shared_producer()
 
         # databases
@@ -359,9 +375,9 @@ def build_prefilter_worker(
         consume_topic=consume_topic,
         produce_topics=produce_topics,
         relevance_function_name=relevance_function_name,
+        instance_name=prefilter_name,
+        worker_id=worker_id,
     )
-    worker.name = prefilter_name
-    worker.worker_id = worker_id
     return worker
 
 

@@ -40,6 +40,29 @@ class TestDel(unittest.TestCase):
     pass
 
 
+class TestTransactionalBatchAssembly(unittest.TestCase):
+    @patch("src.logcollector.batch_handler.ExactlyOnceKafkaProduceHandler")
+    @patch("src.logcollector.batch_handler.ClickHouseKafkaSender")
+    def test_complete_all_batches_returns_packets_without_producing(
+        self, mock_clickhouse, mock_produce_handler
+    ):
+        sut = BufferedBatchSender(
+            collector_name="test-collector",
+            produce_topics=["test-topic"],
+            auto_flush_on_cleanup=False,
+        )
+        sut.batch.get_stored_keys = MagicMock(return_value={"subnet-a", "subnet-b"})
+        sut.batch.complete_batch.side_effect = [{"batch_id": "a"}, {"batch_id": "b"}]
+
+        packets = sut.complete_all_batches()
+
+        self.assertCountEqual(
+            [("subnet-a", {"batch_id": "a"}), ("subnet-b", {"batch_id": "b"})],
+            packets,
+        )
+        sut.kafka_produce_handler.produce.assert_not_called()
+
+
 class TestAddMessage(unittest.TestCase):
     @patch("src.logcollector.batch_handler.logger")
     @patch("src.logcollector.batch_handler.ExactlyOnceKafkaProduceHandler")

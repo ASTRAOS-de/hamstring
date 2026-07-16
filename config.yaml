@@ -17,7 +17,7 @@ logging:
 
 pipeline:
   acceleration:
-    enabled: true
+    enabled: false
     fallback_to_cpu: true
     log_device: true
     default:
@@ -40,7 +40,7 @@ pipeline:
     modules:
       log_storage.logserver:
         executor: thread
-        max_workers: 4
+        max_workers: 1
       log_collection.collector:
         executor: thread
         max_workers: 1
@@ -59,7 +59,7 @@ pipeline:
             max_workers: 1
       data_inspection.inspector:
         executor: thread
-        max_workers: 2
+        max_workers: 1
         instances:
           dga_inspector:
             max_workers: 1
@@ -72,9 +72,9 @@ pipeline:
           RF-dga_detector:
             max_workers: 1
           domainator:
-            max_workers: 2
-          domainator_attributor:
             max_workers: 1
+          domainator_attributor:
+            max_workers: 2
           domainator_attributor_behaviour:
             max_workers: 1
           domainator_attributor_identification_behaviour:
@@ -89,7 +89,7 @@ pipeline:
             max_workers: 1
       monitoring.agent:
         executor: thread
-        max_workers: 2
+        max_workers: 1
   log_storage:
     logserver:
       input_file: "/opt/file.txt"
@@ -282,7 +282,7 @@ pipeline:
   zeek:
     sensors:
       zeek:
-        static_analysis: false
+        static_analysis: true
         protocols:
           - dns
         interfaces:
@@ -307,35 +307,44 @@ environment:
     # Default librdkafka value is 300000 ms (5 minutes), which can be too short
     # for model inference plus downstream alert/monitoring writes.
     max_poll_interval_ms: 1800000
+  kafka_transaction_batch:
+    # Commit one Kafka transaction for a bounded group of source records,
+    # rather than opening and committing a transaction per logline.
+    size: 100
+    timeout_ms: 50
+    # Bound a blocked transactional commit so a worker can abort and recover
+    # instead of holding its input partitions indefinitely.
+    commit_timeout_ms: 15000
+    transaction_timeout_ms: 30000
   kafka_topics:
-    replication_factor: 3
+    replication_factor: 1
     auto_expand_partitions: true
     stages:
       logserver_in:
-        partitions: 12
-        replication_factor: 3
+        partitions: 24
+        replication_factor: 1
       logserver_to_collector:
-        partitions: 12
-        replication_factor: 3
+        partitions: 24
+        replication_factor: 1
       batch_sender_to_prefilter:
-        partitions: 12
-        replication_factor: 3
+        partitions: 24
+        replication_factor: 1
       prefilter_to_inspector:
-        partitions: 12
-        replication_factor: 3
+        partitions: 24
+        replication_factor: 1
       inspector_to_detector:
-        partitions: 12
-        replication_factor: 3
+        partitions: 24
+        replication_factor: 1
       detector_to_alerter:
-        partitions: 12
-        replication_factor: 3
+        partitions: 24
+        replication_factor: 1
       detector_to_detector:
-        partitions: 12
-        replication_factor: 3
+        partitions: 24
+        replication_factor: 1
     topics:
       hamstring_alerts:
-        partitions: 12
-        replication_factor: 3
+        partitions: 24
+        replication_factor: 1
   kafka_topics_prefix:
     pipeline:
       logserver_in: "hamstring_input"

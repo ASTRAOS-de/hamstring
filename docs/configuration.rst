@@ -177,6 +177,16 @@ Controls retry behavior around transient startup and infrastructure errors.
      - ``5``
      - Log every nth retry attempt while a dependency is still unavailable.
 
+Kafka routing and exactly-once processing
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+HAMSTRING uses the canonical ``src_ip`` as the Kafka record key from logserver
+onward. This keeps one IP on one partition within a topic. Pipeline fan-out
+topics that must retain the same partition number for a key must have identical
+partition counts; HAMSTRING validates this when a stage starts. The original
+server message ID is transported in a Kafka header and is retained in the
+collector payload for monitoring correlation.
+
 ``pipeline.scaling``
 ^^^^^^^^^^^^^^^^^^^^
 
@@ -447,6 +457,12 @@ The following list shows the available configuration options.
      - ``30.0``
      - Time after which a Batch is sent. Mainly relevant for Batches that only contain a small number of entries, and
        do not reach the size limit for a longer time period.
+   * - poll_timeout_ms
+     - ``250``
+     - Maximum Kafka poll wait while a partial batch is pending. It determines how quickly the collector notices the configured ``batch_timeout``; it does not shorten that timeout.
+   * - max_kafka_record_bytes
+     - ``900000``
+     - Maximum serialized Kafka record size for one logical batch fragment. Larger batches are split while retaining their batch ID, keeping them below Kafka's default 1 MiB broker limit.
    * - subnet_id.ipv4_prefix_length
      - ``24``
      - The number of bits to trim from the client's IPv4 address for use as `Subnet ID`.
@@ -646,6 +662,19 @@ The following parameters control the infrastructure of the software.
    * - kafka_consumer.max_poll_interval_ms
      - ``1800000``
      - Maximum time in milliseconds between Kafka consumer polls before Kafka removes the consumer from its group. Increase this for long-running detector batches.
+   * - kafka_transaction_batch.size
+     - ``100``
+     - Maximum number of source records committed in one transactional Kafka batch by the logserver.
+       Other stages use the same commit and transaction timeout settings for their EOS producers.
+   * - kafka_transaction_batch.timeout_ms
+     - ``50``
+     - Maximum wait for the next transactional Kafka batch, in milliseconds.
+   * - kafka_transaction_batch.commit_timeout_ms
+     - ``15000``
+     - Maximum time an EOS producer waits for a transaction commit or abort before recovering its producer.
+   * - kafka_transaction_batch.transaction_timeout_ms
+     - ``30000``
+     - Kafka transaction lifetime advertised by every EOS producer; must not exceed the broker maximum.
    * - kafka_topics.replication_factor
      - ``3``
      - Replication factor used when creating new Kafka topics. At runtime this is capped to the number of configured Kafka brokers.
@@ -760,6 +789,23 @@ Application service variables
    * - ``KAFKA_TOPIC_MIN_PARTITIONS``
      - ``1``
      - Runtime lower bound for topic partition creation and expansion.
+   * - ``KAFKA_TRANSACTION_BATCH_SIZE``
+     - from ``environment.kafka_transaction_batch.size``
+     - Maximum number of source records processed in one logserver Kafka transaction.
+   * - ``KAFKA_TRANSACTION_BATCH_TIMEOUT_MS``
+     - from ``environment.kafka_transaction_batch.timeout_ms``
+     - Maximum time the logserver waits to fill a Kafka transaction batch.
+   * - ``KAFKA_TRANSACTION_COMMIT_TIMEOUT_MS``
+     - from ``environment.kafka_transaction_batch.commit_timeout_ms``
+     - Maximum time an EOS producer waits for each commit or abort call.
+   * - ``KAFKA_TRANSACTION_TIMEOUT_MS``
+     - from ``environment.kafka_transaction_batch.transaction_timeout_ms``
+     - Transaction lifetime configured on every EOS producer.
+   * - ``KAFKA_TRANSACTIONAL_ID_PREFIX``
+     - ``HOSTNAME``
+     - Optional transactional-id namespace for one deployment replica. HAMSTRING combines it with
+       the stage, configured instance, input topic, and worker ID. It must differ for concurrently
+       running Compose containers or Swarm replicas (for example, include a Docker Swarm task slot).
    * - ``HAMSTRING_CONFIG_CHECKSUM``
      - current compose value
      - Optional deployment marker used to force Swarm service updates when ``config.yaml`` changes.

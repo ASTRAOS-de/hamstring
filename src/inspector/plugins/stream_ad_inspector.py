@@ -43,8 +43,8 @@ STATIC_ZEROS_MULTIVARIATE = np.zeros((100, 2))
 
 class StreamADInspector(InspectorBase):
 
-    def __init__(self, consume_topic, produce_topics, config):
-        super().__init__(consume_topic, produce_topics, config)
+    def __init__(self, consume_topic, produce_topics, config, worker_id="default"):
+        super().__init__(consume_topic, produce_topics, config, worker_id)
         self.ensemble_config = config["ensemble"]
 
     def subnet_is_suspicious(self) -> bool:

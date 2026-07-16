@@ -38,6 +38,7 @@ class DomainatorAttributor(DetectorBase):
         consume_topic,
         produce_topics=None,
         downstream_detector_topics=None,
+        worker_id="default",
     ):
         """
         Initialize the Domainator attributor with configuration parameters.
@@ -54,7 +55,11 @@ class DomainatorAttributor(DetectorBase):
         self.message_queues = defaultdict(list)
 
         super().__init__(
-            detector_config, consume_topic, produce_topics, downstream_detector_topics
+            detector_config,
+            consume_topic,
+            produce_topics,
+            downstream_detector_topics,
+            worker_id,
         )
 
         self.labels = self.model.classes_

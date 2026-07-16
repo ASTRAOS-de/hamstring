@@ -19,6 +19,7 @@ from src.base.utils import (
     generate_collisions_resistant_uuid,
 )
 from src.base.acceleration import resolve_acceleration_config
+from src.base.eos import EosWorkerContext
 from src.base.kafka_handler import (
     ExactlyOnceKafkaConsumeHandler,
     ExactlyOnceKafkaProduceHandler,
@@ -51,7 +52,7 @@ PLUGIN_PATH = "src.inspector.plugins"
 
 class InspectorAbstractBase(ABC):  # pragma: no cover
     @abstractmethod
-    def __init__(self, consume_topic, produce_topics, config) -> None:
+    def __init__(self, consume_topic, produce_topics, config, worker_id="default") -> None:
         pass
 
     @abstractmethod
@@ -98,6 +99,13 @@ class InspectorBase(InspectorAbstractBase):
             self.time_type = config["time_type"]
             self.time_range = config["time_range"]
         self.name = config["name"]
+        self.eos_context = EosWorkerContext(
+            stage=module_name,
+            consume_topic=consume_topic,
+            instance_name=self.name,
+            worker_id=worker_id,
+        )
+        self.worker_id = self.eos_context.worker_id
         self.acceleration = resolve_acceleration_config(
             globals()["config"].get("pipeline", {}),
             config,
@@ -116,7 +124,9 @@ class InspectorBase(InspectorAbstractBase):
         self.anomalies = []
 
         self.kafka_consume_handler = ExactlyOnceKafkaConsumeHandler(self.consume_topic)
-        self.kafka_produce_handler = ExactlyOnceKafkaProduceHandler()
+        self.kafka_produce_handler = self.eos_context.create_producer(
+            ExactlyOnceKafkaProduceHandler
+        )
         self.monitoring_kafka_producer = ClickHouseKafkaSender.create_shared_producer()
 
         # databases
@@ -426,13 +436,12 @@ def build_inspector_worker(
     plugin_module_name = f"{PLUGIN_PATH}.{inspector_config['inspector_module_name']}"
     plugin_module = importlib.import_module(plugin_module_name)
     inspector_class = getattr(plugin_module, class_name)
-    worker = inspector_class(
+    return inspector_class(
         consume_topic=consume_topic,
         produce_topics=produce_topics,
         config=inspector_config,
+        worker_id=worker_id,
     )
-    worker.worker_id = worker_id
-    return worker
 
 
 def run_inspector_worker_process(

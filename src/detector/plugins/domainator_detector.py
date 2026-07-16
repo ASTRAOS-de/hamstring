@@ -35,6 +35,7 @@ class DomainatorDetector(DetectorBase):
         consume_topic,
         produce_topics=None,
         downstream_detector_topics=None,
+        worker_id="default",
     ):
         """
         Initialize the Domainator detector with configuration parameters.
@@ -50,7 +51,11 @@ class DomainatorDetector(DetectorBase):
         self.model_base_url = detector_config["base_url"]
         self.message_queues = defaultdict(list)
         super().__init__(
-            detector_config, consume_topic, produce_topics, downstream_detector_topics
+            detector_config,
+            consume_topic,
+            produce_topics,
+            downstream_detector_topics,
+            worker_id,
         )
 
     def predict(self, messages):

@@ -12,6 +12,8 @@ from concurrent.futures import (
 from dataclasses import dataclass
 from typing import Any, Callable
 
+from src.base.eos import build_worker_id
+
 
 @dataclass(frozen=True)
 class PipelineExecutorConfig:
@@ -134,7 +136,7 @@ def run_thread_worker_pool(
     futures = []
     try:
         for thread_index in range(threads_per_process):
-            worker_id = _worker_id(process_index, thread_index)
+            worker_id = build_worker_id(process_index, thread_index)
             worker = worker_factory(worker_id)
             futures.append(executor.submit(getattr(worker, target_name)))
 
@@ -161,17 +163,13 @@ async def _start_thread_workers(
     try:
         futures = []
         for thread_index in range(threads_per_process):
-            worker_id = _worker_id(process_index, thread_index)
+            worker_id = build_worker_id(process_index, thread_index)
             worker = worker_factory(worker_id)
             futures.append(loop.run_in_executor(executor, getattr(worker, target_name)))
 
         await asyncio.gather(*futures)
     finally:
         executor.shutdown(wait=False, cancel_futures=True)
-
-
-def _worker_id(process_index: int, thread_index: int) -> str:
-    return f"p{process_index}-t{thread_index}"
 
 
 def _set_topic_min_partitions(total_workers: int) -> None:

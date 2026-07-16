@@ -17,6 +17,7 @@ from src.base.execution import (
     run_thread_worker_pool,
     start_pipeline_worker_replicas,
 )
+from src.base.eos import EosWorkerContext
 from src.base.kafka_handler import (
     ExactlyOnceKafkaConsumeHandler,
     ExactlyOnceKafkaProduceHandler,
@@ -43,7 +44,7 @@ class AlerterAbstractBase(ABC):
     """
 
     @abstractmethod
-    def __init__(self, alerter_config, consume_topic) -> None:
+    def __init__(self, alerter_config, consume_topic, worker_id="default") -> None:
         pass
 
     @abstractmethod
@@ -63,9 +64,16 @@ class AlerterBase(AlerterAbstractBase):
     like logging to a file or forwarding to an external Kafka topic.
     """
 
-    def __init__(self, alerter_config, consume_topic) -> None:
+    def __init__(self, alerter_config, consume_topic, worker_id="default") -> None:
         self.name = alerter_config.get("name", "generic")
         self.consume_topic = consume_topic
+        self.eos_context = EosWorkerContext(
+            stage=module_name,
+            consume_topic=consume_topic,
+            instance_name=self.name,
+            worker_id=worker_id,
+        )
+        self.worker_id = self.eos_context.worker_id
         self.alerter_config = alerter_config
         self.alert_data = None
         self.key = None
@@ -119,7 +127,9 @@ class AlerterBase(AlerterAbstractBase):
                 f"Could not auto-create topic {self.external_kafka_topic}: {e}"
             )
 
-        self.kafka_produce_handler = ExactlyOnceKafkaProduceHandler()
+        self.kafka_produce_handler = self.eos_context.create_producer(
+            ExactlyOnceKafkaProduceHandler
+        )
 
     @staticmethod
     def _parse_log_retention_days(retention_days) -> int | None:
@@ -352,9 +362,11 @@ def build_alerter_worker(alerter_config, consume_topic, worker_id=None):
     plugin_module_name = f"{PLUGIN_PATH}.{alerter_module_name}"
     plugin_module = importlib.import_module(plugin_module_name)
     alerter_class = getattr(plugin_module, class_name)
-    worker = alerter_class(alerter_config=alerter_config, consume_topic=consume_topic)
-    worker.worker_id = worker_id
-    return worker
+    return alerter_class(
+        alerter_config=alerter_config,
+        consume_topic=consume_topic,
+        worker_id=worker_id,
+    )
 
 
 def run_alerter_worker_process(

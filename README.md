@@ -221,7 +221,7 @@ We feature two trained models:
 1. XGBoost (`src/train/model.py#XGBoostModel`) and
 2. RandomForest (`src/train/model.py#RandomForestModel`).
 
-After installing the requirements, use `src/train/train.py`:
+After installing the requirements, run the training module from the repository root:
 
 ```sh
 > python -m venv .venv
@@ -229,7 +229,7 @@ After installing the requirements, use `src/train/train.py`:
 
 > pip install -r requirements/requirements.train.txt
 
-> python src/train/train.py
+> python -m src.train.train
 Usage: train.py [OPTIONS] COMMAND [ARGS]...
 
 Options:
@@ -247,20 +247,20 @@ the training process by running the following commands:
 #### Model Training
 
 ```sh
-> python src/train/train.py train  --dataset <dataset_type> --dataset_path <path/to/your/datasets> --model <model_name>
+> python -m src.train.train train --dataset <dataset_type> --dataset_path <path/to/your/datasets> --model <model_name>
 ```
 The results will be saved per default to `./results`, if not configured otherwise.
 
 #### Model Tests
 
 ```sh
-> python src/train/train.py test  --dataset <dataset_type> --dataset_path <path/to/your/datasets> --model <model_name> --model_output_path <path_to_model_version>
+> python -m src.train.train test --dataset <dataset_type> --dataset_path <path/to/your/datasets> --model <model_name> --model_output_path <path_to_model_version>
 ```
 
 #### Model Explain
 
 ```sh
-> python src/train/train.py explain  --dataset <dataset_type> --dataset_path <path/to/your/datasets> --model <model_name> --model_path <path_to_model_version>
+> python -m src.train.train explain --dataset <dataset_type> --dataset_path <path/to/your/datasets> --model <model_name> --model_path <path_to_model_version>
 ```
 This will create a `rules.txt` file containing the innards of the model, explaining the rules it created.
 

@@ -48,6 +48,7 @@ class TestInit(unittest.TestCase):
             "auto.offset.reset": "earliest",
             "enable.partition.eof": True,
             "max.poll.interval.ms": 1800000,
+            "isolation.level": "read_committed",
         }
 
         sut = ExactlyOnceKafkaConsumeHandler(topics="test_topic")
@@ -94,6 +95,7 @@ class TestInit(unittest.TestCase):
             "auto.offset.reset": "earliest",
             "enable.partition.eof": True,
             "max.poll.interval.ms": 1800000,
+            "isolation.level": "read_committed",
         }
 
         mock_consumer_instance.subscribe.side_effect = [KafkaException(), None]
@@ -203,6 +205,32 @@ class TestConsume(unittest.TestCase):
         self.sut.commit()
 
         self.sut.consumer.commit.assert_called_once_with(msg)
+
+    def test_batch_consumption_preserves_source_offsets(self):
+        first = Mock()
+        first.key.return_value = b"first-key"
+        first.value.return_value = b"first-value"
+        first.topic.return_value = "input-topic"
+        first.partition.return_value = 2
+        first.offset.return_value = 11
+        first.error.return_value = None
+        second = Mock()
+        second.key.return_value = None
+        second.value.return_value = b"second-value"
+        second.topic.return_value = "input-topic"
+        second.partition.return_value = 2
+        second.offset.return_value = 12
+        second.error.return_value = None
+        self.sut.consumer.consume.side_effect = [[first, second], []]
+
+        result = self.sut.consume_batch(max_messages=20, timeout_ms=25)
+
+        first_call = self.sut.consumer.consume.call_args_list[0]
+        self.assertEqual(20, first_call.kwargs["num_messages"])
+        self.assertLessEqual(first_call.kwargs["timeout"], 0.025)
+        self.assertEqual("first-key", result[0].key)
+        self.assertEqual("first-value", result[0].value)
+        self.assertEqual(("input-topic", 2, 12), result[1].topic_partition_offset)
 
     def test_consumer_raises_keyboard_interrupt(self):
         self.sut.consumer.poll.side_effect = [KeyboardInterrupt]
