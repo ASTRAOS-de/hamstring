@@ -14,7 +14,7 @@ from src.detector.detector import (
     build_detector_consume_topic,
     build_downstream_detector_topics,
 )
-from src.base.kafka_handler import KafkaMessageFetchException
+from src.base.kafka import KafkaMessageFetchException
 
 MINIMAL_DETECTOR_CONFIG = {
     "name": "test-detector",

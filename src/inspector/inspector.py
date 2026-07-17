@@ -19,7 +19,7 @@ from src.base.utils import (
     generate_collisions_resistant_uuid,
 )
 from src.base.acceleration import resolve_acceleration_config
-from src.base.kafka_handler import (
+from src.base.kafka import (
     ExactlyOnceKafkaConsumeHandler,
     ExactlyOnceKafkaProduceHandler,
     KafkaMessageFetchException,

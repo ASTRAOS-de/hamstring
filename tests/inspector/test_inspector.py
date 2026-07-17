@@ -7,7 +7,7 @@ import marshmallow_dataclass
 import numpy as np
 from streamad.model import ZScoreDetector, RShashDetector
 
-from src.base.kafka_handler import (
+from src.base.kafka import (
     KafkaMessageFetchException,
 )
 from src.base.data_classes.batch import Batch

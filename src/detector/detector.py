@@ -22,7 +22,7 @@ from src.base.acceleration import (
     apply_model_acceleration,
     resolve_acceleration_config,
 )
-from src.base.kafka_handler import (
+from src.base.kafka import (
     ExactlyOnceKafkaConsumeHandler,
     ExactlyOnceKafkaProduceHandler,
     KafkaMessageFetchException,

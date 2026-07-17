@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import MagicMock, call, patch
 
-from src.base.kafka_handler import (
+from src.base.kafka import (
     ConsumedKafkaMessage,
     ExactlyOnceKafkaConsumeHandler,
     ExactlyOnceKafkaProduceHandler,
@@ -9,7 +9,7 @@ from src.base.kafka_handler import (
 
 
 class TestTransactionalBatch(unittest.TestCase):
-    @patch("src.base.kafka_handler.Producer")
+    @patch("src.base.kafka.producer.Producer")
     def test_outputs_and_source_offsets_are_committed_in_one_transaction(
         self, mock_producer
     ):
@@ -51,7 +51,7 @@ class TestTransactionalBatch(unittest.TestCase):
         )
         producer.commit_transaction.assert_called_once_with()
 
-    @patch("src.base.kafka_handler.Producer")
+    @patch("src.base.kafka.producer.Producer")
     def test_source_offsets_are_committed_when_processing_has_no_output(
         self, mock_producer
     ):

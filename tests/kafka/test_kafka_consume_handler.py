@@ -2,14 +2,17 @@ import json
 import unittest
 from unittest.mock import patch, MagicMock
 
-from src.base.kafka_handler import (
+from src.base.kafka.config import KAFKA_CONSUMER_MAX_POLL_INTERVAL_MS
+from src.base.kafka import (
     build_consumer_group_id,
     ensure_topics,
     KafkaConsumeHandler,
     KafkaMessageFetchException,
+)
+from src.base.kafka.topics import (
     _desired_topic_partitions,
-    _topic_replication_factor,
     _topic_config,
+    _topic_replication_factor,
 )
 
 
@@ -26,14 +29,14 @@ def _metadata(partitions_by_topic: dict[str, int]):
 
 
 class TestConsumerGroupId(unittest.TestCase):
-    @patch("src.base.kafka_handler.CONSUMER_GROUP_ID", "test_group_id")
+    @patch("src.base.kafka.config.CONSUMER_GROUP_ID", "test_group_id")
     def test_build_consumer_group_id_for_single_topic(self):
         self.assertEqual(
             "test_group_id.test_topic",
             build_consumer_group_id("test_topic"),
         )
 
-    @patch("src.base.kafka_handler.CONSUMER_GROUP_ID", "test_group_id")
+    @patch("src.base.kafka.config.CONSUMER_GROUP_ID", "test_group_id")
     def test_build_consumer_group_id_for_multiple_topics(self):
         self.assertEqual(
             "test_group_id.test_topic_1__test_topic_2",
@@ -42,7 +45,7 @@ class TestConsumerGroupId(unittest.TestCase):
 
 
 class TestTopicReconciliation(unittest.TestCase):
-    @patch("src.base.kafka_handler.NewTopic")
+    @patch("src.base.kafka.topics.NewTopic")
     def test_missing_topic_is_created_with_target_partitions(self, mock_new_topic):
         admin_client = MagicMock()
         admin_client.list_topics.side_effect = [
@@ -67,7 +70,7 @@ class TestTopicReconciliation(unittest.TestCase):
         admin_client.create_topics.assert_called_once_with([("test_topic", 4, 2)])
         admin_client.create_partitions.assert_not_called()
 
-    @patch("src.base.kafka_handler.NewPartitions")
+    @patch("src.base.kafka.topics.NewPartitions")
     def test_existing_topic_with_too_few_partitions_is_expanded(
         self, mock_new_partitions
     ):
@@ -144,25 +147,25 @@ class TestTopicReconciliation(unittest.TestCase):
         admin_client.create_topics.assert_not_called()
         admin_client.create_partitions.assert_not_called()
 
-    @patch("src.base.kafka_handler.NUMBER_OF_INSTANCES", 6)
-    @patch("src.base.kafka_handler.KAFKA_TOPIC_DEFAULT_PARTITIONS", 3)
+    @patch("src.base.kafka.config.NUMBER_OF_INSTANCES", 6)
+    @patch("src.base.kafka.config.KAFKA_TOPIC_DEFAULT_PARTITIONS", 3)
     def test_desired_partitions_uses_highest_scale_value(self):
         self.assertEqual(6, _desired_topic_partitions())
 
-    @patch("src.base.kafka_handler.KAFKA_TOPIC_REPLICATION_FACTOR", 3)
+    @patch("src.base.kafka.config.KAFKA_TOPIC_REPLICATION_FACTOR", 3)
     @patch(
-        "src.base.kafka_handler.KAFKA_BROKERS",
+        "src.base.kafka.config.KAFKA_BROKERS",
         [{"hostname": "127.0.0.1", "internal_port": 9999}],
     )
     def test_replication_factor_is_capped_to_configured_brokers(self):
         self.assertEqual(1, _topic_replication_factor())
 
     @patch(
-        "src.base.kafka_handler.KAFKA_PIPELINE_TOPIC_PREFIXES",
+        "src.base.kafka.config.KAFKA_PIPELINE_TOPIC_PREFIXES",
         {"inspector_to_detector": "pipeline-inspector_to_detector"},
     )
     @patch(
-        "src.base.kafka_handler.KAFKA_TOPIC_STAGE_CONFIG",
+        "src.base.kafka.config.KAFKA_TOPIC_STAGE_CONFIG",
         {"inspector_to_detector": {"partitions": 7, "replication_factor": 2}},
     )
     def test_stage_topic_config_is_resolved_from_prefix(self):
@@ -174,7 +177,7 @@ class TestTopicReconciliation(unittest.TestCase):
         self.assertEqual(2, _topic_replication_factor(topic))
 
     @patch(
-        "src.base.kafka_handler.KAFKA_TOPIC_EXACT_CONFIG",
+        "src.base.kafka.config.KAFKA_TOPIC_EXACT_CONFIG",
         {"hamstring_alerts": {"partitions": 5, "replication_factor": 2}},
     )
     def test_exact_topic_config_wins(self):
@@ -187,9 +190,9 @@ class TestTopicReconciliation(unittest.TestCase):
 
 
 class TestInit(unittest.TestCase):
-    @patch("src.base.kafka_handler.CONSUMER_GROUP_ID", "test_group_id")
+    @patch("src.base.kafka.config.CONSUMER_GROUP_ID", "test_group_id")
     @patch(
-        "src.base.kafka_handler.KAFKA_BROKERS",
+        "src.base.kafka.config.KAFKA_BROKERS",
         [
             {
                 "hostname": "127.0.0.1",
@@ -206,11 +209,11 @@ class TestInit(unittest.TestCase):
         ],
     )
     @patch(
-        "src.base.kafka_handler.KafkaConsumeHandler._all_topics_created",
+        "src.base.kafka.consumer.KafkaConsumeHandler._all_topics_created",
         return_value=True,
     )
-    @patch("src.base.kafka_handler.AdminClient")
-    @patch("src.base.kafka_handler.Consumer")
+    @patch("src.base.kafka.consumer.AdminClient")
+    @patch("src.base.kafka.consumer.Consumer")
     def test_init_successful(
         self, mock_consumer, mock_admin_client, mock_all_topics_created
     ):
@@ -224,7 +227,7 @@ class TestInit(unittest.TestCase):
             "enable.auto.commit": False,
             "auto.offset.reset": "earliest",
             "enable.partition.eof": True,
-            "max.poll.interval.ms": 1800000,
+            "max.poll.interval.ms": KAFKA_CONSUMER_MAX_POLL_INTERVAL_MS,
         }
 
         # Act
@@ -236,9 +239,9 @@ class TestInit(unittest.TestCase):
         mock_consumer.assert_called_once_with(expected_conf)
         mock_consumer_instance.subscribe.assert_called_once()
 
-    @patch("src.base.kafka_handler.CONSUMER_GROUP_ID", "test_group_id")
+    @patch("src.base.kafka.config.CONSUMER_GROUP_ID", "test_group_id")
     @patch(
-        "src.base.kafka_handler.KAFKA_BROKERS",
+        "src.base.kafka.config.KAFKA_BROKERS",
         [
             {
                 "hostname": "127.0.0.1",
@@ -255,12 +258,12 @@ class TestInit(unittest.TestCase):
         ],
     )
     @patch(
-        "src.base.kafka_handler.KafkaConsumeHandler._all_topics_created",
+        "src.base.kafka.consumer.KafkaConsumeHandler._all_topics_created",
         side_effect=[False, True],
     )
     @patch("src.base.retry.time.sleep", return_value=None)
-    @patch("src.base.kafka_handler.AdminClient")
-    @patch("src.base.kafka_handler.Consumer")
+    @patch("src.base.kafka.consumer.AdminClient")
+    @patch("src.base.kafka.consumer.Consumer")
     def test_init_retries_until_topics_are_visible(
         self, mock_consumer, mock_admin_client, mock_sleep, mock_all_topics_created
     ):
@@ -274,7 +277,7 @@ class TestInit(unittest.TestCase):
             "enable.auto.commit": False,
             "auto.offset.reset": "earliest",
             "enable.partition.eof": True,
-            "max.poll.interval.ms": 1800000,
+            "max.poll.interval.ms": KAFKA_CONSUMER_MAX_POLL_INTERVAL_MS,
         }
 
         # Act
@@ -288,9 +291,9 @@ class TestInit(unittest.TestCase):
         mock_consumer_instance.subscribe.assert_called_once()
         mock_sleep.assert_called()
 
-    @patch("src.base.kafka_handler.CONSUMER_GROUP_ID", "test_group_id")
+    @patch("src.base.kafka.config.CONSUMER_GROUP_ID", "test_group_id")
     @patch(
-        "src.base.kafka_handler.KAFKA_BROKERS",
+        "src.base.kafka.config.KAFKA_BROKERS",
         [
             {
                 "hostname": "127.0.0.1",
@@ -307,11 +310,11 @@ class TestInit(unittest.TestCase):
         ],
     )
     @patch(
-        "src.base.kafka_handler.KafkaConsumeHandler._all_topics_created",
+        "src.base.kafka.consumer.KafkaConsumeHandler._all_topics_created",
         return_value=True,
     )
-    @patch("src.base.kafka_handler.AdminClient")
-    @patch("src.base.kafka_handler.Consumer")
+    @patch("src.base.kafka.consumer.AdminClient")
+    @patch("src.base.kafka.consumer.Consumer")
     def test_init_successful_with_list(
         self, mock_consumer, mock_admin_client, mock_all_topics_created
     ):
@@ -325,7 +328,7 @@ class TestInit(unittest.TestCase):
             "enable.auto.commit": False,
             "auto.offset.reset": "earliest",
             "enable.partition.eof": True,
-            "max.poll.interval.ms": 1800000,
+            "max.poll.interval.ms": KAFKA_CONSUMER_MAX_POLL_INTERVAL_MS,
         }
 
         # Act
@@ -339,9 +342,9 @@ class TestInit(unittest.TestCase):
 
 
 class TestConsume(unittest.TestCase):
-    @patch("src.base.kafka_handler.CONSUMER_GROUP_ID", "test_group_id")
+    @patch("src.base.kafka.config.CONSUMER_GROUP_ID", "test_group_id")
     @patch(
-        "src.base.kafka_handler.KAFKA_BROKERS",
+        "src.base.kafka.config.KAFKA_BROKERS",
         [
             {
                 "hostname": "127.0.0.1",
@@ -358,11 +361,11 @@ class TestConsume(unittest.TestCase):
         ],
     )
     @patch(
-        "src.base.kafka_handler.KafkaConsumeHandler._all_topics_created",
+        "src.base.kafka.consumer.KafkaConsumeHandler._all_topics_created",
         return_value=True,
     )
-    @patch("src.base.kafka_handler.AdminClient")
-    @patch("src.base.kafka_handler.Consumer")
+    @patch("src.base.kafka.consumer.AdminClient")
+    @patch("src.base.kafka.consumer.Consumer")
     def test_not_implemented(
         self, mock_consumer, mock_admin_client, mock_all_topics_created
     ):
@@ -375,9 +378,9 @@ class TestConsume(unittest.TestCase):
 
 
 class TestConsumeAsJSON(unittest.TestCase):
-    @patch("src.base.kafka_handler.CONSUMER_GROUP_ID", "test_group_id")
+    @patch("src.base.kafka.config.CONSUMER_GROUP_ID", "test_group_id")
     @patch(
-        "src.base.kafka_handler.KAFKA_BROKERS",
+        "src.base.kafka.config.KAFKA_BROKERS",
         [
             {
                 "hostname": "127.0.0.1",
@@ -394,17 +397,17 @@ class TestConsumeAsJSON(unittest.TestCase):
         ],
     )
     @patch(
-        "src.base.kafka_handler.KafkaConsumeHandler._all_topics_created",
+        "src.base.kafka.consumer.KafkaConsumeHandler._all_topics_created",
         return_value=True,
     )
-    @patch("src.base.kafka_handler.AdminClient")
-    @patch("src.base.kafka_handler.Consumer")
+    @patch("src.base.kafka.consumer.AdminClient")
+    @patch("src.base.kafka.consumer.Consumer")
     def setUp(self, mock_consumer, mock_admin_client, mock_all_topics_created):
         self.sut = KafkaConsumeHandler(topics="test_topic")
 
     def test_successful(self):
         with patch(
-            "src.base.kafka_handler.KafkaConsumeHandler.consume"
+            "src.base.kafka.consumer.KafkaConsumeHandler.consume"
         ) as mock_consume:
             # Arrange
             mock_consume.return_value = [
@@ -421,7 +424,7 @@ class TestConsumeAsJSON(unittest.TestCase):
 
     def test_wrong_data_format(self):
         with patch(
-            "src.base.kafka_handler.KafkaConsumeHandler.consume"
+            "src.base.kafka.consumer.KafkaConsumeHandler.consume"
         ) as mock_consume:
             # Arrange
             mock_consume.return_value = ["test_key", "wrong_format", "test_topic"]
@@ -432,7 +435,7 @@ class TestConsumeAsJSON(unittest.TestCase):
 
     def test_wrong_data_format_list(self):
         with patch(
-            "src.base.kafka_handler.KafkaConsumeHandler.consume"
+            "src.base.kafka.consumer.KafkaConsumeHandler.consume"
         ) as mock_consume:
             # Arrange
             mock_consume.return_value = [
@@ -447,7 +450,7 @@ class TestConsumeAsJSON(unittest.TestCase):
 
     def test_kafka_message_fetch_exception(self):
         with patch(
-            "src.base.kafka_handler.KafkaConsumeHandler.consume",
+            "src.base.kafka.consumer.KafkaConsumeHandler.consume",
             side_effect=KafkaMessageFetchException,
         ):
             # Act and Assert
@@ -456,7 +459,7 @@ class TestConsumeAsJSON(unittest.TestCase):
 
     def test_keyboard_interrupt(self):
         with patch(
-            "src.base.kafka_handler.KafkaConsumeHandler.consume",
+            "src.base.kafka.consumer.KafkaConsumeHandler.consume",
             side_effect=KeyboardInterrupt,
         ):
             # Act and Assert
@@ -465,7 +468,7 @@ class TestConsumeAsJSON(unittest.TestCase):
 
     def test_kafka_message_else(self):
         with patch(
-            "src.base.kafka_handler.KafkaConsumeHandler.consume"
+            "src.base.kafka.consumer.KafkaConsumeHandler.consume"
         ) as mock_consume:
             # Arrange
             mock_consume.return_value = [None, None, "test_topic"]
@@ -478,9 +481,9 @@ class TestConsumeAsJSON(unittest.TestCase):
 
 
 class TestAllTopicsCreated(unittest.TestCase):
-    @patch("src.base.kafka_handler.CONSUMER_GROUP_ID", "test_group_id")
+    @patch("src.base.kafka.config.CONSUMER_GROUP_ID", "test_group_id")
     @patch(
-        "src.base.kafka_handler.KAFKA_BROKERS",
+        "src.base.kafka.config.KAFKA_BROKERS",
         [
             {
                 "hostname": "127.0.0.1",
@@ -497,15 +500,15 @@ class TestAllTopicsCreated(unittest.TestCase):
         ],
     )
     @patch(
-        "src.base.kafka_handler.KafkaConsumeHandler._all_topics_created",
+        "src.base.kafka.consumer.KafkaConsumeHandler._all_topics_created",
         return_value=True,
     )
-    @patch("src.base.kafka_handler.AdminClient")
-    @patch("src.base.kafka_handler.Consumer")
+    @patch("src.base.kafka.consumer.AdminClient")
+    @patch("src.base.kafka.consumer.Consumer")
     def setUp(self, mock_consumer, mock_admin_client, mock_all_topics_created):
         self.sut = KafkaConsumeHandler(topics=["test_topic", "another_topic"])
 
-    @patch("src.base.kafka_handler.Consumer")
+    @patch("src.base.kafka.consumer.Consumer")
     def test_with_all_created(self, mock_consumer):
         # Arrange
         self.sut.consumer = MagicMock()
@@ -520,8 +523,8 @@ class TestAllTopicsCreated(unittest.TestCase):
             )
         )
 
-    @patch("src.base.kafka_handler.time.sleep")
-    @patch("src.base.kafka_handler.Consumer")
+    @patch("src.base.kafka.consumer.time.sleep")
+    @patch("src.base.kafka.consumer.Consumer")
     def test_with_none_created(self, mock_consumer, mock_sleep):
         # Arrange
         mock_topics = MagicMock()
@@ -535,8 +538,8 @@ class TestAllTopicsCreated(unittest.TestCase):
             self.sut._all_topics_created(topics=["test_topic", "another_topic"])
         )
 
-    @patch("src.base.kafka_handler.time.sleep")
-    @patch("src.base.kafka_handler.Consumer")
+    @patch("src.base.kafka.consumer.time.sleep")
+    @patch("src.base.kafka.consumer.Consumer")
     def test_with_too_few_partitions(self, mock_consumer, mock_sleep):
         # Arrange
         self.sut.consumer = MagicMock()

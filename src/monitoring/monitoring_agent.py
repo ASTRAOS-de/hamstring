@@ -7,7 +7,7 @@ import marshmallow_dataclass
 
 sys.path.append(os.getcwd())
 from src.monitoring.clickhouse_batch_sender import *
-from src.base.kafka_handler import SimpleKafkaConsumeHandler
+from src.base.kafka import SimpleKafkaConsumeHandler
 from src.base.data_classes.clickhouse_connectors import TABLE_NAME_TO_TYPE
 from src.base.log_config import get_logger
 from src.base.utils import setup_config

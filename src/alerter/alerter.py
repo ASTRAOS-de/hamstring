@@ -17,7 +17,7 @@ from src.base.execution import (
     run_thread_worker_pool,
     start_pipeline_worker_replicas,
 )
-from src.base.kafka_handler import (
+from src.base.kafka import (
     ExactlyOnceKafkaConsumeHandler,
     ExactlyOnceKafkaProduceHandler,
     KafkaMessageFetchException,

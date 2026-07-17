@@ -8,7 +8,7 @@ from uuid import UUID
 
 import aiofiles
 
-from src.base.kafka_handler import ConsumedKafkaMessage
+from src.base.kafka import ConsumedKafkaMessage
 from src.logserver.server import LogServer, main
 
 LOG_SERVER_IP_ADDR = "192.168.0.1"

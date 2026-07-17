@@ -1,19 +1,19 @@
 logging:
   base:
-    debug: true
+    debug: false
   modules:
     log_storage.logserver:
-      debug: true
+      debug: false
     log_collection.collector:
-      debug: true
+      debug: false
     log_collection.batch_handler:
-      debug: true
+      debug: false
     log_filtering.prefilter:
-      debug: true
+      debug: false
     data_inspection.inspector:
-      debug: true
+      debug: false
     data_analysis.detector:
-      debug: true
+      debug: false
 
 pipeline:
   acceleration:

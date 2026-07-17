@@ -10,7 +10,7 @@ import marshmallow_dataclass
 
 sys.path.append(os.getcwd())
 from src.base.data_classes.clickhouse_connectors import TABLE_NAME_TO_TYPE
-from src.base.kafka_handler import (
+from src.base.kafka import (
     BufferedKafkaProduceHandler,
     SimpleKafkaProduceHandler,
 )

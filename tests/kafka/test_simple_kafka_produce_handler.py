@@ -3,7 +3,7 @@ from unittest.mock import ANY, Mock, call, patch
 
 from confluent_kafka import KafkaError
 
-from src.base.kafka_handler import (
+from src.base.kafka import (
     BufferedKafkaProduceHandler,
     SimpleKafkaProduceHandler,
 )
@@ -11,7 +11,7 @@ from src.base.kafka_handler import (
 
 class TestInit(unittest.TestCase):
     @patch(
-        "src.base.kafka_handler.KAFKA_BROKERS",
+        "src.base.kafka.config.KAFKA_BROKERS",
         [
             {
                 "hostname": "127.0.0.1",
@@ -37,7 +37,7 @@ class TestInit(unittest.TestCase):
         }
 
         # Act
-        with patch("src.base.kafka_handler.Producer") as mock_producer:
+        with patch("src.base.kafka.producer.Producer") as mock_producer:
             mock_producer_instance = Mock()
             mock_producer.return_value = mock_producer_instance
 
@@ -51,7 +51,7 @@ class TestInit(unittest.TestCase):
 
 class TestProduce(unittest.TestCase):
     def test_with_data(self):
-        with patch("src.base.kafka_handler.Producer") as mock_producer:
+        with patch("src.base.kafka.producer.Producer") as mock_producer:
             # Arrange
             mock_producer_instance = Mock()
             mock_producer.return_value = mock_producer_instance
@@ -72,7 +72,7 @@ class TestProduce(unittest.TestCase):
 
     @patch("src.base.retry.time.sleep", return_value=None)
     def test_with_data_recreates_producer_after_transient_failure(self, mock_sleep):
-        with patch("src.base.kafka_handler.Producer") as mock_producer:
+        with patch("src.base.kafka.producer.Producer") as mock_producer:
             first_producer = Mock()
             second_producer = Mock()
             first_producer.flush.side_effect = BufferError("queue full")
@@ -93,7 +93,7 @@ class TestProduce(unittest.TestCase):
 
     @patch("src.base.retry.time.sleep", return_value=None)
     def test_with_data_retries_delivery_callback_error(self, mock_sleep):
-        with patch("src.base.kafka_handler.Producer") as mock_producer:
+        with patch("src.base.kafka.producer.Producer") as mock_producer:
             first_producer = Mock()
             second_producer = Mock()
             delivery_error = KafkaError(KafkaError._ALL_BROKERS_DOWN)
@@ -118,7 +118,7 @@ class TestProduce(unittest.TestCase):
         mock_sleep.assert_called()
 
     def test_without_data(self):
-        with patch("src.base.kafka_handler.Producer") as mock_producer:
+        with patch("src.base.kafka.producer.Producer") as mock_producer:
             # Arrange
             mock_producer_instance = Mock()
             mock_producer.return_value = mock_producer_instance
@@ -135,7 +135,7 @@ class TestProduce(unittest.TestCase):
 
 class TestBufferedProduce(unittest.TestCase):
     def test_queues_data_without_flushing(self):
-        with patch("src.base.kafka_handler.Producer") as mock_producer:
+        with patch("src.base.kafka.producer.Producer") as mock_producer:
             producer = Mock()
             mock_producer.return_value = producer
             sut = BufferedKafkaProduceHandler()
@@ -152,7 +152,7 @@ class TestBufferedProduce(unittest.TestCase):
         )
 
     def test_waits_for_queue_space_without_recreating_producer(self):
-        with patch("src.base.kafka_handler.Producer") as mock_producer:
+        with patch("src.base.kafka.producer.Producer") as mock_producer:
             producer = Mock()
             producer.produce.side_effect = [BufferError("queue full"), None]
             mock_producer.return_value = producer

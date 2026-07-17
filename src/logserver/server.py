@@ -7,7 +7,7 @@ import uuid
 import aiofiles
 
 sys.path.append(os.getcwd())
-from src.base.kafka_handler import (
+from src.base.kafka import (
     ExactlyOnceKafkaConsumeHandler,
     ExactlyOnceKafkaProduceHandler,
 )

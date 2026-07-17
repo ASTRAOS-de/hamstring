@@ -10,7 +10,7 @@ sys.path.append(os.getcwd())
 from src.base.clickhouse_kafka_sender import ClickHouseKafkaSender
 from src.base.data_classes.batch import Batch
 from src.base.logline_handler import LoglineHandler
-from src.base.kafka_handler import (
+from src.base.kafka import (
     ExactlyOnceKafkaProduceHandler,
     ExactlyOnceKafkaConsumeHandler,
     KafkaMessageFetchException,

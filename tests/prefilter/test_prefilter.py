@@ -4,7 +4,7 @@ import uuid
 from unittest.mock import MagicMock, patch, AsyncMock, call
 
 from src.base.data_classes.batch import Batch
-from src.base.kafka_handler import KafkaMessageFetchException
+from src.base.kafka import KafkaMessageFetchException
 from src.prefilter.prefilter import Prefilter, main
 
 

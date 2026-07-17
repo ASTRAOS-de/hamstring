@@ -8,7 +8,7 @@ import uuid
 
 sys.path.append(os.getcwd())
 from src.base.clickhouse_kafka_sender import ClickHouseKafkaSender
-from src.base.kafka_handler import (
+from src.base.kafka import (
     ExactlyOnceKafkaConsumeHandler,
 )
 from src.base.logline_handler import LoglineHandler

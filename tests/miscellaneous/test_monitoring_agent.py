@@ -7,7 +7,7 @@ from unittest.mock import patch, Mock, call, mock_open
 import marshmallow_dataclass
 
 from src.base.data_classes.clickhouse_connectors import ServerLogs
-from src.base.kafka_handler import ConsumedKafkaMessage
+from src.base.kafka import ConsumedKafkaMessage
 from src.monitoring.monitoring_agent import (
     CREATE_TABLES_DIRECTORY,
     MONITORING_CONSUMER_BATCH_SIZE,

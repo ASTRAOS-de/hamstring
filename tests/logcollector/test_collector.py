@@ -5,7 +5,7 @@ import unittest
 import uuid
 from unittest.mock import MagicMock, patch, AsyncMock, Mock
 
-from src.base.kafka_handler import ConsumedKafkaMessage
+from src.base.kafka import ConsumedKafkaMessage
 from src.logcollector.collector import LogCollector, main
 from src.base.utils import setup_config
 

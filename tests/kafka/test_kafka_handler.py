@@ -1,6 +1,6 @@
 import unittest
 
-from src.base.kafka_handler import KafkaHandler
+from src.base.kafka import KafkaHandler
 
 
 class TestInit(unittest.TestCase):
