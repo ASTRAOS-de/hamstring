@@ -92,7 +92,8 @@ class ClickHouseBatchSender:
     insertion with automatic schema validation for all monitored tables.
     """
 
-    def __init__(self):
+    def __init__(self, use_timer: bool = True):
+        self.use_timer = use_timer
         self.tables = {
             "server_logs": Table(
                 "server_logs",
@@ -280,7 +281,7 @@ class ClickHouseBatchSender:
         if len(self.batch.get(table_name)) >= self.max_batch_size:
             self.insert(table_name)
 
-        if not self.timer:
+        if self.use_timer and not self.timer:
             self._start_timer()
 
     def insert(self, table_name: str):
@@ -318,7 +319,11 @@ class ClickHouseBatchSender:
                     f"ClickHouse insert for table '{table_name}'",
                     RETRY_SETTINGS,
                 )
-                logger.debug(f"Inserted {table_name=},{pending_rows=},{column_names=}")
+                logger.debug(
+                    "Inserted %d monitoring row(s) into %s.",
+                    len(pending_rows),
+                    table_name,
+                )
                 self.batch[table_name] = []
 
     def insert_all(self):

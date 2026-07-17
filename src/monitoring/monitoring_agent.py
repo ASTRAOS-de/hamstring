@@ -11,7 +11,10 @@ from src.base.kafka_handler import SimpleKafkaConsumeHandler
 from src.base.data_classes.clickhouse_connectors import TABLE_NAME_TO_TYPE
 from src.base.log_config import get_logger
 from src.base.utils import setup_config
-from src.base.execution import create_pipeline_executor
+from src.base.execution import (
+    run_thread_worker_pool,
+    start_pipeline_worker_replicas,
+)
 from src.base.retry import load_retry_settings, retry_forever
 
 logger = get_logger()
@@ -23,6 +26,13 @@ CREATE_TABLES_DIRECTORY = "docker/create_tables"  # TODO: Get from config
 CLICKHOUSE_HOSTNAME = CONFIG["environment"]["monitoring"]["clickhouse_server"][
     "hostname"
 ]
+MONITORING_CONSUMER_CONFIG = CONFIG["pipeline"]["monitoring"]["kafka_consumer"]
+MONITORING_CONSUMER_BATCH_SIZE = max(
+    1, int(MONITORING_CONSUMER_CONFIG["batch_size"])
+)
+MONITORING_CONSUMER_TIMEOUT_MS = max(
+    0, int(MONITORING_CONSUMER_CONFIG["timeout_ms"])
+)
 
 
 def prepare_all_tables():
@@ -71,11 +81,12 @@ class MonitoringAgent:
     the batch sender for persistent storage.
     """
 
-    def __init__(self):
+    def __init__(self, worker_id: str = "default"):
         """
         Sets up consumption from all ClickHouse-related Kafka topics and
         initializes the batch sender for efficient data insertion.
         """
+        self.worker_id = worker_id
         self.table_names = [
             "server_logs",
             "server_logs_timestamps",
@@ -95,9 +106,17 @@ class MonitoringAgent:
 
         self.topics = [f"clickhouse_{table_name}" for table_name in self.table_names]
         self.kafka_consumer = SimpleKafkaConsumeHandler(self.topics)
-        self.batch_sender = ClickHouseBatchSender()
+        # This worker explicitly flushes before committing its Kafka offsets.
+        # A timer would race with record decoding and create smaller inserts.
+        self.batch_sender = ClickHouseBatchSender(use_timer=False)
+        self.data_schemas = {
+            table_name: marshmallow_dataclass.class_schema(
+                TABLE_NAME_TO_TYPE[table_name]
+            )()
+            for table_name in self.table_names
+        }
 
-    async def start(self):
+    def run(self) -> None:
         """Starts the monitoring agent to consume and process data continuously.
 
         Runs an infinite loop to consume messages from Kafka topics, deserialize
@@ -108,41 +127,88 @@ class MonitoringAgent:
             KeyboardInterrupt: When the agent is manually stopped.
             Exception: For any other processing errors (logged as warnings).
         """
-        loop = asyncio.get_running_loop()
-        executor = create_pipeline_executor(CONFIG, module_name)
-
         try:
             while True:
                 try:
-                    key, value, topic = await loop.run_in_executor(
-                        executor, self.kafka_consumer.consume
+                    source_records = self.kafka_consumer.consume_batch(
+                        MONITORING_CONSUMER_BATCH_SIZE,
+                        MONITORING_CONSUMER_TIMEOUT_MS,
                     )
-                    logger.debug(f"From Kafka: {value}")
+                    if not source_records:
+                        continue
 
-                    table_name = topic.replace("clickhouse_", "")
-                    data_schema = marshmallow_dataclass.class_schema(
-                        TABLE_NAME_TO_TYPE.get(table_name)
-                    )()
-                    data = data_schema.loads(value)
+                    logger.debug(
+                        "Monitoring worker %s fetched %d Kafka record(s).",
+                        self.worker_id,
+                        len(source_records),
+                    )
+                    for source_record in source_records:
+                        try:
+                            table_name = source_record.topic.removeprefix(
+                                "clickhouse_"
+                            )
+                            data = self.data_schemas[table_name].loads(
+                                source_record.value
+                            )
+                            self.batch_sender.add(table_name, asdict(data))
+                        except Exception as exception:
+                            logger.warning(
+                                "Discarding invalid monitoring record at %s[%d] "
+                                "offset %d: %s",
+                                source_record.topic,
+                                source_record.partition,
+                                source_record.offset,
+                                exception,
+                            )
 
-                    self.batch_sender.add(table_name, asdict(data))
+                    self.batch_sender.insert_all()
+                    self.kafka_consumer.commit(source_records)
                 except KeyboardInterrupt:
                     logger.info("Stopped MonitoringAgent.")
                     break
                 except Exception as e:
                     logger.warning(e)
         finally:
-            executor.shutdown(wait=False, cancel_futures=True)
+            self.batch_sender.insert_all()
+
+
+def build_monitoring_worker(worker_id: str) -> MonitoringAgent:
+    """Create one independently consumable monitoring worker."""
+    return MonitoringAgent(worker_id=worker_id)
+
+
+def run_monitoring_worker_process(
+    process_index: int, threads_per_process: int
+) -> None:
+    """Run all monitoring threads assigned to one process."""
+    run_thread_worker_pool(
+        worker_factory=build_monitoring_worker,
+        target_name="run",
+        module_name=module_name,
+        instance_name=None,
+        process_index=process_index,
+        threads_per_process=threads_per_process,
+    )
+
+
+async def start_monitoring_workers() -> None:
+    """Start every configured monitoring consumer replica."""
+    await start_pipeline_worker_replicas(
+        config=CONFIG,
+        module_name=module_name,
+        instance_name=None,
+        worker_factory=build_monitoring_worker,
+        target_name="run",
+        process_entrypoint=run_monitoring_worker_process,
+    )
 
 
 def main():
-    """Creates the :class:`MonitoringAgent` instance and starts it.
+    """Start all configured :class:`MonitoringAgent` workers.
 
-    Entry point for the monitoring agent that initializes and runs
-    the asynchronous monitoring process.
+    Each worker owns an independent Kafka consumer and ClickHouse batch sender.
     """
-    clickhouse_consumer = MonitoringAgent()
-    asyncio.run(clickhouse_consumer.start())
+    asyncio.run(start_monitoring_workers())
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -274,6 +274,14 @@ pipeline:
     external_kafka_topic: "hamstring_alerts"
     plugins: []
   monitoring:
+    kafka_consumer:
+      # Monitoring produces several records per pipeline message. Consume them
+      # in larger blocks so schema decoding, ClickHouse writes, and offset
+      # commits are amortized across the batch.
+      batch_size: 5000
+      # Match the ClickHouse partial-batch window. A shorter timeout forces
+      # sparse tables into many small synchronous inserts.
+      timeout_ms: 2000
     clickhouse_connector:
       batch_size: 50  # do not set higher
       batch_timeout: 2.0

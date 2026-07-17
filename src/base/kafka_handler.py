@@ -920,9 +920,30 @@ class KafkaConsumeHandler(KafkaHandler):
         self._last_consumed_message = None
         self._connect_consumer()
 
-    def commit(self) -> None:
-        """Commit the last message returned by ``consume``."""
-        if self.consumer and self._last_consumed_message is not None:
+    def commit(
+        self,
+        consumed_messages: Sequence[ConsumedKafkaMessage] | None = None,
+    ) -> None:
+        """Commit either an explicit batch or the last record from ``consume``."""
+        if not self.consumer:
+            return
+
+        if consumed_messages is not None:
+            if not consumed_messages:
+                return
+            retry_forever(
+                lambda: self.consumer.commit(
+                    offsets=self.offsets_for(consumed_messages),
+                    asynchronous=False,
+                ),
+                "Kafka consumer batch offset commit",
+                RETRY_SETTINGS,
+                retryable=(KafkaException, RuntimeError, OSError),
+            )
+            self._last_consumed_message = None
+            return
+
+        if self._last_consumed_message is not None:
             retry_forever(
                 lambda: self.consumer.commit(self._last_consumed_message),
                 "Kafka consumer offset commit",

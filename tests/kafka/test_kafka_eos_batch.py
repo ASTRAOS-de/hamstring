@@ -130,6 +130,26 @@ class TestBatchConsumption(unittest.TestCase):
             {(item.topic, item.partition, item.offset) for item in offsets},
         )
 
+    def test_commit_batch_commits_all_partition_offsets_synchronously(self):
+        records = [
+            ConsumedKafkaMessage(None, "one", "source", 0, 3),
+            ConsumedKafkaMessage(None, "two", "source", 1, 8),
+            ConsumedKafkaMessage(None, "three", "source", 0, 7),
+        ]
+
+        self.handler.commit(records)
+
+        self.handler.consumer.commit.assert_called_once()
+        commit_kwargs = self.handler.consumer.commit.call_args.kwargs
+        self.assertFalse(commit_kwargs["asynchronous"])
+        self.assertEqual(
+            {("source", 0, 8), ("source", 1, 9)},
+            {
+                (item.topic, item.partition, item.offset)
+                for item in commit_kwargs["offsets"]
+            },
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
