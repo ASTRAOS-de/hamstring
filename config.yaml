@@ -1,17 +1,17 @@
 logging:
   base:
-    debug: false
+    debug: true
   modules:
     log_storage.logserver:
-      debug: false
+      debug: true
     log_collection.collector:
-      debug: false
+      debug: true
     log_collection.batch_handler:
-      debug: false
+      debug: true
     log_filtering.prefilter:
-      debug: false
+      debug: true
     data_inspection.inspector:
-      debug: false
+      debug: true
     data_analysis.detector:
       debug: true
 
@@ -40,7 +40,7 @@ pipeline:
     modules:
       log_storage.logserver:
         executor: thread
-        max_workers: 4
+        max_workers: 1
       log_collection.collector:
         executor: thread
         max_workers: 1
@@ -282,7 +282,7 @@ pipeline:
   zeek:
     sensors:
       zeek:
-        static_analysis: false
+        static_analysis: true
         protocols:
           - dns
         interfaces:
@@ -304,9 +304,13 @@ environment:
       node_ip: 127.0.0.1
   kafka_consumer:
     # Allow long-running detector batches without Kafka forcing a group rebalance.
-    # Default librdkafka value is 300000 ms (5 minutes), which can be too short
-    # for model inference plus downstream alert/monitoring writes.
-    max_poll_interval_ms: 1800000
+    # Default librdkafka value is 300000 ms (5 minutes)
+    max_poll_interval_ms: 300000
+  kafka_transaction_batch:
+    # Each stage processes this many Kafka records before atomically publishing
+    # all outputs and committing the corresponding source offsets.
+    size: 250
+    timeout_ms: 50
   kafka_topics:
     replication_factor: 3
     auto_expand_partitions: true

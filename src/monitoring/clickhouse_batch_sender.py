@@ -10,12 +10,13 @@ import clickhouse_connect
 
 sys.path.append(os.getcwd())
 from src.base.log_config import get_logger
-from src.base.retry import retry_forever
+from src.base.retry import load_retry_settings, retry_forever
 from src.base.utils import setup_config
 
 logger = get_logger()
 
 CONFIG = setup_config()
+RETRY_SETTINGS = load_retry_settings(CONFIG)
 CLICKHOUSE_HOSTNAME = CONFIG["environment"]["monitoring"]["clickhouse_server"][
     "hostname"
 ]
@@ -239,6 +240,7 @@ class ClickHouseBatchSender:
         return retry_forever(
             create_clickhouse_client,
             "ClickHouse client connection",
+            RETRY_SETTINGS,
         )
 
     def _reset_client(self) -> None:
@@ -312,7 +314,9 @@ class ClickHouseBatchSender:
                         raise
 
                 retry_forever(
-                    insert_batch, f"ClickHouse insert for table '{table_name}'"
+                    insert_batch,
+                    f"ClickHouse insert for table '{table_name}'",
+                    RETRY_SETTINGS,
                 )
                 logger.debug(f"Inserted {table_name=},{pending_rows=},{column_names=}")
                 self.batch[table_name] = []

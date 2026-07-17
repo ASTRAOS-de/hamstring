@@ -12,17 +12,17 @@ from src.base.data_classes.clickhouse_connectors import TABLE_NAME_TO_TYPE
 from src.base.log_config import get_logger
 from src.base.utils import setup_config
 from src.base.execution import create_pipeline_executor
-from src.base.retry import retry_forever
+from src.base.retry import load_retry_settings, retry_forever
 
 logger = get_logger()
 module_name = "monitoring.agent"
 
 CONFIG = setup_config()
+RETRY_SETTINGS = load_retry_settings(CONFIG)
 CREATE_TABLES_DIRECTORY = "docker/create_tables"  # TODO: Get from config
 CLICKHOUSE_HOSTNAME = CONFIG["environment"]["monitoring"]["clickhouse_server"][
     "hostname"
 ]
-RETRY_CONFIG = CONFIG.get("pipeline", {}).get("resilience", {}).get("retry", {})
 
 
 def prepare_all_tables():
@@ -53,7 +53,7 @@ def prepare_all_tables():
             with retry_forever(
                 create_clickhouse_client,
                 "ClickHouse table preparation connection",
-                retry_config=RETRY_CONFIG,
+                RETRY_SETTINGS,
             ) as client:
                 for statement in _iter_statements(sql_content):
                     try:

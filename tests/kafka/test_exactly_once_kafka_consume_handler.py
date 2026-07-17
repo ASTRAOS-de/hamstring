@@ -48,6 +48,7 @@ class TestInit(unittest.TestCase):
             "auto.offset.reset": "earliest",
             "enable.partition.eof": True,
             "max.poll.interval.ms": 1800000,
+            "isolation.level": "read_committed",
         }
 
         sut = ExactlyOnceKafkaConsumeHandler(topics="test_topic")
@@ -94,6 +95,7 @@ class TestInit(unittest.TestCase):
             "auto.offset.reset": "earliest",
             "enable.partition.eof": True,
             "max.poll.interval.ms": 1800000,
+            "isolation.level": "read_committed",
         }
 
         mock_consumer_instance.subscribe.side_effect = [KafkaException(), None]

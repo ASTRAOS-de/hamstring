@@ -11,6 +11,9 @@ import sys
 import time
 import uuid
 from abc import abstractmethod
+from collections.abc import Iterator, Sequence
+from contextlib import contextmanager
+from dataclasses import dataclass, field
 from typing import Callable, Optional
 
 import marshmallow_dataclass
@@ -19,13 +22,14 @@ from confluent_kafka import (
     KafkaError,
     KafkaException,
     Producer,
+    TopicPartition,
 )
 from confluent_kafka.admin import AdminClient, NewPartitions, NewTopic
 
 sys.path.append(os.getcwd())
 from src.base.data_classes.batch import Batch
 from src.base.log_config import get_logger
-from src.base.retry import retry_forever
+from src.base.retry import load_retry_settings, retry_forever
 from src.base.utils import kafka_delivery_report, setup_config
 
 logger = get_logger()
@@ -35,10 +39,26 @@ CONSUMER_GROUP_ID = os.getenv("GROUP_ID", "default_gid")
 NUMBER_OF_INSTANCES = int(os.getenv("NUMBER_OF_INSTANCES", 1))
 
 config = setup_config()
+RETRY_SETTINGS = load_retry_settings(config)
 KAFKA_BROKERS = config["environment"]["kafka_brokers"]
 KAFKA_CONSUMER_CONFIG = config["environment"].get("kafka_consumer", {})
 KAFKA_CONSUMER_MAX_POLL_INTERVAL_MS = int(
     KAFKA_CONSUMER_CONFIG.get("max_poll_interval_ms", 1800000)
+)
+KAFKA_TRANSACTION_BATCH_CONFIG = config["environment"].get(
+    "kafka_transaction_batch", {}
+)
+KAFKA_TRANSACTION_BATCH_SIZE = int(
+    os.getenv(
+        "KAFKA_TRANSACTION_BATCH_SIZE",
+        KAFKA_TRANSACTION_BATCH_CONFIG.get("size", 100),
+    )
+)
+KAFKA_TRANSACTION_BATCH_TIMEOUT_MS = int(
+    os.getenv(
+        "KAFKA_TRANSACTION_BATCH_TIMEOUT_MS",
+        KAFKA_TRANSACTION_BATCH_CONFIG.get("timeout_ms", 50),
+    )
 )
 KAFKA_TOPIC_CONFIG = config["environment"].get("kafka_topics", {})
 KAFKA_TOPIC_DEFAULT_PARTITIONS = int(os.getenv("KAFKA_TOPIC_PARTITIONS", 12))
@@ -239,6 +259,7 @@ def ensure_topics(
     cluster_metadata = retry_forever(
         lambda: admin_client.list_topics(timeout=10),
         "Kafka metadata lookup",
+        RETRY_SETTINGS,
     )
     topics_metadata = getattr(cluster_metadata, "topics", {})
     existing_topics = (
@@ -270,6 +291,7 @@ def ensure_topics(
                 "create topic",
             ),
             f"Kafka topic creation for {missing_topics}",
+            RETRY_SETTINGS,
         )
 
     if not auto_expand_partitions:
@@ -278,6 +300,7 @@ def ensure_topics(
     cluster_metadata = retry_forever(
         lambda: admin_client.list_topics(timeout=10),
         "Kafka metadata lookup after topic creation",
+        RETRY_SETTINGS,
     )
     topics_to_expand = []
     for topic in normalized_topics:
@@ -301,6 +324,7 @@ def ensure_topics(
                 "expand partitions",
             ),
             f"Kafka partition expansion for {[str(topic) for topic in topics_to_expand]}",
+            RETRY_SETTINGS,
         )
 
     return target_partitions_by_topic
@@ -344,6 +368,27 @@ class KafkaMessageFetchException(Exception):
     pass
 
 
+@dataclass(frozen=True)
+class ConsumedKafkaMessage:
+    """Decoded Kafka record plus the source offset needed for EoS."""
+
+    key: str | None
+    value: str | None
+    topic: str
+    partition: int
+    offset: int
+    raw_message: object | None = field(default=None, repr=False, compare=False)
+
+
+@dataclass(frozen=True)
+class KafkaProduceRecord:
+    """One output record queued for a Kafka transaction."""
+
+    topic: str
+    data: str
+    key: str | None = None
+
+
 class KafkaHandler:
     """Base class for all Kafka wrappers and handlers
 
@@ -383,6 +428,7 @@ class KafkaProduceHandler(KafkaHandler):
         return retry_forever(
             lambda: Producer(self.conf),
             "Kafka producer creation",
+            RETRY_SETTINGS,
         )
 
     def _reset_producer(self) -> None:
@@ -413,6 +459,7 @@ class KafkaProduceHandler(KafkaHandler):
         retry_forever(
             attempt,
             description,
+            RETRY_SETTINGS,
             retryable=(KafkaException, BufferError, RuntimeError, OSError),
         )
 
@@ -615,6 +662,7 @@ class ExactlyOnceKafkaProduceHandler(KafkaProduceHandler):
         Raises:
             KafkaException: If transaction initialization fails.
         """
+        self._transaction_records: list[KafkaProduceRecord] | None = None
         self.brokers = ",".join(
             [
                 f"{broker['hostname']}:{broker['internal_port']}"
@@ -640,14 +688,15 @@ class ExactlyOnceKafkaProduceHandler(KafkaProduceHandler):
         retry_forever(
             lambda: self.producer.init_transactions(),
             "Kafka transactional producer initialization",
+            RETRY_SETTINGS,
         )
 
     def produce(self, topic: str, data: str, key: None | str = None) -> None:
         """Produce a message to the specified Kafka topic with exactly-once semantics.
 
-        Sends the provided data within a Kafka transaction to ensure exactly-once
-        delivery. The transaction is automatically committed on success or aborted
-        on failure. Empty data is silently ignored.
+        Outside ``transaction_batch`` this sends one record in its own transaction.
+        Inside a batch it queues the record so all outputs and consumed offsets are
+        committed atomically when the batch context exits. Empty data is ignored.
 
         Args:
             topic (str): Target Kafka topic name.
@@ -662,20 +711,69 @@ class ExactlyOnceKafkaProduceHandler(KafkaProduceHandler):
         if not data:
             return
 
+        record = KafkaProduceRecord(topic=topic, data=data, key=key)
+        if self._transaction_records is not None:
+            self._transaction_records.append(record)
+            return
+
+        self._run_transaction([record])
+
+    @contextmanager
+    def transaction_batch(
+        self,
+        consumer: "KafkaConsumeHandler",
+        consumed_messages: Sequence[ConsumedKafkaMessage],
+    ) -> Iterator[None]:
+        """Collect stage outputs and atomically commit them with source offsets."""
+        if self._transaction_records is not None:
+            raise RuntimeError("Kafka transaction batches cannot be nested.")
+        if not consumed_messages:
+            raise ValueError("A Kafka transaction batch requires source messages.")
+
+        self._transaction_records = []
+        try:
+            yield
+            records = self._transaction_records
+        except Exception:
+            self._transaction_records = None
+            raise
+        else:
+            self._transaction_records = None
+            self._run_transaction(
+                records,
+                consumer=consumer,
+                consumed_messages=consumed_messages,
+            )
+
+    def _run_transaction(
+        self,
+        records: Sequence[KafkaProduceRecord],
+        consumer: "KafkaConsumeHandler | None" = None,
+        consumed_messages: Sequence[ConsumedKafkaMessage] = (),
+    ) -> None:
+        """Commit output records and the corresponding source offsets once."""
+
         def operation():
-            self.producer.flush()
             self.producer.begin_transaction()
 
             try:
-                self.producer.produce(
-                    topic=topic,
-                    key=key,
-                    value=data,
-                    callback=kafka_delivery_report,
-                )
+                for record in records:
+                    if not record.data:
+                        continue
+                    self.producer.produce(
+                        topic=record.topic,
+                        key=record.key,
+                        value=record.data,
+                        callback=kafka_delivery_report,
+                    )
+                if consumer is not None:
+                    self.producer.send_offsets_to_transaction(
+                        consumer.offsets_for(consumed_messages),
+                        consumer.group_metadata(),
+                    )
                 self.commit_transaction_with_retry()
             except Exception as e:
-                logger.info(f"aborted for topic {topic}")
+                logger.info("Aborting Kafka transaction.")
                 try:
                     self.producer.abort_transaction()
                 except Exception as abort_exception:
@@ -686,7 +784,7 @@ class ExactlyOnceKafkaProduceHandler(KafkaProduceHandler):
                 logger.error(e)
                 raise
 
-        self._with_producer_retry(f"Kafka transactional produce to {topic}", operation)
+        self._with_producer_retry("Kafka transaction", operation)
 
     def commit_transaction_with_retry(
         self, max_retries: int = 3, retry_interval_ms: int = 1000
@@ -806,7 +904,9 @@ class KafkaConsumeHandler(KafkaHandler):
             return consumer
 
         self.consumer = retry_forever(
-            connect, f"Kafka consumer setup for {self.topics}"
+            connect,
+            f"Kafka consumer setup for {self.topics}",
+            RETRY_SETTINGS,
         )
 
     def _reset_consumer(self) -> None:
@@ -826,9 +926,77 @@ class KafkaConsumeHandler(KafkaHandler):
             retry_forever(
                 lambda: self.consumer.commit(self._last_consumed_message),
                 "Kafka consumer offset commit",
+                RETRY_SETTINGS,
                 retryable=(KafkaException, RuntimeError, OSError),
             )
             self._last_consumed_message = None
+
+    def consume_batch(
+        self,
+        max_messages: int | None = None,
+        timeout_ms: int | None = None,
+    ) -> list[ConsumedKafkaMessage]:
+        """Fetch multiple records without committing their offsets."""
+        batch_size = max(
+            1,
+            KAFKA_TRANSACTION_BATCH_SIZE
+            if max_messages is None
+            else int(max_messages),
+        )
+        batch_timeout_ms = max(
+            0,
+            KAFKA_TRANSACTION_BATCH_TIMEOUT_MS
+            if timeout_ms is None
+            else int(timeout_ms),
+        )
+        deadline = time.monotonic() + batch_timeout_ms / 1000
+        records = []
+
+        while len(records) < batch_size:
+            timeout = max(0.0, deadline - time.monotonic())
+            try:
+                messages = self.consumer.consume(
+                    num_messages=batch_size - len(records),
+                    timeout=timeout,
+                )
+            except (KafkaException, RuntimeError, OSError) as exception:
+                logger.warning(
+                    "Kafka consumer batch fetch failed, reconnecting: %s", exception
+                )
+                self._reset_consumer()
+                return []
+
+            for message in messages or []:
+                record = self._record_from_message(message)
+                if record is not None:
+                    records.append(record)
+
+            if not messages or time.monotonic() >= deadline:
+                break
+
+        if records:
+            self._last_consumed_message = records[-1].raw_message
+        return records
+
+    @staticmethod
+    def offsets_for(
+        consumed_messages: Sequence[ConsumedKafkaMessage],
+    ) -> list[TopicPartition]:
+        """Return the highest processed next offset for each source partition."""
+        offsets_by_partition: dict[tuple[str, int], int] = {}
+        for message in consumed_messages:
+            partition_key = (message.topic, message.partition)
+            offsets_by_partition[partition_key] = max(
+                offsets_by_partition.get(partition_key, 0), message.offset + 1
+            )
+        return [
+            TopicPartition(topic, partition, offset)
+            for (topic, partition), offset in offsets_by_partition.items()
+        ]
+
+    def group_metadata(self):
+        """Return metadata required by ``send_offsets_to_transaction``."""
+        return self.consumer.consumer_group_metadata()
 
     @abstractmethod
     def consume(self, *args, **kwargs):
@@ -846,7 +1014,9 @@ class KafkaConsumeHandler(KafkaHandler):
         """
         raise NotImplementedError
 
-    def consume_as_json(self) -> tuple[Optional[str], dict]:
+    def consume_as_json(
+        self, source_message: ConsumedKafkaMessage | None = None
+    ) -> tuple[Optional[str], dict]:
         """Consume messages and return them in JSON format.
 
         Consumes available messages from subscribed topics, decodes the data,
@@ -861,7 +1031,14 @@ class KafkaConsumeHandler(KafkaHandler):
         Raises:
             ValueError: If the message data format is invalid or cannot be parsed.
         """
-        key, value, topic = self.consume()
+        if source_message is None:
+            key, value, topic = self.consume()
+        else:
+            key, value, topic = (
+                source_message.key,
+                source_message.value,
+                source_message.topic,
+            )
 
         if not key and not value:
             return None, {}
@@ -901,6 +1078,7 @@ class KafkaConsumeHandler(KafkaHandler):
             assigned_topics = retry_forever(
                 lambda: consumer.list_topics(timeout=10),
                 "Kafka topic visibility check",
+                RETRY_SETTINGS,
                 retryable=(KafkaException, RuntimeError, OSError),
             )
 
@@ -952,6 +1130,28 @@ class KafkaConsumeHandler(KafkaHandler):
 
             return msg
 
+    @staticmethod
+    def _record_from_message(message) -> ConsumedKafkaMessage | None:
+        if message is None:
+            return None
+        error = message.error()
+        if error is not None:
+            if error.code() == KafkaError._PARTITION_EOF:
+                return None
+            if _is_retriable_kafka_error(error):
+                logger.warning("Kafka consumer received retriable error: %s", error)
+                return None
+            raise KafkaMessageFetchException(f"Kafka consumer error: {error}")
+
+        return ConsumedKafkaMessage(
+            key=message.key().decode("utf-8") if message.key() else None,
+            value=message.value().decode("utf-8") if message.value() else None,
+            topic=message.topic(),
+            partition=message.partition(),
+            offset=message.offset(),
+            raw_message=message,
+        )
+
     def __del__(self) -> None:
         """Cleanup method called when the object is destroyed
 
@@ -982,7 +1182,9 @@ class KafkaConsumeHandler(KafkaHandler):
                 raise ValueError("Batch data contains unsupported item type.")
         return decoded_data
 
-    def consume_as_object(self) -> tuple[None | str, Batch]:
+    def consume_as_object(
+        self, source_message: ConsumedKafkaMessage | None = None
+    ) -> tuple[None | str, Batch]:
         """
         Consumes available messages on the specified topic. Decodes the data and converts it to a Batch
         object. Returns the Batch object.
@@ -993,7 +1195,14 @@ class KafkaConsumeHandler(KafkaHandler):
         Raises:
             ValueError: Invalid data format
         """
-        key, value, topic = self.consume()
+        if source_message is None:
+            key, value, topic = self.consume()
+        else:
+            key, value, topic = (
+                source_message.key,
+                source_message.value,
+                source_message.topic,
+            )
         if not key and not value:
             # TODO: Change return value to fit the type, maybe switch to raise
             return None, {}
@@ -1072,9 +1281,9 @@ class SimpleKafkaConsumeHandler(KafkaConsumeHandler):
 class ExactlyOnceKafkaConsumeHandler(KafkaConsumeHandler):
     """Kafka Consumer wrapper with Write-Exactly-Once semantics
 
-    Provides message consumption with exactly-once processing guarantees.
-    Messages are automatically committed after successful processing to
-    ensure each message is processed exactly once.
+    Reads only committed records. Pipeline stages pass fetched records to an
+    exactly-once producer, which commits their offsets in the same transaction
+    as the corresponding output records.
     """
 
     def __init__(self, topics: str | list[str]) -> None:
@@ -1084,13 +1293,18 @@ class ExactlyOnceKafkaConsumeHandler(KafkaConsumeHandler):
         """
         super().__init__(topics)
 
+    def _build_consumer_conf(self) -> dict:
+        conf = super()._build_consumer_conf()
+        conf["isolation.level"] = "read_committed"
+        return conf
+
     def consume(self) -> tuple[Optional[str], Optional[str], Optional[str]]:
         """
         Consume messages from subscribed Kafka topics with exactly-once semantics.
 
-        Polls for available messages, decodes them, and automatically commits
-        the message offset after successful processing. This ensures each
-        message is processed exactly once.
+        Polls for one available message and decodes it without committing its
+        offset. Pipeline stages use ``consume_batch`` and commit source offsets
+        through the producer transaction after successful processing.
 
         Returns:
             tuple[Optional[str], Optional[str], Optional[str]]: A tuple containing:

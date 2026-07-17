@@ -108,7 +108,7 @@ class Prefilter:
             )
         )
 
-    def get_and_fill_data(self) -> None:
+    def get_and_fill_data(self, source_message=None) -> None:
         """Retrieves and processes new data from Kafka.
 
         This method:
@@ -124,7 +124,7 @@ class Prefilter:
         """
 
         self.clear_data()  # clear in case we already have data stored
-        key, data = self.kafka_consume_handler.consume_as_object()
+        key, data = self.kafka_consume_handler.consume_as_object(source_message)
         self.subnet_id = key
         if data.data:
             self.parent_row_id = data.batch_tree_row_id
@@ -315,10 +315,20 @@ class Prefilter:
 
         """
         while True:
-            self.get_and_fill_data()
-            self.check_data_relevance_using_rules()
-            self.send_filtered_data()
-            self.kafka_consume_handler.commit()
+            source_messages = self.kafka_consume_handler.consume_batch()
+            if not source_messages:
+                continue
+
+            with self.kafka_produce_handler.transaction_batch(
+                self.kafka_consume_handler, source_messages
+            ):
+                for source_message in source_messages:
+                    try:
+                        self.get_and_fill_data(source_message)
+                        self.check_data_relevance_using_rules()
+                        self.send_filtered_data()
+                    finally:
+                        self.clear_data()
 
     async def start(self):  # pragma: no cover
         """Starts the ``Prefilter`` processing loop.

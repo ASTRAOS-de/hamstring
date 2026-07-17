@@ -451,7 +451,6 @@ class TestInspectMethod(unittest.TestCase):
             produce_topics=["produce_topic_1"],
             config=config,
         )
-
         # Mock data
         sut.messages = [{"test": "data"}]
 
@@ -543,6 +542,7 @@ class TestBootStrapFunction(unittest.TestCase):
             produce_topics=["produce_topic_1"],
             config=config,
         )
+        sut.kafka_consume_handler.consume_batch.return_value = [MagicMock()]
 
         # Mock data so send_data works
         sut.messages = [{"src_ip": "192.168.0.1", "logline_id": "test_id"}]
@@ -603,6 +603,7 @@ class TestBootStrapFunction(unittest.TestCase):
             produce_topics=["produce_topic_1"],
             config=config,
         )
+        sut.kafka_consume_handler.consume_batch.return_value = [MagicMock()]
 
         # Mock data so send_data works
         sut.messages = [{"src_ip": "192.168.0.1", "logline_id": "test_id"}]

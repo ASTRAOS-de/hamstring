@@ -71,6 +71,7 @@ class AlerterBase(AlerterAbstractBase):
         self.key = None
 
         self.kafka_consume_handler = ExactlyOnceKafkaConsumeHandler(self.consume_topic)
+        self.kafka_produce_handler = None
         self.server_log_terminal_events = ClickHouseKafkaSender(
             "server_log_terminal_events"
         )
@@ -193,14 +194,14 @@ class AlerterBase(AlerterAbstractBase):
         except ValueError:
             return None
 
-    def get_and_fill_data(self) -> None:
+    def get_and_fill_data(self, source_message=None) -> None:
         if self.alert_data:
             logger.warning(
                 "Alerter is busy: Not consuming new messages. Wait for the Alerter to finish the current workload."
             )
             return
 
-        key, data = self.kafka_consume_handler.consume_as_json()
+        key, data = self.kafka_consume_handler.consume_as_json(source_message)
         if data:
             self.alert_data = data
             self.key = key
@@ -311,16 +312,30 @@ class AlerterBase(AlerterAbstractBase):
         logger.info(f"Starting {self.name} Alerter")
         while True:
             try:
-                self.get_and_fill_data()
-                if self.alert_data:
-                    server_message_ids = self._extract_server_message_ids()
-                    # 1. Process specific action
-                    self.process_alert()
-                    # 2. Executing Base Logging Actions
-                    self._log_to_file_action()
-                    self._log_to_kafka_action()
-                    self._record_alerter_terminal_events(server_message_ids)
-                    self.kafka_consume_handler.commit()
+                source_messages = self.kafka_consume_handler.consume_batch()
+                if not source_messages:
+                    continue
+                if self.kafka_produce_handler is None:
+                    self.kafka_produce_handler = ExactlyOnceKafkaProduceHandler()
+
+                with self.kafka_produce_handler.transaction_batch(
+                    self.kafka_consume_handler, source_messages
+                ):
+                    for source_message in source_messages:
+                        try:
+                            self.get_and_fill_data(source_message)
+                            if self.alert_data:
+                                server_message_ids = self._extract_server_message_ids()
+                                # 1. Process specific action
+                                self.process_alert()
+                                # 2. Executing Base Logging Actions
+                                self._log_to_file_action()
+                                self._log_to_kafka_action()
+                                self._record_alerter_terminal_events(
+                                    server_message_ids
+                                )
+                        finally:
+                            self.clear_data()
 
             except KafkaMessageFetchException as e:
                 logger.debug(e)
@@ -334,8 +349,6 @@ class AlerterBase(AlerterAbstractBase):
                 break
             except Exception as e:
                 logger.error(f"Unexpected error: {e}")
-            finally:
-                self.clear_data()
 
     async def start(self):
         loop = asyncio.get_running_loop()

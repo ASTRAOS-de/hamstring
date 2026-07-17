@@ -451,10 +451,12 @@ class BufferedBatchSender:
         produce_topics,
         collector_name,
         monitoring_kafka_producer=None,
+        use_timer=True,
     ):
         self.topics = produce_topics
         self.batch_configuration = get_batch_configuration(collector_name)
         self.timer = None
+        self.use_timer = use_timer
         self.monitoring_kafka_producer = (
             monitoring_kafka_producer or ClickHouseKafkaSender.create_shared_producer()
         )
@@ -522,8 +524,15 @@ class BufferedBatchSender:
                 f"Full batch: Successfully sent batch messages for subnet_id {key}.\n"
                 f"    ⤷  {number_of_messages_for_key} messages sent."
             )
-        elif not self.timer:  # First time setting the timer
+        elif self.use_timer and not self.timer:  # First time setting the timer
             self._reset_timer()
+
+    def flush(self) -> None:
+        """Send every accumulated batch without scheduling another timer."""
+        if self.timer:
+            self.timer.cancel()
+            self.timer = None
+        self._send_all_batches(reset_timer=False)
 
     def _send_all_batches(self, reset_timer: bool = True) -> None:
         """Dispatches all available batches to the Kafka queue.

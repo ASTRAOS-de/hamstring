@@ -148,7 +148,7 @@ class InspectorBase(InspectorAbstractBase):
             )
         )
 
-    def get_and_fill_data(self) -> None:
+    def get_and_fill_data(self, source_message=None) -> None:
         """Consumes data from Kafka and stores it for processing.
 
         Fetches batch data from the configured Kafka topic and stores it in internal data structures.
@@ -162,7 +162,7 @@ class InspectorBase(InspectorAbstractBase):
             )
             return
 
-        key, data = self.kafka_consume_handler.consume_as_object()
+        key, data = self.kafka_consume_handler.consume_as_object(source_message)
         if data:
             self.parent_row_id = data.batch_tree_row_id
             self.batch_id = data.batch_id
@@ -383,10 +383,20 @@ class InspectorBase(InspectorAbstractBase):
         logger.info(f"Starting {self.name}")
         while True:
             try:
-                self.get_and_fill_data()
-                self.inspect()
-                self.send_data()
-                self.kafka_consume_handler.commit()
+                source_messages = self.kafka_consume_handler.consume_batch()
+                if not source_messages:
+                    continue
+
+                with self.kafka_produce_handler.transaction_batch(
+                    self.kafka_consume_handler, source_messages
+                ):
+                    for source_message in source_messages:
+                        try:
+                            self.get_and_fill_data(source_message)
+                            self.inspect()
+                            self.send_data()
+                        finally:
+                            self.clear_data()
             except KafkaMessageFetchException as e:  # pragma: no cover
                 logger.debug(e)
             except IOError as e:
@@ -397,8 +407,6 @@ class InspectorBase(InspectorAbstractBase):
             except KeyboardInterrupt:
                 logger.info(f" {self.consume_topic}  Closing down Inspector...")
                 break
-            finally:
-                self.clear_data()
 
     async def start(self):  # pragma: no cover
         """
