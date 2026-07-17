@@ -1,6 +1,6 @@
 services:
   logserver:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-logserver:${HAMSTRING_LOGSERVER_IMAGE_TAG:-v2.2.1}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-logserver:${HAMSTRING_LOGSERVER_IMAGE_TAG:-v2.3.0}"
     restart: "unless-stopped"
     networks:
       hamstring:
@@ -10,7 +10,7 @@ services:
       - GROUP_ID=log_storage
       - HAMSTRING_WAIT_FOR=kafka
   logcollector:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-logcollector:${HAMSTRING_LOGCOLLECTOR_IMAGE_TAG:-v2.2.1}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-logcollector:${HAMSTRING_LOGCOLLECTOR_IMAGE_TAG:-v2.3.0}"
     restart: "unless-stopped"
     volumes:
       - ../../../config.yaml:/app/config.yaml
@@ -21,7 +21,7 @@ services:
       - HAMSTRING_WAIT_FOR=kafka
 
   prefilter:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-prefilter:${HAMSTRING_PREFILTER_IMAGE_TAG:-v2.2.1}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-prefilter:${HAMSTRING_PREFILTER_IMAGE_TAG:-v2.3.0}"
     restart: "unless-stopped"
     volumes:
       - ../../../config.yaml:/app/config.yaml
@@ -35,7 +35,7 @@ services:
       - HAMSTRING_WAIT_FOR=kafka
 
   inspector:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-inspector:${HAMSTRING_INSPECTOR_IMAGE_TAG:-v2.2.1}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-inspector:${HAMSTRING_INSPECTOR_IMAGE_TAG:-v2.3.0}"
     restart: "unless-stopped"
     volumes:
       - ../../../config.yaml:/app/config.yaml
@@ -57,7 +57,7 @@ services:
       - HAMSTRING_WAIT_FOR=kafka
 
   detector:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-detector:${HAMSTRING_DETECTOR_IMAGE_TAG:-v2.2.1}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-detector:${HAMSTRING_DETECTOR_IMAGE_TAG:-v2.3.0}"
     restart: "unless-stopped"
     volumes:
       - ../../../config.yaml:/app/config.yaml
@@ -71,7 +71,7 @@ services:
       - HAMSTRING_WAIT_FOR=kafka
 
   detector-gpu:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-detector:${HAMSTRING_DETECTOR_IMAGE_TAG:-v2.2.1}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-detector:${HAMSTRING_DETECTOR_IMAGE_TAG:-v2.3.0}"
     restart: "unless-stopped"
     volumes:
       - ../../../config.yaml:/app/config.yaml
@@ -93,7 +93,7 @@ services:
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
   alerter:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-alerter:${HAMSTRING_ALERTER_IMAGE_TAG:-v2.2.1}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-alerter:${HAMSTRING_ALERTER_IMAGE_TAG:-v2.3.0}"
     restart: "unless-stopped"
     volumes:
       - ../../../config.yaml:/app/config.yaml
