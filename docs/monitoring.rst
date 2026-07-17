@@ -49,15 +49,29 @@ All Kafka values can be overridden at startup, for example:
 ``KAFKA_LOG_RETENTION_BYTES`` is a limit **per partition replica**, rather than a per-broker or per-volume limit.
 Increasing the partition count, replication factor, or this value increases the possible disk usage accordingly.
 
-ClickHouse monitoring tables have a one-day TTL (alerts have a 60-day TTL). TTL deletion happens in background
-merges; the supplied ClickHouse configuration checks for TTL work every 15 minutes. Its server logs are also rotated
-at 100 MiB with three retained files.
+ClickHouse keeps detailed monitoring events and per-message latency state for one day (raw alerts are retained for
+60 days). It then preserves compact monitoring history at progressively lower resolution:
 
-The new retention settings apply after restarting Kafka and ClickHouse. They reclaim data as the brokers close new
-segments and ClickHouse performs TTL merges; they do not remove a stopped stack's volume files immediately. If this is
-a disposable local environment and its historical data is not needed, stop the stack and remove its volumes with
-``docker compose -f docker/docker-compose.yml down -v`` before starting it again. Do not remove production volumes as
-a retention operation.
+* one-minute aggregates for seven days;
+* fifteen-minute aggregates for 30 days;
+* hourly aggregates for 90 days.
+
+Alert counts and fill-level states are aggregated as rows arrive. Completed latency values are snapshotted by
+ClickHouse refreshable materialized views; their historical rows retain the sample count and minimum, average, p50,
+p95, p99, and maximum latency without retaining message, logline, or batch identifiers. Grafana uses unified history
+views, so selecting an older time range automatically uses the appropriate resolution. Recent latency data remains
+exact, while latency older than one day is represented by its bucketed p50 value in existing dashboard panels.
+
+TTL deletion happens in background merges; the supplied ClickHouse configuration checks for TTL work every 15
+minutes. ClickHouse server logs are rotated at 100 MiB with three retained files. Increasing a raw-table TTL has a
+much larger storage impact than increasing an aggregate-table TTL.
+
+The retention schema is reconciled when the monitoring agent starts. New aggregate tables are backfilled once from
+whatever source data is still available; data already removed by an older TTL cannot be recovered. Retention changes
+reclaim data as Kafka closes segments and ClickHouse performs TTL merges, and therefore do not remove a stopped
+stack's volume files immediately. If this is a disposable local environment and its historical data is not needed,
+stop the stack and remove its volumes with ``docker compose -f docker/docker-compose.yml down -v`` before starting it
+again. Do not remove production volumes as a retention operation.
 
 `Datatest` mode
 ---------------

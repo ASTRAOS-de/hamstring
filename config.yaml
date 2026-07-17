@@ -59,7 +59,7 @@ pipeline:
             max_workers: 1
       data_inspection.inspector:
         executor: thread
-        max_workers: 2
+        max_workers: 1
         instances:
           dga_inspector:
             max_workers: 1
@@ -72,7 +72,7 @@ pipeline:
           RF-dga_detector:
             max_workers: 1
           domainator:
-            max_workers: 2
+            max_workers: 1
           domainator_attributor:
             max_workers: 1
           domainator_attributor_behaviour:
@@ -89,7 +89,7 @@ pipeline:
             max_workers: 1
       monitoring.agent:
         executor: thread
-        max_workers: 2
+        max_workers: 1
   log_storage:
     logserver:
       input_file: "/opt/file.txt"
