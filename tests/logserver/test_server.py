@@ -8,6 +8,7 @@ from uuid import UUID
 
 import aiofiles
 
+from src.base.kafka import ConsumedKafkaMessage
 from src.logserver.server import LogServer, main
 
 LOG_SERVER_IP_ADDR = "192.168.0.1"
@@ -133,8 +134,11 @@ class TestFetchFromKafka(unittest.IsolatedAsyncioTestCase):
         mock_uuid.return_value = mock_uuid_instance
         mock_uuid.uuid4.return_value = UUID("bd72ccb4-0ef2-4100-aa22-e787122d6875")
         mock_consume_handler = MagicMock()
-        mock_consume_handler.consume.side_effect = [
-            ("key1", "value1", "test-topic"),
+        source_message = ConsumedKafkaMessage(
+            "key1", "value1", "test-topic", 0, 1
+        )
+        mock_consume_handler.consume_batch.side_effect = [
+            [source_message],
             _StopFetching(),
         ]
         mock_kafka_consume.return_value = mock_consume_handler
@@ -157,7 +161,10 @@ class TestFetchFromKafka(unittest.IsolatedAsyncioTestCase):
         mock_send.assert_called_once_with(
             UUID("bd72ccb4-0ef2-4100-aa22-e787122d6875"), "value1"
         )
-        mock_consume_handler.commit.assert_called_once()
+        self.sut.kafka_produce_handler.transaction_batch.assert_called_once_with(
+            mock_consume_handler, [source_message]
+        )
+        mock_consume_handler.commit.assert_not_called()
 
 
 # class TestFetchFromFile(unittest.IsolatedAsyncioTestCase):

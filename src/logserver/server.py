@@ -7,7 +7,7 @@ import uuid
 import aiofiles
 
 sys.path.append(os.getcwd())
-from src.base.kafka_handler import (
+from src.base.kafka import (
     ExactlyOnceKafkaConsumeHandler,
     ExactlyOnceKafkaProduceHandler,
 )
@@ -114,20 +114,29 @@ class LogServer:
         its timestamp ("timestamp_in") is logged.
         """
         while True:
-            key, value, topic = self.kafka_consume_handler.consume()
-            logger.debug(f"From Kafka: '{value}'")
+            source_messages = self.kafka_consume_handler.consume_batch()
+            if not source_messages:
+                continue
 
-            message_id = uuid.uuid4()
-            self.server_logs.insert(
-                dict(
-                    message_id=message_id,
-                    timestamp_in=datetime.datetime.now(),
-                    message_text=value,
-                )
-            )
+            with self.kafka_produce_handler.transaction_batch(
+                self.kafka_consume_handler, source_messages
+            ):
+                for source_message in source_messages:
+                    value = source_message.value
+                    if value is None:
+                        raise ValueError("LogServer received a Kafka record without data.")
+                    logger.debug(f"From Kafka: '{value}'")
 
-            self.send(message_id, value)
-            self.kafka_consume_handler.commit()
+                    message_id = uuid.uuid4()
+                    self.server_logs.insert(
+                        dict(
+                            message_id=message_id,
+                            timestamp_in=datetime.datetime.now(),
+                            message_text=value,
+                        )
+                    )
+
+                    self.send(message_id, value)
 
 
 def build_logserver_worker(consume_topic, produce_topics, worker_id=None):

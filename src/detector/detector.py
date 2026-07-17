@@ -22,7 +22,7 @@ from src.base.acceleration import (
     apply_model_acceleration,
     resolve_acceleration_config,
 )
-from src.base.kafka_handler import (
+from src.base.kafka import (
     ExactlyOnceKafkaConsumeHandler,
     ExactlyOnceKafkaProduceHandler,
     KafkaMessageFetchException,
@@ -267,7 +267,7 @@ class DetectorBase(DetectorAbstractBase):
             )
         )
 
-    def get_and_fill_data(self) -> None:
+    def get_and_fill_data(self, source_message=None) -> None:
         """
         Consume data from Kafka and store it for processing.
 
@@ -284,7 +284,7 @@ class DetectorBase(DetectorAbstractBase):
                 "current workload."
             )
             return
-        key, data = self.kafka_consume_handler.consume_as_object()
+        key, data = self.kafka_consume_handler.consume_as_object(source_message)
         if data.data:
             self.parent_row_id = data.batch_tree_row_id
             self.suspicious_batch_id = data.batch_id
@@ -849,13 +849,25 @@ class DetectorBase(DetectorAbstractBase):
         """
         while True:
             try:
-                logger.debug("Before getting and filling data")
-                self.get_and_fill_data()
-                logger.debug("Inspect Data")
-                self.detect()
-                logger.debug("Send warnings")
-                self.send_warning()
-                self.kafka_consume_handler.commit()
+                source_messages = self.kafka_consume_handler.consume_batch()
+                if not source_messages:
+                    continue
+                if self.kafka_produce_handler is None:
+                    self.kafka_produce_handler = ExactlyOnceKafkaProduceHandler()
+
+                with self.kafka_produce_handler.transaction_batch(
+                    self.kafka_consume_handler, source_messages
+                ):
+                    for source_message in source_messages:
+                        try:
+                            logger.debug("Before getting and filling data")
+                            self.get_and_fill_data(source_message)
+                            logger.debug("Inspect Data")
+                            self.detect()
+                            logger.debug("Send warnings")
+                            self.send_warning()
+                        finally:
+                            self.clear_data()
             except KafkaMessageFetchException as e:  # pragma: no cover
                 logger.debug(e)
             except IOError as e:
@@ -866,8 +878,6 @@ class DetectorBase(DetectorAbstractBase):
             except KeyboardInterrupt:
                 logger.info("Closing down Detector...")
                 break
-            finally:
-                self.clear_data()
 
     async def start(self):  # pragma: no cover
         """

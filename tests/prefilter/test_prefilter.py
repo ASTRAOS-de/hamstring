@@ -4,7 +4,7 @@ import uuid
 from unittest.mock import MagicMock, patch, AsyncMock, call
 
 from src.base.data_classes.batch import Batch
-from src.base.kafka_handler import KafkaMessageFetchException
+from src.base.kafka import KafkaMessageFetchException
 from src.prefilter.prefilter import Prefilter, main
 
 
@@ -31,6 +31,7 @@ class TestBootstrapPrefilteringProcess(unittest.TestCase):
         mock_produce_handler.return_value = mock_produce_handler_instance
         mock_consume_handler_instance = MagicMock()
         mock_consume_handler.return_value = mock_consume_handler_instance
+        mock_consume_handler_instance.consume_batch.return_value = [MagicMock()]
         mock_consume_handler_instance.consume_as_object.return_value = (
             "127.0.0.0_24",
             Batch(
@@ -120,6 +121,7 @@ class TestBootstrapPrefilteringProcess(unittest.TestCase):
         mock_produce_handler.return_value = mock_produce_handler_instance
         mock_consume_handler_instance = MagicMock()
         mock_consume_handler.return_value = mock_consume_handler_instance
+        mock_consume_handler_instance.consume_batch.return_value = [MagicMock()]
         mock_consume_handler_instance.consume_as_object.return_value = (
             "127.0.0.0_24",
             Batch(
@@ -162,9 +164,10 @@ class TestBootstrapPrefilteringProcess(unittest.TestCase):
                 sut.bootstrap_prefiltering_process()
             spy.assert_called_once()
 
-        # Verify data was correctly processed
-        self.assertEqual(sut.unfiltered_data, [test_entry])
-        self.assertEqual(sut.filtered_data, [test_entry])
+        # The record was processed and per-record state was cleared afterwards.
+        sut.logline_handler.check_relevance.assert_called_once()
+        self.assertEqual(sut.unfiltered_data, [])
+        self.assertEqual(sut.filtered_data, [])
         self.assertEqual(sut.subnet_id, "127.0.0.0_24")
 
     @patch("src.prefilter.prefilter.logger")
@@ -189,6 +192,7 @@ class TestBootstrapPrefilteringProcess(unittest.TestCase):
         mock_produce_handler.return_value = mock_produce_handler_instance
         mock_consume_handler_instance = MagicMock()
         mock_consume_handler.return_value = mock_consume_handler_instance
+        mock_consume_handler_instance.consume_batch.return_value = [MagicMock()]
         mock_consume_handler_instance.consume_as_object.return_value = (
             "127.0.0.0_24",
             Batch(

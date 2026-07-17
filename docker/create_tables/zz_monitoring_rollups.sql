@@ -6,7 +6,10 @@ CREATE TABLE IF NOT EXISTS alerts_1m (
 ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMM(time_bucket)
 ORDER BY (time_bucket, src_ip)
-TTL toDateTime(time_bucket) + INTERVAL 1 DAY;
+TTL toDateTime(time_bucket) + INTERVAL 7 DAY;
+
+ALTER TABLE alerts_1m
+MODIFY TTL toDateTime(time_bucket) + INTERVAL 7 DAY;
 
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS alerts_1m_mv
@@ -31,7 +34,10 @@ CREATE TABLE IF NOT EXISTS fill_levels_1m (
 ENGINE = AggregatingMergeTree
 PARTITION BY toYYYYMM(time_bucket)
 ORDER BY (stage, entry_type, time_bucket)
-TTL toDateTime(time_bucket) + INTERVAL 1 DAY;
+TTL toDateTime(time_bucket) + INTERVAL 7 DAY;
+
+ALTER TABLE fill_levels_1m
+MODIFY TTL toDateTime(time_bucket) + INTERVAL 7 DAY;
 
 CREATE MATERIALIZED VIEW IF NOT EXISTS fill_levels_1m_mv
 TO fill_levels_1m

@@ -5,6 +5,7 @@ import unittest
 import uuid
 from unittest.mock import MagicMock, patch, AsyncMock, Mock
 
+from src.base.kafka import ConsumedKafkaMessage
 from src.logcollector.collector import LogCollector, main
 from src.base.utils import setup_config
 
@@ -110,8 +111,9 @@ class TestFetch(unittest.TestCase):
         mock_logline_handler,
     ):
         mock_consume_handler = MagicMock()
-        mock_consume_handler.consume.side_effect = [
-            ("key1", "value1", "topic1"),
+        source_message = ConsumedKafkaMessage("key1", "value1", "topic1", 0, 1)
+        mock_consume_handler.consume_batch.side_effect = [
+            [source_message],
             _StopFetching(),
         ]
         mock_kafka_consume.return_value = mock_consume_handler
@@ -136,7 +138,11 @@ class TestFetch(unittest.TestCase):
             self.sut.fetch()
 
         mock_send.assert_called_once()
-        mock_consume_handler.commit.assert_called_once()
+        self.sut.batch_handler.flush.assert_called_once_with()
+        self.sut.batch_handler.kafka_produce_handler.transaction_batch.assert_called_once_with(
+            mock_consume_handler, [source_message]
+        )
+        mock_consume_handler.commit.assert_not_called()
 
 
 class TestSend(unittest.TestCase):

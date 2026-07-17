@@ -8,7 +8,7 @@ import uuid
 
 sys.path.append(os.getcwd())
 from src.base.clickhouse_kafka_sender import ClickHouseKafkaSender
-from src.base.kafka_handler import (
+from src.base.kafka import (
     ExactlyOnceKafkaConsumeHandler,
 )
 from src.base.logline_handler import LoglineHandler
@@ -76,6 +76,7 @@ class LogCollector:
             produce_topics=produce_topics,
             collector_name=collector_name,
             monitoring_kafka_producer=self.monitoring_kafka_producer,
+            use_timer=False,
         )
         self.logline_handler = LoglineHandler(validation_config)
 
@@ -142,10 +143,28 @@ class LogCollector:
         """
 
         while True:
-            key, value, topic = self.kafka_consume_handler.consume()
-            logger.debug(f"From Kafka: '{value}'")
-            self.send(datetime.datetime.now(), value, server_message_id=key)
-            self.kafka_consume_handler.commit()
+            source_messages = self.kafka_consume_handler.consume_batch(
+                max_messages=self.batch_configuration["batch_size"],
+                timeout_ms=int(self.batch_configuration["batch_timeout"] * 1000),
+            )
+            if not source_messages:
+                continue
+
+            with self.batch_handler.kafka_produce_handler.transaction_batch(
+                self.kafka_consume_handler, source_messages
+            ):
+                for source_message in source_messages:
+                    if source_message.value is None:
+                        raise ValueError(
+                            "LogCollector received a Kafka record without data."
+                        )
+                    logger.debug(f"From Kafka: '{source_message.value}'")
+                    self.send(
+                        datetime.datetime.now(),
+                        source_message.value,
+                        server_message_id=source_message.key,
+                    )
+                self.batch_handler.flush()
 
     def send(
         self,

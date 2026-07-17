@@ -1,13 +1,14 @@
 import unittest
 from unittest.mock import patch, Mock
 from confluent_kafka import KafkaError
-from src.base.kafka_handler import SimpleKafkaConsumeHandler
+from src.base.kafka.config import KAFKA_CONSUMER_MAX_POLL_INTERVAL_MS
+from src.base.kafka import SimpleKafkaConsumeHandler
 
 
 class TestInit(unittest.TestCase):
-    @patch("src.base.kafka_handler.CONSUMER_GROUP_ID", "test_group_id")
+    @patch("src.base.kafka.config.CONSUMER_GROUP_ID", "test_group_id")
     @patch(
-        "src.base.kafka_handler.KAFKA_BROKERS",
+        "src.base.kafka.config.KAFKA_BROKERS",
         [
             {
                 "hostname": "127.0.0.1",
@@ -24,11 +25,11 @@ class TestInit(unittest.TestCase):
         ],
     )
     @patch(
-        "src.base.kafka_handler.KafkaConsumeHandler._all_topics_created",
+        "src.base.kafka.consumer.KafkaConsumeHandler._all_topics_created",
         return_value=True,
     )
-    @patch("src.base.kafka_handler.AdminClient")
-    @patch("src.base.kafka_handler.Consumer")
+    @patch("src.base.kafka.consumer.AdminClient")
+    @patch("src.base.kafka.consumer.Consumer")
     def test_init_successful(
         self, mock_consumer, mock_admin_client, mock_all_topics_created
     ):
@@ -42,7 +43,7 @@ class TestInit(unittest.TestCase):
             "enable.auto.commit": False,
             "auto.offset.reset": "earliest",
             "enable.partition.eof": True,
-            "max.poll.interval.ms": 1800000,
+            "max.poll.interval.ms": KAFKA_CONSUMER_MAX_POLL_INTERVAL_MS,
         }
 
         # Act
@@ -56,9 +57,9 @@ class TestInit(unittest.TestCase):
 
 
 class TestConsume(unittest.TestCase):
-    @patch("src.base.kafka_handler.CONSUMER_GROUP_ID", "test_group_id")
+    @patch("src.base.kafka.config.CONSUMER_GROUP_ID", "test_group_id")
     @patch(
-        "src.base.kafka_handler.KAFKA_BROKERS",
+        "src.base.kafka.config.KAFKA_BROKERS",
         [
             {
                 "hostname": "127.0.0.1",
@@ -75,11 +76,11 @@ class TestConsume(unittest.TestCase):
         ],
     )
     @patch(
-        "src.base.kafka_handler.KafkaConsumeHandler._all_topics_created",
+        "src.base.kafka.consumer.KafkaConsumeHandler._all_topics_created",
         return_value=True,
     )
-    @patch("src.base.kafka_handler.AdminClient")
-    @patch("src.base.kafka_handler.Consumer")
+    @patch("src.base.kafka.consumer.AdminClient")
+    @patch("src.base.kafka.consumer.Consumer")
     def setUp(self, mock_consumer, mock_admin_client, mock_all_topics_created):
         self.mock_consumer = mock_consumer
         self.topics = ["test_topic_1", "test_topic_2"]
