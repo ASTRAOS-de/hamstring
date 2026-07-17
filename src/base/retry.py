@@ -47,9 +47,7 @@ def load_retry_settings(config: dict[str, Any]) -> RetrySettings:
         max_delay_seconds=max(
             initial_delay, _float_setting(merged, "max_delay_seconds")
         ),
-        backoff_multiplier=max(
-            1.0, _float_setting(merged, "backoff_multiplier")
-        ),
+        backoff_multiplier=max(1.0, _float_setting(merged, "backoff_multiplier")),
         jitter_seconds=max(0.0, _float_setting(merged, "jitter_seconds")),
         log_every_attempts=max(1, _int_setting(merged, "log_every_attempts")),
     )

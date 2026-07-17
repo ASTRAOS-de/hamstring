@@ -203,9 +203,7 @@ class KafkaTopicManager:
             try:
                 future.result()
             except KafkaException as exception:
-                if operation == "create topic" and _is_topic_already_created(
-                    exception
-                ):
+                if operation == "create topic" and _is_topic_already_created(exception):
                     logger.info("Kafka topic '%s' already exists.", topic)
                     continue
                 if (

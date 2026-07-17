@@ -124,7 +124,9 @@ class LogServer:
                 for source_message in source_messages:
                     value = source_message.value
                     if value is None:
-                        raise ValueError("LogServer received a Kafka record without data.")
+                        raise ValueError(
+                            "LogServer received a Kafka record without data."
+                        )
                     logger.debug(f"From Kafka: '{value}'")
 
                     message_id = uuid.uuid4()

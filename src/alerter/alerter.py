@@ -331,9 +331,7 @@ class AlerterBase(AlerterAbstractBase):
                                 # 2. Executing Base Logging Actions
                                 self._log_to_file_action()
                                 self._log_to_kafka_action()
-                                self._record_alerter_terminal_events(
-                                    server_message_ids
-                                )
+                                self._record_alerter_terminal_events(server_message_ids)
                         finally:
                             self.clear_data()
 

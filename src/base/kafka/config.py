@@ -56,6 +56,5 @@ KAFKA_PIPELINE_TOPIC_PREFIXES = (
 def bootstrap_servers() -> str:
     """Return the configured brokers in confluent-kafka format."""
     return ",".join(
-        f"{broker['hostname']}:{broker['internal_port']}"
-        for broker in KAFKA_BROKERS
+        f"{broker['hostname']}:{broker['internal_port']}" for broker in KAFKA_BROKERS
     )
