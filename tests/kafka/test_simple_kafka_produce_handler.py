@@ -1,168 +1,99 @@
 import unittest
-from unittest.mock import ANY, Mock, call, patch
+from unittest.mock import MagicMock, patch
 
-from confluent_kafka import KafkaError
-
-from src.base.kafka_handler import (
+from src.base.kafka import (
     BufferedKafkaProduceHandler,
+    ConsumedKafkaMessage,
+    KafkaProduceRecord,
     SimpleKafkaProduceHandler,
 )
 
 
-class TestInit(unittest.TestCase):
-    @patch(
-        "src.base.kafka_handler.KAFKA_BROKERS",
-        [
-            {
-                "hostname": "127.0.0.1",
-                "internal_port": 9999,
-            },
-            {
-                "hostname": "127.0.0.2",
-                "internal_port": 9998,
-            },
-            {
-                "hostname": "127.0.0.3",
-                "internal_port": 9997,
-            },
-        ],
-    )
-    def test_successful(self):
-        # Arrange
-        expected_conf = {
-            "bootstrap.servers": "127.0.0.1:9999,127.0.0.2:9998,127.0.0.3:9997",
-            "enable.idempotence": False,
-            "acks": "1",
-            "message.max.bytes": 1000000000,
-        }
+class TestSimpleKafkaProduceHandler(unittest.TestCase):
+    @patch("src.base.kafka.producer.Producer")
+    def test_configuration_is_idempotent_and_synchronous(self, producer_type):
+        handler = SimpleKafkaProduceHandler()
 
-        # Act
-        with patch("src.base.kafka_handler.Producer") as mock_producer:
-            mock_producer_instance = Mock()
-            mock_producer.return_value = mock_producer_instance
-
-            sut = SimpleKafkaProduceHandler()
-
-        # Assert
-        self.assertEqual("127.0.0.1:9999,127.0.0.2:9998,127.0.0.3:9997", sut.brokers)
-        self.assertIsNone(sut.consumer)
-        mock_producer.assert_called_once_with(expected_conf)
-
-
-class TestProduce(unittest.TestCase):
-    def test_with_data(self):
-        with patch("src.base.kafka_handler.Producer") as mock_producer:
-            # Arrange
-            mock_producer_instance = Mock()
-            mock_producer.return_value = mock_producer_instance
-
-            sut = SimpleKafkaProduceHandler()
-
-            # Act
-            sut.produce("test_topic", "test_data")
-
-        # Assert
-        self.assertEqual(2, mock_producer_instance.flush.call_count)
-        mock_producer_instance.produce.assert_called_once_with(
-            topic="test_topic",
-            key=None,
-            value="test_data",
-            callback=ANY,
+        configuration = producer_type.call_args.args[0]
+        self.assertTrue(configuration["enable.idempotence"])
+        self.assertEqual("all", configuration["acks"])
+        self.assertEqual(
+            "900000" if isinstance(configuration["message.max.bytes"], str) else 900000,
+            configuration["message.max.bytes"],
         )
+        self.assertIs(handler.producer, producer_type.return_value)
 
-    @patch("src.base.retry.time.sleep", return_value=None)
-    def test_with_data_recreates_producer_after_transient_failure(self, mock_sleep):
-        with patch("src.base.kafka_handler.Producer") as mock_producer:
-            first_producer = Mock()
-            second_producer = Mock()
-            first_producer.flush.side_effect = BufferError("queue full")
-            mock_producer.side_effect = [first_producer, second_producer]
+    @patch("src.base.kafka.producer.Producer")
+    def test_publish_queues_all_records_and_flushes_once(self, producer_type):
+        producer_type.return_value.flush.return_value = 0
+        handler = SimpleKafkaProduceHandler()
+        records = [
+            KafkaProduceRecord("output-a", "one", key="key"),
+            KafkaProduceRecord("output-b", "two", headers=(("correlation", b"id"),)),
+        ]
 
-            sut = SimpleKafkaProduceHandler()
-            sut.produce("test_topic", "test_data")
+        handler.publish(records)
 
-        self.assertEqual(2, mock_producer.call_count)
-        first_producer.flush.assert_called()
-        second_producer.produce.assert_called_once_with(
-            topic="test_topic",
-            key=None,
-            value="test_data",
-            callback=ANY,
+        self.assertEqual(2, producer_type.return_value.produce.call_count)
+        first = producer_type.return_value.produce.call_args_list[0].kwargs
+        second = producer_type.return_value.produce.call_args_list[1].kwargs
+        self.assertEqual(
+            ("output-a", "key", "one"), (first["topic"], first["key"], first["value"])
         )
-        mock_sleep.assert_called()
+        self.assertEqual([("correlation", b"id")], second["headers"])
+        producer_type.return_value.flush.assert_called_once_with()
 
-    @patch("src.base.retry.time.sleep", return_value=None)
-    def test_with_data_retries_delivery_callback_error(self, mock_sleep):
-        with patch("src.base.kafka_handler.Producer") as mock_producer:
-            first_producer = Mock()
-            second_producer = Mock()
-            delivery_error = KafkaError(KafkaError._ALL_BROKERS_DOWN)
+    @patch("src.base.kafka.producer.Producer")
+    def test_complete_publishes_before_committing_sources(self, producer_type):
+        producer_type.return_value.flush.return_value = 0
+        handler = SimpleKafkaProduceHandler()
+        consumer = MagicMock()
+        source = ConsumedKafkaMessage(None, "source", "input", 2, 7)
 
-            def fail_delivery(**kwargs):
-                kwargs["callback"](delivery_error, None)
+        handler.complete([KafkaProduceRecord("output", "value")], consumer, [source])
 
-            first_producer.produce.side_effect = fail_delivery
-            mock_producer.side_effect = [first_producer, second_producer]
+        producer_type.return_value.flush.assert_called_once_with()
+        consumer.commit.assert_called_once_with([source])
 
-            sut = SimpleKafkaProduceHandler()
-            sut.produce("test_topic", "test_data")
+    @patch("src.base.retry.time.sleep")
+    @patch("src.base.kafka.producer.Producer")
+    def test_publish_retries_when_flush_leaves_records_undelivered(
+        self, producer_type, sleep
+    ):
+        producer_type.return_value.flush.side_effect = [1, 0, 0]
+        handler = SimpleKafkaProduceHandler()
 
-        self.assertEqual(2, mock_producer.call_count)
-        first_producer.produce.assert_called_once()
-        second_producer.produce.assert_called_once_with(
-            topic="test_topic",
-            key=None,
-            value="test_data",
-            callback=ANY,
-        )
-        mock_sleep.assert_called()
+        handler.publish([KafkaProduceRecord("output", "value")])
 
-    def test_without_data(self):
-        with patch("src.base.kafka_handler.Producer") as mock_producer:
-            # Arrange
-            mock_producer_instance = Mock()
-            mock_producer.return_value = mock_producer_instance
+        self.assertEqual(2, producer_type.call_count)
+        self.assertEqual(2, producer_type.return_value.produce.call_count)
+        sleep.assert_called_once()
 
-            sut = SimpleKafkaProduceHandler()
+    @patch("src.base.kafka.producer.Producer")
+    def test_complete_requires_sources(self, producer_type):
+        handler = SimpleKafkaProduceHandler()
 
-            # Act
-            sut.produce("test_topic", "")
-
-        # Assert
-        mock_producer_instance.flush.assert_not_called()
-        mock_producer_instance.produce.assert_not_called()
+        with self.assertRaisesRegex(ValueError, "source records"):
+            handler.complete([], MagicMock(), [])
 
 
-class TestBufferedProduce(unittest.TestCase):
-    def test_queues_data_without_flushing(self):
-        with patch("src.base.kafka_handler.Producer") as mock_producer:
-            producer = Mock()
-            mock_producer.return_value = producer
-            sut = BufferedKafkaProduceHandler()
+class TestBufferedKafkaProduceHandler(unittest.TestCase):
+    @patch("src.base.kafka.producer.Producer")
+    def test_publish_is_non_flushing_and_polls_delivery_callbacks(self, producer_type):
+        handler = BufferedKafkaProduceHandler()
 
-            sut.produce("test_topic", "test_data")
+        handler.publish([KafkaProduceRecord("telemetry", "value")])
 
-        producer.flush.assert_not_called()
-        producer.poll.assert_called_once_with(0)
-        producer.produce.assert_called_once_with(
-            topic="test_topic",
-            key=None,
-            value="test_data",
-            callback=ANY,
-        )
+        producer_type.return_value.poll.assert_called_with(0)
+        producer_type.return_value.produce.assert_called_once()
+        producer_type.return_value.flush.assert_not_called()
 
-    def test_waits_for_queue_space_without_recreating_producer(self):
-        with patch("src.base.kafka_handler.Producer") as mock_producer:
-            producer = Mock()
-            producer.produce.side_effect = [BufferError("queue full"), None]
-            mock_producer.return_value = producer
-            sut = BufferedKafkaProduceHandler()
+    @patch("src.base.kafka.producer.Producer")
+    def test_buffered_producer_cannot_acknowledge_pipeline_input(self, producer_type):
+        handler = BufferedKafkaProduceHandler()
 
-            sut.produce("test_topic", "test_data")
-
-        mock_producer.assert_called_once()
-        self.assertEqual(2, producer.produce.call_count)
-        producer.poll.assert_has_calls([call(0), call(0.1)])
+        with self.assertRaisesRegex(TypeError, "cannot commit"):
+            handler.complete([], MagicMock(), [MagicMock()])
 
 
 if __name__ == "__main__":

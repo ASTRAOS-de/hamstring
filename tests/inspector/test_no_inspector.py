@@ -6,8 +6,8 @@ from src.inspector.plugins.no_inspector import NoInspector
 
 class TestNoInspector(unittest.TestCase):
     @patch("src.inspector.inspector.logger")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaProduceHandler")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.inspector.inspector.create_pipeline_producer")
+    @patch("src.inspector.inspector.create_pipeline_consumer")
     @patch("src.inspector.inspector.ClickHouseKafkaSender")
     def setUp(
         self,

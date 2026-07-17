@@ -7,7 +7,10 @@ services:
     networks:
       - hamstring
     environment:
-      - GROUP_ID=monitoring_agent
-      - HAMSTRING_WAIT_FOR=kafka,clickhouse
-      - CLICKHOUSE_USER=${CLICKHOUSE_USER:-default}
-      - CLICKHOUSE_PASSWORD=${CLICKHOUSE_PASSWORD:-hamstring}
+      GROUP_ID: monitoring_agent
+      HAMSTRING_WAIT_FOR: kafka,clickhouse
+      KAFKA_MAX_RECORD_BYTES: "${KAFKA_MAX_RECORD_BYTES:-}"
+      KAFKA_TOPIC_PARTITIONS: "${KAFKA_TOPIC_PARTITIONS:-}"
+      KAFKA_TOPIC_REPLICATION_FACTOR: "${KAFKA_TOPIC_REPLICATION_FACTOR:-}"
+      CLICKHOUSE_USER: "${CLICKHOUSE_USER:-default}"
+      CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-hamstring}"

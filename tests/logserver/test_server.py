@@ -9,14 +9,14 @@ import aiofiles
 
 from src.logserver.server import LogServer, main
 from src.base.pipeline_routing import SERVER_MESSAGE_ID_HEADER
-from src.base.kafka_handler import ConsumedKafkaMessage, KafkaProduceRecord
+from src.base.kafka import ConsumedKafkaMessage, KafkaProduceRecord
 
 LOG_SERVER_IP_ADDR = "192.168.0.1"
 
 
 class TestInit(unittest.TestCase):
-    @patch("src.logserver.server.ExactlyOnceKafkaProduceHandler")
-    @patch("src.logserver.server.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.logserver.server.create_pipeline_producer")
+    @patch("src.logserver.server.create_pipeline_consumer")
     @patch("src.logserver.server.ClickHouseKafkaSender")
     def test_valid_init(
         self, mock_clickhouse, mock_kafka_consume_handler, mock_kafka_produce_handler
@@ -35,8 +35,8 @@ class TestInit(unittest.TestCase):
 
 class TestStart(unittest.IsolatedAsyncioTestCase):
     @patch("src.logserver.server.logger")
-    @patch("src.logserver.server.ExactlyOnceKafkaConsumeHandler")
-    @patch("src.logserver.server.ExactlyOnceKafkaProduceHandler")
+    @patch("src.logserver.server.create_pipeline_consumer")
+    @patch("src.logserver.server.create_pipeline_producer")
     @patch("src.logserver.server.ClickHouseKafkaSender")
     def setUp(
         self,
@@ -77,8 +77,8 @@ class TestStart(unittest.IsolatedAsyncioTestCase):
 
 
 class TestSend(unittest.TestCase):
-    @patch("src.logserver.server.ExactlyOnceKafkaProduceHandler")
-    @patch("src.logserver.server.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.logserver.server.create_pipeline_producer")
+    @patch("src.logserver.server.create_pipeline_consumer")
     @patch("src.logserver.server.ClickHouseKafkaSender")
     def test_send(
         self,
@@ -101,11 +101,17 @@ class TestSend(unittest.TestCase):
         sut.send(message_id, message)
 
         # Assert
-        mock_kafka_produce_handler_instance.produce.assert_called_once_with(
-            topic="test_topic",
-            data=message,
-            key="192.0.2.10",
-            headers=((SERVER_MESSAGE_ID_HEADER, str(message_id).encode("utf-8")),),
+        mock_kafka_produce_handler_instance.publish.assert_called_once_with(
+            [
+                KafkaProduceRecord(
+                    topic="test_topic",
+                    data=message,
+                    key="192.0.2.10",
+                    headers=(
+                        (SERVER_MESSAGE_ID_HEADER, str(message_id).encode("utf-8")),
+                    ),
+                )
+            ]
         )
 
 
@@ -116,8 +122,8 @@ class _StopFetching(RuntimeError):
 
 
 class TestFetchFromKafka(unittest.IsolatedAsyncioTestCase):
-    @patch("src.logserver.server.ExactlyOnceKafkaProduceHandler")
-    @patch("src.logserver.server.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.logserver.server.create_pipeline_producer")
+    @patch("src.logserver.server.create_pipeline_consumer")
     @patch("src.logserver.server.logger")
     @patch("src.logserver.server.ClickHouseKafkaSender")
     async def test_fetch_from_kafka(
@@ -156,10 +162,8 @@ class TestFetchFromKafka(unittest.IsolatedAsyncioTestCase):
         with patch.object(self.sut, "fetch_from_kafka", new=fetch_wrapper):
             self.sut.fetch_from_kafka()
 
-        expected_message_id = uuid.uuid5(
-            uuid.NAMESPACE_URL, "test-topic:3:10"
-        )
-        mock_kafka_produce.return_value.produce_batch.assert_called_once_with(
+        expected_message_id = uuid.uuid5(uuid.NAMESPACE_URL, "test-topic:3:10")
+        mock_kafka_produce.return_value.complete.assert_called_once_with(
             [
                 KafkaProduceRecord(
                     topic="test_produce_topic",
@@ -173,16 +177,15 @@ class TestFetchFromKafka(unittest.IsolatedAsyncioTestCase):
                     ),
                 )
             ],
-            consumer=mock_consume_handler.consumer,
+            consumer=mock_consume_handler,
             consumed_messages=[source_message],
         )
-        mock_consume_handler.commit.assert_not_called()
 
 
 # class TestFetchFromFile(unittest.IsolatedAsyncioTestCase):
 
-#     @patch("src.logserver.server.ExactlyOnceKafkaProduceHandler")
-#     @patch("src.logserver.server.ExactlyOnceKafkaConsumeHandler")
+#     @patch("src.logserver.server.create_pipeline_producer")
+#     @patch("src.logserver.server.create_pipeline_consumer")
 #     @patch("src.logserver.server.LogServer.send")
 #     @patch("src.logserver.server.logger")
 #     @patch("src.logserver.server.ClickHouseKafkaSender")

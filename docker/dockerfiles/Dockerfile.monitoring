@@ -21,4 +21,4 @@ COPY src/monitoring /app/src/monitoring
 COPY config.yaml /app
 WORKDIR /app
 ENTRYPOINT ["/venv/bin/python3", "-m", "src.base.service_entrypoint"]
-CMD ["src/monitoring/monitoring_agent.py"]
+CMD ["-m", "src.monitoring.monitoring_agent"]

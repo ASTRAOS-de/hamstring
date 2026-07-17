@@ -1,3 +1,11 @@
+x-kafka-dependencies: &kafka-dependencies
+  kafka1:
+    condition: service_healthy
+  kafka2:
+    condition: service_healthy
+  kafka3:
+    condition: service_healthy
+
 services:
   kafka1:
     extends:
@@ -20,27 +28,32 @@ services:
     extends:
       file: "docker-compose.pipeline.yml"
       service: logserver
+    depends_on: *kafka-dependencies
 
   logcollector:
     extends:
       file: "docker-compose.pipeline.yml"
       service: logcollector
+    depends_on: *kafka-dependencies
 
 
   prefilter:
     extends:
       file: "docker-compose.pipeline.yml"
       service: prefilter
+    depends_on: *kafka-dependencies
 
   inspector:
     extends:
       file: "docker-compose.pipeline.yml"
       service: inspector
+    depends_on: *kafka-dependencies
 
   detector:
     extends:
       file: "docker-compose.pipeline.yml"
       service: detector
+    depends_on: *kafka-dependencies
 
   clickhouse-server:
     extends:
@@ -51,6 +64,9 @@ services:
     extends:
       file: "../base/docker-compose.grafana.yml"
       service: grafana
+    depends_on:
+      clickhouse-server:
+        condition: service_healthy
 
   prometheus:
     extends:
@@ -61,19 +77,15 @@ services:
     extends:
       file: "../base/docker-compose.kafka-exporter.yml"
       service: kafka-exporter
-    depends_on:
-      kafka1:
-        condition: service_healthy
-      kafka2:
-        condition: service_healthy
-      kafka3:
-        condition: service_healthy
-      clickhouse-server:
-        condition: service_healthy
+    depends_on: *kafka-dependencies
   monitoring_agent:
     extends:
       file: "docker-compose.monitoring.yml"
       service: monitoring_agent
+    depends_on:
+      <<: *kafka-dependencies
+      clickhouse-server:
+        condition: service_healthy
 
 networks:
   hamstring:

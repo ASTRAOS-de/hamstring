@@ -25,7 +25,8 @@ class TestAlerterLogRotation(unittest.TestCase):
         }
         patches = [
             patch("src.alerter.alerter.ALERTING_CONFIG", alerting_config),
-            patch("src.alerter.alerter.ExactlyOnceKafkaConsumeHandler"),
+            patch("src.alerter.alerter.create_pipeline_consumer"),
+            patch("src.alerter.alerter.create_pipeline_producer"),
             patch("src.alerter.alerter.ClickHouseKafkaSender"),
         ]
         for active_patch in patches:

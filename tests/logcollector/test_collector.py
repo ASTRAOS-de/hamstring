@@ -1,6 +1,7 @@
 import asyncio
 import datetime
 import ipaddress
+import json
 import unittest
 import uuid
 from unittest.mock import MagicMock, patch, AsyncMock, Mock
@@ -8,10 +9,20 @@ from unittest.mock import MagicMock, patch, AsyncMock, Mock
 from src.logcollector.collector import LogCollector, main
 from src.base.utils import setup_config
 
+_PRODUCER_PATCHER = patch("src.logcollector.collector.create_pipeline_producer")
+
+
+def setUpModule():
+    _PRODUCER_PATCHER.start()
+
+
+def tearDownModule():
+    _PRODUCER_PATCHER.stop()
+
 
 class TestInit(unittest.TestCase):
-    @patch("src.logcollector.collector.ExactlyOnceKafkaConsumeHandler")
-    @patch("src.logcollector.collector.BufferedBatchSender")
+    @patch("src.logcollector.collector.create_pipeline_consumer")
+    @patch("src.logcollector.collector.BatchAccumulator")
     @patch("src.logcollector.collector.LoglineHandler")
     @patch("src.logcollector.collector.ClickHouseKafkaSender")
     def test_valid_init(
@@ -47,8 +58,8 @@ class TestInit(unittest.TestCase):
 
 class TestStart(unittest.IsolatedAsyncioTestCase):
     @patch("src.logcollector.collector.logger")
-    @patch("src.logcollector.collector.ExactlyOnceKafkaConsumeHandler")
-    @patch("src.logcollector.collector.BufferedBatchSender")
+    @patch("src.logcollector.collector.create_pipeline_consumer")
+    @patch("src.logcollector.collector.BatchAccumulator")
     @patch("src.logcollector.collector.LoglineHandler")
     @patch("src.logcollector.collector.ClickHouseKafkaSender")
     def setUp(
@@ -95,8 +106,8 @@ class _StopFetching(RuntimeError):
 
 class TestFetch(unittest.TestCase):
     @patch("src.logcollector.collector.LoglineHandler")
-    @patch("src.logcollector.collector.BufferedBatchSender")
-    @patch("src.logcollector.collector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.logcollector.collector.BatchAccumulator")
+    @patch("src.logcollector.collector.create_pipeline_consumer")
     @patch("src.logcollector.collector.LogCollector.send")
     @patch("src.logcollector.collector.logger")
     @patch("src.logcollector.collector.ClickHouseKafkaSender")
@@ -112,8 +123,12 @@ class TestFetch(unittest.TestCase):
         mock_consume_handler = MagicMock()
         source_record = MagicMock(value="value1")
         source_record.header_text.return_value = "server-message-id"
-        mock_consume_handler.consume_batch.side_effect = [[source_record], _StopFetching()]
+        mock_consume_handler.consume_batch.side_effect = [
+            [source_record],
+            _StopFetching(),
+        ]
         mock_kafka_consume.return_value = mock_consume_handler
+        mock_batch_sender.return_value.add_message.return_value = 1
         mock_send.return_value = ("subnet-1", "batched-message")
         self.sut = LogCollector(
             collector_name="my-collector",
@@ -129,20 +144,19 @@ class TestFetch(unittest.TestCase):
             self.sut.fetch()
 
         mock_send.assert_called_once()
-        self.sut.batch_handler.add_message_without_dispatch.assert_called_once_with(
+        self.sut.batch_handler.add_message.assert_called_once_with(
             "subnet-1", "batched-message"
         )
         self.sut._flush_pending_batches.assert_called_once()
-        mock_consume_handler.commit.assert_not_called()
 
 
 class TestSend(unittest.TestCase):
     def setUp(self):
         with (
             patch("src.logcollector.collector.asyncio.Queue"),
-            patch("src.logcollector.collector.BufferedBatchSender"),
+            patch("src.logcollector.collector.BatchAccumulator"),
             patch("src.logcollector.collector.LoglineHandler"),
-            patch("src.logcollector.collector.ExactlyOnceKafkaConsumeHandler"),
+            patch("src.logcollector.collector.create_pipeline_consumer"),
             patch("src.logcollector.collector.ClickHouseKafkaSender"),
         ):
             self.sut = LogCollector(
@@ -259,20 +273,25 @@ class TestKafkaBatchSerialization(unittest.TestCase):
             ["a" * 15, "b" * 15, "c" * 15],
             [item for packet in packets for item in json.loads(packet)["data"]],
         )
-        self.assertTrue(
-            all(len(packet.encode("utf-8")) <= 60 for packet in packets)
-        )
+        self.assertTrue(all(len(packet.encode("utf-8")) <= 60 for packet in packets))
 
     def test_rejects_one_logline_larger_than_the_record_limit(self):
-        with self.assertRaisesRegex(ValueError, "One logline exceeds"):
+        with self.assertRaisesRegex(ValueError, "One serialized logline packet"):
             self.sut._serialize_batch_packets(
                 {"batch_id": "batch-1", "data": ["a" * 100]}, self.schema
             )
 
+    def test_rechecks_large_logline_after_packet_rollover(self):
+        with self.assertRaisesRegex(ValueError, "One serialized logline packet"):
+            self.sut._serialize_batch_packets(
+                {"batch_id": "batch-1", "data": ["small", "a" * 100]},
+                self.schema,
+            )
+
 
 class TestGetSubnetId(unittest.TestCase):
-    @patch("src.logcollector.collector.ExactlyOnceKafkaConsumeHandler")
-    @patch("src.logcollector.collector.BufferedBatchSender")
+    @patch("src.logcollector.collector.create_pipeline_consumer")
+    @patch("src.logcollector.collector.BatchAccumulator")
     @patch("src.logcollector.collector.LoglineHandler")
     @patch("src.logcollector.collector.ClickHouseKafkaSender")
     def test_get_subnet_id_ipv4(
@@ -302,8 +321,8 @@ class TestGetSubnetId(unittest.TestCase):
         # Assert
         self.assertEqual(expected_result, result)
 
-    @patch("src.logcollector.collector.ExactlyOnceKafkaConsumeHandler")
-    @patch("src.logcollector.collector.BufferedBatchSender")
+    @patch("src.logcollector.collector.create_pipeline_consumer")
+    @patch("src.logcollector.collector.BatchAccumulator")
     @patch("src.logcollector.collector.LoglineHandler")
     @patch("src.logcollector.collector.ClickHouseKafkaSender")
     def test_get_subnet_id_ipv4_zero(
@@ -333,8 +352,8 @@ class TestGetSubnetId(unittest.TestCase):
         # Assert
         self.assertEqual(expected_result, result)
 
-    @patch("src.logcollector.collector.ExactlyOnceKafkaConsumeHandler")
-    @patch("src.logcollector.collector.BufferedBatchSender")
+    @patch("src.logcollector.collector.create_pipeline_consumer")
+    @patch("src.logcollector.collector.BatchAccumulator")
     @patch("src.logcollector.collector.LoglineHandler")
     @patch("src.logcollector.collector.ClickHouseKafkaSender")
     def test_get_subnet_id_ipv4_max(
@@ -364,8 +383,8 @@ class TestGetSubnetId(unittest.TestCase):
         # Assert
         self.assertEqual(expected_result, result)
 
-    @patch("src.logcollector.collector.ExactlyOnceKafkaConsumeHandler")
-    @patch("src.logcollector.collector.BufferedBatchSender")
+    @patch("src.logcollector.collector.create_pipeline_consumer")
+    @patch("src.logcollector.collector.BatchAccumulator")
     @patch("src.logcollector.collector.LoglineHandler")
     @patch("src.logcollector.collector.ClickHouseKafkaSender")
     def test_get_subnet_id_ipv6(
@@ -395,8 +414,8 @@ class TestGetSubnetId(unittest.TestCase):
         # Assert
         self.assertEqual(expected_result, result)
 
-    @patch("src.logcollector.collector.ExactlyOnceKafkaConsumeHandler")
-    @patch("src.logcollector.collector.BufferedBatchSender")
+    @patch("src.logcollector.collector.create_pipeline_consumer")
+    @patch("src.logcollector.collector.BatchAccumulator")
     @patch("src.logcollector.collector.LoglineHandler")
     @patch("src.logcollector.collector.ClickHouseKafkaSender")
     def test_get_subnet_id_ipv6_zero(
@@ -427,8 +446,8 @@ class TestGetSubnetId(unittest.TestCase):
         # Assert
         self.assertEqual(expected_result, result)
 
-    @patch("src.logcollector.collector.ExactlyOnceKafkaConsumeHandler")
-    @patch("src.logcollector.collector.BufferedBatchSender")
+    @patch("src.logcollector.collector.create_pipeline_consumer")
+    @patch("src.logcollector.collector.BatchAccumulator")
     @patch("src.logcollector.collector.LoglineHandler")
     @patch("src.logcollector.collector.ClickHouseKafkaSender")
     def test_get_subnet_id_ipv6_max(
@@ -459,8 +478,8 @@ class TestGetSubnetId(unittest.TestCase):
         # Assert
         self.assertEqual(expected_result, result)
 
-    @patch("src.logcollector.collector.ExactlyOnceKafkaConsumeHandler")
-    @patch("src.logcollector.collector.BufferedBatchSender")
+    @patch("src.logcollector.collector.create_pipeline_consumer")
+    @patch("src.logcollector.collector.BatchAccumulator")
     @patch("src.logcollector.collector.LoglineHandler")
     @patch("src.logcollector.collector.ClickHouseKafkaSender")
     def test_get_subnet_id_unsupported_type(
@@ -489,8 +508,8 @@ class TestGetSubnetId(unittest.TestCase):
             # noinspection PyTypeChecker
             sut._get_subnet_id(test_address)
 
-    @patch("src.logcollector.collector.ExactlyOnceKafkaConsumeHandler")
-    @patch("src.logcollector.collector.BufferedBatchSender")
+    @patch("src.logcollector.collector.create_pipeline_consumer")
+    @patch("src.logcollector.collector.BatchAccumulator")
     @patch("src.logcollector.collector.LoglineHandler")
     @patch("src.logcollector.collector.ClickHouseKafkaSender")
     def test_get_subnet_id_none(
@@ -532,7 +551,7 @@ class TestMain(unittest.IsolatedAsyncioTestCase):
                     [
                         "domain_name",
                         "RegEx",
-                        "^(?=.{1,253}$)((?!-)[A-Za-z0-9-]{1,63}(?<!-)\.)+[A-Za-z]{2,63}$",
+                r"^(?=.{1,253}$)((?!-)[A-Za-z0-9-]{1,63}(?<!-)\.)+[A-Za-z]{2,63}$",
                     ],
                     ["src_ip", "IpAddress"],
                 ],

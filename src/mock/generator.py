@@ -1,12 +1,9 @@
-import os
 import socket
-import sys
 import time
 import polars as pl
 import numpy as np
 
 
-sys.path.append(os.getcwd())
 from src.mock.log_generator import generate_dns_log_line
 from src.base.log_config import get_logger
 from src.train.dataset import Dataset, DatasetLoader

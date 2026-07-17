@@ -1,6 +1,4 @@
 import json
-import os
-import sys
 import asyncio
 import datetime
 import uuid
@@ -8,20 +6,19 @@ from abc import ABC, abstractmethod
 import importlib
 from pathlib import Path
 
-sys.path.append(os.getcwd())
-from confluent_kafka.admin import AdminClient
 from src.base.clickhouse_kafka_sender import ClickHouseKafkaSender
-from src.base.utils import setup_config, ensure_directory
+from src.base.utils import setup_config
 from src.base.execution import (
     create_pipeline_executor,
     run_thread_worker_pool,
     start_pipeline_worker_replicas,
 )
-from src.base.eos import EosWorkerContext
-from src.base.kafka_handler import (
-    ExactlyOnceKafkaConsumeHandler,
-    ExactlyOnceKafkaProduceHandler,
+from src.base.kafka import (
     KafkaMessageFetchException,
+    KafkaProduceRecord,
+    create_pipeline_consumer,
+    create_pipeline_producer,
+    decode_json_record,
     ensure_topics,
 )
 from src.base.log_config import get_logger
@@ -30,11 +27,11 @@ module_name = "pipeline.alerter"
 logger = get_logger(module_name)
 
 config = setup_config()
-CONSUME_TOPIC_PREFIX = config["environment"]["kafka_topics_prefix"]["pipeline"].get(
-    "detector_to_alerter", "pipeline-detector_to_alerter"
-)
+CONSUME_TOPIC_PREFIX = config["environment"]["kafka_topics_prefix"]["pipeline"][
+    "detector_to_alerter"
+]
 ALERTING_CONFIG = config["pipeline"].get("alerting", {})
-ALTERTERS = ALERTING_CONFIG.get("plugins", [])
+ALERTERS = ALERTING_CONFIG.get("plugins", [])
 PLUGIN_PATH = "src.alerter.plugins"
 
 
@@ -67,18 +64,19 @@ class AlerterBase(AlerterAbstractBase):
     def __init__(self, alerter_config, consume_topic, worker_id="default") -> None:
         self.name = alerter_config.get("name", "generic")
         self.consume_topic = consume_topic
-        self.eos_context = EosWorkerContext(
-            stage=module_name,
-            consume_topic=consume_topic,
-            instance_name=self.name,
-            worker_id=worker_id,
-        )
-        self.worker_id = self.eos_context.worker_id
+        self.worker_id = worker_id or "default"
         self.alerter_config = alerter_config
         self.alert_data = None
         self.key = None
+        self.source_message = None
 
-        self.kafka_consume_handler = ExactlyOnceKafkaConsumeHandler(self.consume_topic)
+        self.kafka_consume_handler = create_pipeline_consumer(self.consume_topic)
+        self.kafka_produce_handler = create_pipeline_producer(
+            stage=module_name,
+            consume_topic=consume_topic,
+            instance_name=self.name,
+            worker_id=self.worker_id,
+        )
         self.server_log_terminal_events = ClickHouseKafkaSender(
             "server_log_terminal_events"
         )
@@ -100,7 +98,7 @@ class AlerterBase(AlerterAbstractBase):
         )
 
         if self.log_to_file:
-            ensure_directory(self.log_file_path)
+            Path(self.log_file_path).parent.mkdir(parents=True, exist_ok=True)
 
         if self.log_to_kafka:
             self._setup_kafka_output_topics()
@@ -110,26 +108,9 @@ class AlerterBase(AlerterAbstractBase):
         Ensure that the external Kafka topic exists.
 
         Since no internal consumer subscribes to this topic, auto-creation
-        via consumer polling won't happen. We use AdminClient to ensure
-        the topic exists before producing to it.
+        via consumer polling won't happen.
         """
-        brokers = ",".join(
-            [
-                f"{broker['hostname']}:{broker['internal_port']}"
-                for broker in config["environment"]["kafka_brokers"]
-            ]
-        )
-        admin_client = AdminClient({"bootstrap.servers": brokers})
-        try:
-            ensure_topics(admin_client, [self.external_kafka_topic])
-        except Exception as e:
-            logger.warning(
-                f"Could not auto-create topic {self.external_kafka_topic}: {e}"
-            )
-
-        self.kafka_produce_handler = self.eos_context.create_producer(
-            ExactlyOnceKafkaProduceHandler
-        )
+        ensure_topics([self.external_kafka_topic])
 
     @staticmethod
     def _parse_log_retention_days(retention_days) -> int | None:
@@ -210,7 +191,9 @@ class AlerterBase(AlerterAbstractBase):
             )
             return
 
-        key, data = self.kafka_consume_handler.consume_as_json()
+        self.source_message = self.kafka_consume_handler.consume_one()
+        data = decode_json_record(self.source_message)
+        key = self.source_message.key
         if data:
             self.alert_data = data
             self.key = key
@@ -230,7 +213,7 @@ class AlerterBase(AlerterAbstractBase):
             return
 
         active_log_file_path = self._get_active_log_file_path()
-        ensure_directory(active_log_file_path)
+        Path(active_log_file_path).parent.mkdir(parents=True, exist_ok=True)
         self._cleanup_rotated_logs()
 
         logger.info(f"{self.name}: Logging alert to file {active_log_file_path}")
@@ -242,22 +225,24 @@ class AlerterBase(AlerterAbstractBase):
             logger.error(f"{self.name}: Error writing alert to file: {e}")
             raise
 
-    def _log_to_kafka_action(self):
+    def _build_kafka_output_records(self) -> list[KafkaProduceRecord]:
         """
         Forward the current alert_data to the external Kafka topic.
         """
         if not self.log_to_kafka:
-            return
+            return []
 
         logger.info(
             f"{self.name}: Forwarding alert to topic {self.external_kafka_topic}"
         )
         try:
-            self.kafka_produce_handler.produce(
-                topic=self.external_kafka_topic,
-                data=json.dumps(self.alert_data),
-                key=self.key,
-            )
+            return [
+                KafkaProduceRecord(
+                    topic=self.external_kafka_topic,
+                    data=json.dumps(self.alert_data),
+                    key=self.key,
+                )
+            ]
         except Exception as e:
             logger.error(f"{self.name}: Error forwarding alert: {e}")
             raise
@@ -328,9 +313,19 @@ class AlerterBase(AlerterAbstractBase):
                     self.process_alert()
                     # 2. Executing Base Logging Actions
                     self._log_to_file_action()
-                    self._log_to_kafka_action()
+                    records = self._build_kafka_output_records()
                     self._record_alerter_terminal_events(server_message_ids)
-                    self.kafka_consume_handler.commit()
+                    self.kafka_produce_handler.complete(
+                        records,
+                        consumer=self.kafka_consume_handler,
+                        consumed_messages=[self.source_message],
+                    )
+                else:
+                    self.kafka_produce_handler.complete(
+                        [],
+                        consumer=self.kafka_consume_handler,
+                        consumed_messages=[self.source_message],
+                    )
 
             except KafkaMessageFetchException as e:
                 logger.debug(e)
@@ -427,8 +422,8 @@ async def main():
     )
 
     # Setup Specific Custom Alerter Tasks
-    if ALTERTERS:
-        for alerter_config in ALTERTERS:
+    if ALERTERS:
+        for alerter_config in ALERTERS:
             logger.info(f"Initializing Custom Alerter: {alerter_config['name']}")
             consume_topic = f"{CONSUME_TOPIC_PREFIX}-{alerter_config['name']}"
 

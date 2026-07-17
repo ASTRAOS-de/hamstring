@@ -20,4 +20,4 @@ COPY src/base /app/src/base
 COPY src/detector /app/src/detector
 WORKDIR /app
 ENTRYPOINT ["/venv/bin/python3", "-m", "src.base.service_entrypoint"]
-CMD ["src/detector/detector.py"]
+CMD ["-m", "src.detector.detector"]

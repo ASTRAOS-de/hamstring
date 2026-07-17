@@ -1,7 +1,4 @@
-import os
-import sys
 
-sys.path.append(os.getcwd())
 from src.alerter.alerter import AlerterBase
 from src.base.log_config import get_logger
 

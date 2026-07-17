@@ -43,6 +43,7 @@ class TestLoggingSetup(unittest.TestCase):
 
         # Check if logger level is set to DEBUG
         self.assertEqual(logger.level, logging.DEBUG)
+        self.assertFalse(logger.propagate)
 
         # Log a debug message
         logger.debug("This is a debug message.")

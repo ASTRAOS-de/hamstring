@@ -11,6 +11,8 @@ x-kafka-broker-env: &kafka-broker-env
   KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "${KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR:-3}"
   KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "${KAFKA_TRANSACTION_STATE_LOG_MIN_ISR:-2}"
   KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "${KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR:-3}"
+  KAFKA_MESSAGE_MAX_BYTES: "${KAFKA_BROKER_MAX_RECORD_BYTES:-2097152}"
+  KAFKA_REPLICA_FETCH_MAX_BYTES: "${KAFKA_BROKER_MAX_RECORD_BYTES:-2097152}"
   # Retention applies only to closed segments and retention.bytes is per
   # partition replica.  Frequent, small segments make the retention window
   # effective and keep the replicated pipeline topics bounded on disk.
@@ -25,11 +27,22 @@ x-hamstring-kafka-wait-env: &hamstring-kafka-wait-env
   HAMSTRING_WAIT_FOR: kafka
   HAMSTRING_WAIT_INITIAL_DELAY_SECONDS: "${HAMSTRING_WAIT_INITIAL_DELAY_SECONDS:-30}"
   HAMSTRING_WAIT_TIMEOUT_SECONDS: "${HAMSTRING_WAIT_TIMEOUT_SECONDS:-180}"
+  KAFKA_PIPELINE_MODE: "${KAFKA_PIPELINE_MODE:-}"
+  KAFKA_MAX_RECORD_BYTES: "${KAFKA_MAX_RECORD_BYTES:-}"
+  KAFKA_TRANSACTION_BATCH_SIZE: "${KAFKA_TRANSACTION_BATCH_SIZE:-}"
+  KAFKA_TRANSACTION_BATCH_TIMEOUT_MS: "${KAFKA_TRANSACTION_BATCH_TIMEOUT_MS:-}"
+  KAFKA_TRANSACTION_COMMIT_TIMEOUT_MS: "${KAFKA_TRANSACTION_COMMIT_TIMEOUT_MS:-}"
+  KAFKA_TRANSACTION_TIMEOUT_MS: "${KAFKA_TRANSACTION_TIMEOUT_MS:-}"
+  KAFKA_TOPIC_PARTITIONS: "${KAFKA_TOPIC_PARTITIONS:-}"
+  KAFKA_TOPIC_REPLICATION_FACTOR: "${KAFKA_TOPIC_REPLICATION_FACTOR:-}"
 
 x-hamstring-kafka-clickhouse-wait-env: &hamstring-kafka-clickhouse-wait-env
   HAMSTRING_WAIT_FOR: kafka,clickhouse
   HAMSTRING_WAIT_INITIAL_DELAY_SECONDS: "${HAMSTRING_WAIT_INITIAL_DELAY_SECONDS:-30}"
   HAMSTRING_WAIT_TIMEOUT_SECONDS: "${HAMSTRING_WAIT_TIMEOUT_SECONDS:-180}"
+  KAFKA_MAX_RECORD_BYTES: "${KAFKA_MAX_RECORD_BYTES:-}"
+  KAFKA_TOPIC_PARTITIONS: "${KAFKA_TOPIC_PARTITIONS:-}"
+  KAFKA_TOPIC_REPLICATION_FACTOR: "${KAFKA_TOPIC_REPLICATION_FACTOR:-}"
 
 services:
   kafka1:
@@ -149,7 +162,7 @@ services:
     environment:
       GF_SECURITY_ADMIN_USER: "${GRAFANA_ADMIN_USER:-admin}"
       GF_SECURITY_ADMIN_PASSWORD: "${GRAFANA_ADMIN_PASSWORD:-admin}"
-      GF_INSTALL_PLUGINS: "${GRAFANA_INSTALL_PLUGINS:-grafana-clickhouse-datasource}"
+      GF_PLUGINS_PREINSTALL: "${GRAFANA_INSTALL_PLUGINS:-grafana-clickhouse-datasource}"
       CLICKHOUSE_USER: "${CLICKHOUSE_USER:-default}"
       CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-hamstring}"
     healthcheck:
@@ -206,8 +219,8 @@ services:
         condition: any
 
   monitoring_agent:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-monitoring:${HAMSTRING_MONITORING_IMAGE_TAG:-v2.2.1}"
-    command: ["src/monitoring/monitoring_agent.py"]
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-monitoring:${HAMSTRING_MONITORING_IMAGE_TAG:-v2.3.0}"
+    command: ["-m", "src.monitoring.monitoring_agent"]
     networks:
       - hamstring
     volumes:
@@ -226,8 +239,8 @@ services:
         condition: any
 
   logserver:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-logserver:${HAMSTRING_LOGSERVER_IMAGE_TAG:-v2.2.1}"
-    command: ["src/logserver/server.py"]
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-logserver:${HAMSTRING_LOGSERVER_IMAGE_TAG:-v2.3.0}"
+    command: ["-m", "src.logserver.server"]
     networks:
       - hamstring
     volumes:
@@ -236,6 +249,7 @@ services:
     environment:
       <<: *hamstring-kafka-wait-env
       GROUP_ID: "${LOGSERVER_GROUP_ID:-log_storage}"
+      KAFKA_TRANSACTIONAL_ID_PREFIX: "logserver-{{.Task.Slot}}"
       HAMSTRING_CONFIG_CHECKSUM: "${HAMSTRING_CONFIG_CHECKSUM:-d9bc812b76c2b58c633b412a6c07f981f3c4d787}"
     deploy:
       mode: replicated
@@ -247,8 +261,8 @@ services:
         condition: any
 
   logcollector:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-logcollector:${HAMSTRING_LOGCOLLECTOR_IMAGE_TAG:-v2.2.1}"
-    command: ["src/logcollector/collector.py"]
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-logcollector:${HAMSTRING_LOGCOLLECTOR_IMAGE_TAG:-v2.3.0}"
+    command: ["-m", "src.logcollector.collector"]
     networks:
       - hamstring
     volumes:
@@ -256,6 +270,7 @@ services:
     environment:
       <<: *hamstring-kafka-wait-env
       GROUP_ID: "${LOGCOLLECTOR_GROUP_ID:-log_collection}"
+      KAFKA_TRANSACTIONAL_ID_PREFIX: "logcollector-{{.Task.Slot}}"
       HAMSTRING_CONFIG_CHECKSUM: "${HAMSTRING_CONFIG_CHECKSUM:-d9bc812b76c2b58c633b412a6c07f981f3c4d787}"
     deploy:
       mode: replicated
@@ -267,8 +282,8 @@ services:
         condition: any
 
   prefilter:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-prefilter:${HAMSTRING_PREFILTER_IMAGE_TAG:-v2.2.1}"
-    command: ["src/prefilter/prefilter.py"]
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-prefilter:${HAMSTRING_PREFILTER_IMAGE_TAG:-v2.3.0}"
+    command: ["-m", "src.prefilter.prefilter"]
     networks:
       - hamstring
     volumes:
@@ -276,6 +291,7 @@ services:
     environment:
       <<: *hamstring-kafka-wait-env
       GROUP_ID: "${PREFILTER_GROUP_ID:-log_filtering}"
+      KAFKA_TRANSACTIONAL_ID_PREFIX: "prefilter-{{.Task.Slot}}"
       HAMSTRING_CONFIG_CHECKSUM: "${HAMSTRING_CONFIG_CHECKSUM:-d9bc812b76c2b58c633b412a6c07f981f3c4d787}"
     deploy:
       mode: replicated
@@ -287,8 +303,8 @@ services:
         condition: any
 
   inspector:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-inspector:${HAMSTRING_INSPECTOR_IMAGE_TAG:-v2.2.1}"
-    command: ["src/inspector/inspector.py"]
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-inspector:${HAMSTRING_INSPECTOR_IMAGE_TAG:-v2.3.0}"
+    command: ["-m", "src.inspector.inspector"]
     networks:
       - hamstring
     volumes:
@@ -296,7 +312,7 @@ services:
     environment:
       <<: *hamstring-kafka-wait-env
       GROUP_ID: "${INSPECTOR_GROUP_ID:-data_inspection}"
-      NUMBER_OF_INSTANCES: "${INSPECTOR_NUMBER_OF_INSTANCES:-1}"
+      KAFKA_TRANSACTIONAL_ID_PREFIX: "inspector-{{.Task.Slot}}"
       HAMSTRING_CONFIG_CHECKSUM: "${HAMSTRING_CONFIG_CHECKSUM:-d9bc812b76c2b58c633b412a6c07f981f3c4d787}"
     deploy:
       mode: replicated
@@ -315,8 +331,8 @@ services:
         condition: any
 
   detector:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-detector:${HAMSTRING_DETECTOR_IMAGE_TAG:-v2.2.1}"
-    command: ["src/detector/detector.py"]
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-detector:${HAMSTRING_DETECTOR_IMAGE_TAG:-v2.3.0}"
+    command: ["-m", "src.detector.detector"]
     networks:
       - hamstring
     volumes:
@@ -324,6 +340,7 @@ services:
     environment:
       <<: *hamstring-kafka-wait-env
       GROUP_ID: "${DETECTOR_GROUP_ID:-data_analysis}"
+      KAFKA_TRANSACTIONAL_ID_PREFIX: "detector-{{.Task.Slot}}"
       NVIDIA_DRIVER_CAPABILITIES: "${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}"
       NVIDIA_VISIBLE_DEVICES: "${NVIDIA_VISIBLE_DEVICES:-all}"
       HAMSTRING_CONFIG_CHECKSUM: "${HAMSTRING_CONFIG_CHECKSUM:-d9bc812b76c2b58c633b412a6c07f981f3c4d787}"
@@ -344,8 +361,8 @@ services:
         condition: any
 
   alerter:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-alerter:${HAMSTRING_ALERTER_IMAGE_TAG:-v2.2.1}"
-    command: ["src/alerter/alerter.py"]
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-alerter:${HAMSTRING_ALERTER_IMAGE_TAG:-v2.3.0}"
+    command: ["-m", "src.alerter.alerter"]
     networks:
       - hamstring
     volumes:
@@ -354,6 +371,7 @@ services:
     environment:
       <<: *hamstring-kafka-wait-env
       GROUP_ID: "${ALERTER_GROUP_ID:-data_alerting}"
+      KAFKA_TRANSACTIONAL_ID_PREFIX: "alerter-{{.Task.Slot}}"
       HAMSTRING_CONFIG_CHECKSUM: "${HAMSTRING_CONFIG_CHECKSUM:-d9bc812b76c2b58c633b412a6c07f981f3c4d787}"
     deploy:
       mode: replicated

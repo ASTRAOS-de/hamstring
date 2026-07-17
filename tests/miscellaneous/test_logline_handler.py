@@ -266,7 +266,7 @@ class TestValidateLoglineAndGetFieldsAsJson(unittest.TestCase):
             [
                 "domain_name",
                 "RegEx",
-                "^(?=.{1,253}$)((?!-)[A-Za-z0-9-]{1,63}(?<!-)\.)+[A-Za-z]{2,63}$",
+            r"^(?=.{1,253}$)((?!-)[A-Za-z0-9-]{1,63}(?<!-)\.)+[A-Za-z]{2,63}$",
             ],
             ["record_type", "ListItem", ["A", "AAAA"]],
             ["response_ip", "IpAddress"],

@@ -1,6 +1,5 @@
 import os
 import re
-import sys
 from abc import ABCMeta, abstractmethod
 
 import joblib
@@ -17,7 +16,6 @@ from sklearn.model_selection import cross_val_score, train_test_split
 from sklearn.utils import class_weight
 from sklearn.utils.validation import check_is_fitted
 
-sys.path.append(os.getcwd())
 from src.train.feature import Processor
 from src.base.log_config import get_logger
 from src.train.dataset import Dataset

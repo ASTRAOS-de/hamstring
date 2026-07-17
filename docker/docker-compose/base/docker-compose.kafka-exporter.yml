@@ -2,6 +2,7 @@ services:
   kafka-exporter:
     image: "${KAFKA_EXPORTER_IMAGE_REPOSITORY:-danielqsj/kafka-exporter}:${KAFKA_EXPORTER_IMAGE_TAG:-latest}"
     container_name: kafka-exporter
+    restart: "unless-stopped"
     ports:
       - "9308:9308"
     command: ["--kafka.server=kafka1:19092", "--kafka.server=kafka2:19093", "--kafka.server=kafka3:19094"]

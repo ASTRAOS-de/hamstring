@@ -2,13 +2,18 @@ import datetime
 import os
 import unittest
 import uuid
-from unittest.mock import patch, AsyncMock, Mock, MagicMock, call, mock_open
+from unittest.mock import patch, Mock, call, mock_open
 
 import marshmallow_dataclass
 
 from src.base.data_classes.clickhouse_connectors import ServerLogs
-from src.monitoring.monitoring_agent import CREATE_TABLES_DIRECTORY, main
-from src.monitoring.monitoring_agent import MonitoringAgent, prepare_all_tables
+from src.base.kafka import ConsumedKafkaMessage
+from src.monitoring.monitoring_agent import (
+    CREATE_TABLES_DIRECTORY,
+    MonitoringAgent,
+    main,
+    prepare_all_tables,
+)
 
 
 class TestPrepareAllTables(unittest.TestCase):
@@ -107,7 +112,7 @@ class TestInit(unittest.TestCase):
         mock_clickhouse_batch_sender.assert_called_once()
 
 
-class TestStart(unittest.IsolatedAsyncioTestCase):
+class TestRun(unittest.TestCase):
     def setUp(self):
         with (
             patch("src.monitoring.monitoring_agent.SimpleKafkaConsumeHandler"),
@@ -115,7 +120,7 @@ class TestStart(unittest.IsolatedAsyncioTestCase):
         ):
             self.sut = MonitoringAgent()
 
-    async def test_successful(self):
+    def test_successful(self):
         # Arrange
         data_schema = marshmallow_dataclass.class_schema(ServerLogs)()
         fixed_id = uuid.UUID("35871c8c-ff72-44ad-a9b7-4f02cf92d484")
@@ -127,38 +132,25 @@ class TestStart(unittest.IsolatedAsyncioTestCase):
                 "message_text": "test_text",
             }
         )
-        self.sut.kafka_consumer.consume.return_value = (
-            "test_key",
-            value,
-            "clickhouse_server_logs",
+        source_record = ConsumedKafkaMessage(
+            "test_key", value, "clickhouse_server_logs", 0, 4
         )
+        self.sut.kafka_consume_batch_size = 10
+        self.sut.kafka_consume_timeout_ms = 250
 
-        with (
-            patch(
-                "src.monitoring.monitoring_agent.asyncio.get_running_loop"
-            ) as mock_get_running_loop,
-            patch(
-                "src.monitoring.monitoring_agent.create_pipeline_executor"
-            ) as mock_create_pipeline_executor,
-        ):
-            mock_executor = MagicMock()
-            mock_create_pipeline_executor.return_value = mock_executor
-            mock_loop = AsyncMock()
-            mock_get_running_loop.return_value = mock_loop
+        self.sut.kafka_consumer.consume_batch.side_effect = [
+            [source_record],
+            KeyboardInterrupt(),
+        ]
 
-            mock_loop.run_in_executor.side_effect = [
-                ("test_key", value, "clickhouse_server_logs"),
-                KeyboardInterrupt(),
-            ]
-
-            # Act
-            await self.sut.start()
+        # Act
+        self.sut.run()
 
         # Assert
-        mock_loop.run_in_executor.assert_any_await(
-            mock_executor, self.sut.kafka_consumer.consume
+        self.sut.kafka_consumer.consume_batch.assert_called_with(
+            10,
+            250,
         )
-        mock_executor.shutdown.assert_called_once_with(wait=False, cancel_futures=True)
         self.sut.batch_sender.add.assert_called_once_with(
             "server_logs",
             {
@@ -167,22 +159,24 @@ class TestStart(unittest.IsolatedAsyncioTestCase):
                 "message_text": "test_text",
             },
         )
+        self.sut.batch_sender.insert_all.assert_called_once_with()
+        self.sut.kafka_consumer.commit.assert_called_once_with([source_record])
+        self.sut.batch_sender.close.assert_called_once_with()
+        self.sut.kafka_consumer.close.assert_called_once_with()
 
 
 class TestMain(unittest.TestCase):
-    @patch("src.monitoring.monitoring_agent.MonitoringAgent")
+    @patch("src.monitoring.monitoring_agent.start_monitoring_workers")
     @patch("asyncio.run")
-    def test_main(self, mock_asyncio_run, mock_monitoring_agent):
-        # Arrange
-        mock_agent_instance = Mock()
-        mock_monitoring_agent.return_value = mock_agent_instance
-
+    def test_main(self, mock_asyncio_run, mock_start_monitoring_workers):
         # Act
         main()
 
         # Assert
-        mock_monitoring_agent.assert_called_once()
-        mock_asyncio_run.assert_called_once_with(mock_agent_instance.start())
+        mock_start_monitoring_workers.assert_called_once_with()
+        mock_asyncio_run.assert_called_once()
+        workers = mock_asyncio_run.call_args.args[0]
+        workers.close()
 
 
 if __name__ == "__main__":

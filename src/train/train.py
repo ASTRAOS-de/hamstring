@@ -2,7 +2,6 @@ import hashlib
 import json
 import os
 import pickle
-import sys
 import tempfile
 from enum import Enum, unique
 
@@ -14,7 +13,6 @@ import torch
 from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.preprocessing import StandardScaler
 
-sys.path.append(os.getcwd())
 from src.train.dataset import DatasetLoader
 from src.train.model import (
     Pipeline,

@@ -1,8 +1,9 @@
 import datetime
+import ipaddress
 import re
 import json
 from src.base.log_config import get_logger
-from src.base.utils import setup_config, validate_host
+from src.base.utils import setup_config
 
 logger = get_logger()
 
@@ -52,7 +53,7 @@ class RegEx(FieldType):
 
     def __init__(self, name: str, pattern: str):
         super().__init__(name)
-        self.pattern = re.compile(r"{}".format(pattern))
+        self.pattern = re.compile(pattern)
 
     def validate(self, value) -> bool:
         """Validates the input value against the configured regular expression pattern.
@@ -63,7 +64,7 @@ class RegEx(FieldType):
         Returns:
             True if the value matches the pattern, False otherwise.
         """
-        return True if re.match(self.pattern, str(value)) else False
+        return bool(self.pattern.match(str(value)))
 
 
 class Timestamp(FieldType):
@@ -108,7 +109,7 @@ class Timestamp(FieldType):
 class IpAddress(FieldType):
     """Field type for IP address validation
 
-    Validates both IPv4 and IPv6 addresses using the utility validation functions.
+    Validates both IPv4 and IPv6 addresses using :mod:`ipaddress`.
     No additional configuration parameters are required beyond the field name.
     """
 
@@ -125,7 +126,7 @@ class IpAddress(FieldType):
             True if the value is a valid IPv4 or IPv6 address, False otherwise.
         """
         try:
-            validate_host(value)
+            ipaddress.ip_address(value)
         except ValueError:
             return False
 
@@ -159,7 +160,7 @@ class ListItem(FieldType):
         Returns:
             True if the value is in the allowed_list, False otherwise.
         """
-        return True if value in self.allowed_list else False
+        return value in self.allowed_list
 
 
 class RelevanceHandler:

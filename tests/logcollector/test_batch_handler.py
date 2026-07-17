@@ -1,557 +1,72 @@
-import datetime
 import json
 import unittest
-import uuid
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, call, patch
 
-from src.logcollector.batch_handler import BufferedBatchSender
+from src.logcollector.batch_handler import BatchAccumulator
 
 
-class TestInit(unittest.TestCase):
-    @patch("src.logcollector.batch_handler.BufferedBatch")
-    @patch("src.logcollector.batch_handler.ExactlyOnceKafkaProduceHandler")
-    @patch("src.logcollector.batch_handler.ClickHouseKafkaSender")
-    def test_init_with_buffer(
-        self, mock_clickhouse, mock_kafka_produce_handler, mock_buffered_batch
-    ):
-        # Arrange
-        mock_handler_instance = MagicMock()
-        mock_kafka_produce_handler.return_value = mock_handler_instance
-        mock_batch_instance = MagicMock()
-        mock_buffered_batch.return_value = mock_batch_instance
-
-        # Act
-        sut = BufferedBatchSender(
-            collector_name="test-collector", produce_topics=["test_topic"]
+class TestBatchAccumulator(unittest.TestCase):
+    def setUp(self):
+        self.sender_patch = patch(
+            "src.logcollector.batch_handler.ClickHouseKafkaSender"
+        )
+        self.sender_type = self.sender_patch.start()
+        self.addCleanup(self.sender_patch.stop)
+        self.monitoring_producer = object()
+        self.accumulator = BatchAccumulator(
+            "collector", monitoring_kafka_producer=self.monitoring_producer
         )
 
-        # Assert
-        self.assertEqual(["test_topic"], sut.topics)
-        self.assertEqual(mock_batch_instance, sut.batch)
-        self.assertIsNone(sut.timer)
-        self.assertEqual(mock_handler_instance, sut.kafka_produce_handler)
+    def test_uses_one_supplied_monitoring_producer(self):
+        self.sender_type.create_shared_producer.assert_not_called()
+        self.sender_type.assert_any_call("logline_timestamps", self.monitoring_producer)
 
-        mock_buffered_batch.assert_called_once()
-        mock_kafka_produce_handler.assert_called_once()
-
-
-class TestDel(unittest.TestCase):
-    # TODO
-    pass
-
-
-class TestTransactionalBatchAssembly(unittest.TestCase):
-    @patch("src.logcollector.batch_handler.ExactlyOnceKafkaProduceHandler")
-    @patch("src.logcollector.batch_handler.ClickHouseKafkaSender")
-    def test_complete_all_batches_returns_packets_without_producing(
-        self, mock_clickhouse, mock_produce_handler
-    ):
-        sut = BufferedBatchSender(
-            collector_name="test-collector",
-            produce_topics=["test-topic"],
-            auto_flush_on_cleanup=False,
-        )
-        sut.batch.get_stored_keys = MagicMock(return_value={"subnet-a", "subnet-b"})
-        sut.batch.complete_batch.side_effect = [{"batch_id": "a"}, {"batch_id": "b"}]
-
-        packets = sut.complete_all_batches()
-
-        self.assertCountEqual(
-            [("subnet-a", {"batch_id": "a"}), ("subnet-b", {"batch_id": "b"})],
-            packets,
-        )
-        sut.kafka_produce_handler.produce.assert_not_called()
-
-
-class TestAddMessage(unittest.TestCase):
-    @patch("src.logcollector.batch_handler.logger")
-    @patch("src.logcollector.batch_handler.ExactlyOnceKafkaProduceHandler")
-    @patch("src.logcollector.batch_handler.BufferedBatchSender._reset_timer")
-    @patch("src.logcollector.batch_handler.BufferedBatchSender._send_batch_for_key")
-    @patch("src.logcollector.batch_handler.ClickHouseKafkaSender")
-    def test_add_message_normal(
-        self,
-        mock_clickhouse,
-        mock_send_batch,
-        mock_reset_timer,
-        mock_produce_handler,
-        mock_logger,
-    ):
-        # Arrange
-        mock_produce_handler_instance = MagicMock()
-        mock_produce_handler.return_value = mock_produce_handler_instance
-
-        key = "test_key"
+    def test_add_message_delegates_and_returns_key_count(self):
+        self.accumulator.batch = MagicMock()
+        self.accumulator.batch.get_message_count_for_batch_key.return_value = 3
         message = json.dumps(
-            dict(
-                logline_id=str(uuid.uuid4()),
-                data=f"test_message",
-            )
+            {
+                "logline_id": "7cc92111-7f1e-45c6-b872-d89c8fdfd8cc",
+                "ts": "2026-07-16T08:00:00",
+            }
         )
 
-        sut = BufferedBatchSender(
-            collector_name="test-collector", produce_topics=["test_topic"]
+        result = self.accumulator.add_message("subnet", message)
+
+        self.assertEqual(3, result)
+        self.accumulator.batch.add_message.assert_called_once_with(
+            "subnet", "7cc92111-7f1e-45c6-b872-d89c8fdfd8cc", message
+        )
+        statuses = [
+            insert.args[0]["status"]
+            for insert in self.accumulator.logline_timestamps.insert.call_args_list
+            if "status" in insert.args[0]
+        ]
+        self.assertEqual(["in_process", "batched"], statuses)
+
+    def test_complete_all_returns_only_current_packets(self):
+        self.accumulator.batch = MagicMock()
+        self.accumulator.batch.get_stored_keys.return_value = {"current", "expired"}
+        packet = {"data": ["message"]}
+        self.accumulator.batch.complete_batch.side_effect = lambda key: (
+            packet if key == "current" else None
         )
 
-        sut.timer = MagicMock()
+        result = self.accumulator.complete_all()
 
-        # Act
-        sut.add_message(key, message)
-
-        # Assert
-        mock_send_batch.assert_not_called()
-        mock_reset_timer.assert_not_called()
-
-    @patch("src.logcollector.batch_handler.get_batch_configuration")
-    @patch("src.logcollector.batch_handler.logger")
-    @patch("src.logcollector.batch_handler.ExactlyOnceKafkaProduceHandler")
-    @patch("src.logcollector.batch_handler.BufferedBatchSender._send_batch_for_key")
-    @patch("src.logcollector.batch_handler.ClickHouseKafkaSender")
-    def test_add_message_full_messages(
-        self,
-        mock_clickhouse,
-        mock_send_batch,
-        mock_produce_handler,
-        mock_logger,
-        mock_get_batch_config,
-    ):
-        # Arrange
-        mock_get_batch_config.return_value = {
-            "batch_size": 100,
-            "batch_timeout": 5.9,
-            "subnet_id": {"ipv4_prefix_length": "16", "ipv6_prefix_length": "32"},
-        }
-
-        # Arrange
-        mock_produce_handler_instance = MagicMock()
-        mock_produce_handler.return_value = mock_produce_handler_instance
-
-        key = "test_key"
-
-        sut = BufferedBatchSender(
-            collector_name="test-collector", produce_topics=["test_topic"]
+        self.assertEqual([("current", packet)], result)
+        self.assertCountEqual(
+            [call("current"), call("expired")],
+            self.accumulator.batch.complete_batch.call_args_list,
         )
 
-        sut.timer = MagicMock()
+    def test_completion_errors_propagate(self):
+        self.accumulator.batch = MagicMock()
+        self.accumulator.batch.get_stored_keys.return_value = {"broken"}
+        self.accumulator.batch.complete_batch.side_effect = ValueError("bad timestamp")
 
-        # Act
-        for i in range(99):
-            test_message = json.dumps(
-                dict(
-                    logline_id=str(uuid.uuid4()),
-                    data=f"message_{i}",
-                )
-            )
-            sut.add_message(key, test_message)
-
-        # Assert
-        mock_send_batch.assert_not_called()
-        sut.add_message(
-            key,
-            json.dumps(
-                dict(
-                    logline_id=str(uuid.uuid4()),
-                    data="message_100",
-                )
-            ),
-        )
-        mock_send_batch.assert_called_once()
-
-    @patch("src.logcollector.batch_handler.get_batch_configuration")
-    @patch("src.logcollector.batch_handler.logger")
-    @patch("src.logcollector.batch_handler.ExactlyOnceKafkaProduceHandler")
-    @patch("src.logcollector.batch_handler.BufferedBatchSender._send_batch_for_key")
-    @patch("src.logcollector.batch_handler.ClickHouseKafkaSender")
-    def test_add_message_full_messages_with_different_keys(
-        self,
-        mock_clickhouse,
-        mock_send_batch,
-        mock_produce_handler,
-        mock_logger,
-        mock_get_batch_config,
-    ):
-        mock_get_batch_config.return_value = {
-            "batch_size": 100,
-            "batch_timeout": 5.9,
-            "subnet_id": {"ipv4_prefix_length": "16", "ipv6_prefix_length": "32"},
-        }
-
-        # Arrange
-        mock_produce_handler_instance = MagicMock()
-        mock_produce_handler.return_value = mock_produce_handler_instance
-
-        key = "test_key"
-        other_key = "other_key"
-
-        sut = BufferedBatchSender(
-            collector_name="test-collector", produce_topics=["test_topic"]
-        )
-
-        sut.timer = MagicMock()
-
-        # Act
-        for i in range(79):
-            sut.add_message(
-                key,
-                json.dumps(
-                    dict(
-                        logline_id=str(uuid.uuid4()),
-                        data=f"message_{i}",
-                    )
-                ),
-            )
-        for i in range(15):
-            sut.add_message(
-                other_key,
-                json.dumps(
-                    dict(
-                        logline_id=str(uuid.uuid4()),
-                        data=f"message_{i}",
-                    )
-                ),
-            )
-        for i in range(20):
-            sut.add_message(
-                key,
-                json.dumps(
-                    dict(
-                        logline_id=str(uuid.uuid4()),
-                        data=f"message_{i}",
-                    )
-                ),
-            )
-
-        # Assert
-        mock_send_batch.assert_not_called()
-        sut.add_message(
-            key,
-            json.dumps(
-                dict(
-                    logline_id=str(uuid.uuid4()),
-                    data="message_100",
-                )
-            ),
-        )
-        mock_send_batch.assert_called_once()
-
-    @patch("src.logcollector.batch_handler.logger")
-    @patch("src.logcollector.batch_handler.ExactlyOnceKafkaProduceHandler")
-    @patch("src.logcollector.batch_handler.BufferedBatchSender._reset_timer")
-    @patch("src.logcollector.batch_handler.ClickHouseKafkaSender")
-    def test_add_message_no_timer(
-        self, mock_clickhouse, mock_reset_timer, mock_produce_handler, mock_logger
-    ):
-        # Arrange
-        mock_produce_handler_instance = MagicMock()
-        mock_produce_handler.return_value = mock_produce_handler_instance
-
-        sut = BufferedBatchSender(
-            collector_name="test-collector", produce_topics=["test_topic"]
-        )
-
-        sut.timer = None
-
-        # Act
-        sut.add_message(
-            "test_key",
-            json.dumps(
-                dict(
-                    logline_id=str(uuid.uuid4()),
-                    data="test_message",
-                )
-            ),
-        )
-
-        # Assert
-        mock_reset_timer.assert_called_once()
-
-
-class TestSendAllBatches(unittest.TestCase):
-    @patch("src.logcollector.batch_handler.logger")
-    @patch("src.logcollector.batch_handler.ClickHouseKafkaSender")
-    @patch("src.logcollector.batch_handler.ExactlyOnceKafkaProduceHandler")
-    @patch("src.logcollector.batch_handler.BufferedBatchSender._send_batch_for_key")
-    @patch("src.logcollector.batch_handler.BufferedBatch")
-    def test_send_all_batches_with_existing_keys(
-        self,
-        mock_buffered_batch,
-        mock_send_batch,
-        mock_kafka_produce_handler,
-        mock_clickhouse,
-        mock_logger,
-    ):
-        # Arrange
-        mock_batch_instance = MagicMock()
-        mock_buffered_batch.return_value = mock_batch_instance
-        mock_batch_instance.get_stored_keys.return_value = ["key_1", "key_2"]
-        mock_send_batch_instance = MagicMock()
-        mock_send_batch.return_value = mock_send_batch_instance
-
-        sut = BufferedBatchSender(
-            collector_name="test-collector", produce_topics=["test_topic"]
-        )
-
-        # Act
-        sut._send_all_batches(reset_timer=False)
-
-        # Assert
-        mock_send_batch.assert_any_call("key_1")
-        mock_send_batch.assert_any_call("key_2")
-        self.assertEqual(mock_send_batch.call_count, 2)
-
-    @patch("src.logcollector.batch_handler.ClickHouseKafkaSender")
-    @patch("src.logcollector.batch_handler.ExactlyOnceKafkaProduceHandler")
-    @patch("src.logcollector.batch_handler.BufferedBatchSender._send_batch_for_key")
-    @patch("src.logcollector.batch_handler.BufferedBatch")
-    def test_send_all_batches_with_one_key(
-        self,
-        mock_buffered_batch,
-        mock_send_batch,
-        mock_kafka_produce_handler,
-        mock_clickhouse,
-    ):
-        # Arrange
-        mock_batch_instance = MagicMock()
-        mock_buffered_batch.return_value = mock_batch_instance
-        mock_batch_instance.get_stored_keys.return_value = []
-        mock_send_batch_instance = MagicMock()
-        mock_send_batch.return_value = mock_send_batch_instance
-
-        sut = BufferedBatchSender(
-            collector_name="test-collector", produce_topics=["test_topic"]
-        )
-
-        # Act
-        sut._send_all_batches(reset_timer=False)
-
-        # Assert
-        self.assertEqual(mock_send_batch.call_count, 0)
-
-    @patch("src.logcollector.batch_handler.logger")
-    @patch("src.logcollector.batch_handler.ClickHouseKafkaSender")
-    @patch("src.logcollector.batch_handler.ExactlyOnceKafkaProduceHandler")
-    @patch("src.logcollector.batch_handler.BufferedBatchSender._send_batch_for_key")
-    @patch("src.logcollector.batch_handler.BufferedBatchSender._reset_timer")
-    @patch("src.logcollector.batch_handler.BufferedBatch")
-    def test_send_all_batches_with_existing_keys_and_reset_timer(
-        self,
-        mock_buffered_batch,
-        mock_reset_timer,
-        mock_send_batch,
-        mock_kafka_produce_handler,
-        mock_clickhouse,
-        mock_logger,
-    ):
-        # Arrange
-        mock_batch_instance = MagicMock()
-        mock_buffered_batch.return_value = mock_batch_instance
-        mock_batch_instance.get_stored_keys.return_value = ["key_1", "key_2"]
-        mock_send_batch_instance = MagicMock()
-        mock_send_batch.return_value = mock_send_batch_instance
-
-        sut = BufferedBatchSender(
-            collector_name="test-collector", produce_topics=["test_topic"]
-        )
-
-        # Act
-        sut._send_all_batches(reset_timer=True)
-
-        # Assert
-        mock_send_batch.assert_any_call("key_1")
-        mock_send_batch.assert_any_call("key_2")
-        mock_reset_timer.assert_called_once()
-        self.assertEqual(mock_send_batch.call_count, 2)
-
-    @patch("src.logcollector.batch_handler.ClickHouseKafkaSender")
-    @patch("src.logcollector.batch_handler.ExactlyOnceKafkaProduceHandler")
-    @patch("src.logcollector.batch_handler.BufferedBatchSender._send_batch_for_key")
-    @patch("src.logcollector.batch_handler.BufferedBatch")
-    def test_send_all_batches_with_no_keys(
-        self,
-        mock_buffered_batch,
-        mock_send_batch,
-        mock_kafka_produce_handler,
-        mock_clickhouse,
-    ):
-        # Arrange
-        mock_batch_instance = MagicMock()
-        mock_buffered_batch.return_value = mock_batch_instance
-        mock_batch_instance.get_stored_keys.return_value = []
-        mock_send_batch_instance = MagicMock()
-        mock_send_batch.return_value = mock_send_batch_instance
-
-        sut = BufferedBatchSender(
-            collector_name="test-collector", produce_topics=["test_topic"]
-        )
-
-        # Act
-        sut._send_all_batches(reset_timer=False)
-
-        # Assert
-        mock_send_batch.assert_not_called()
-
-
-class TestSendBatchForKey(unittest.TestCase):
-    @patch("src.logcollector.batch_handler.ClickHouseKafkaSender")
-    @patch("src.logcollector.batch_handler.ExactlyOnceKafkaProduceHandler")
-    @patch.object(BufferedBatchSender, "_send_data_packet")
-    @patch("src.logcollector.batch_handler.BufferedBatch")
-    def test_send_batch_for_key_success(
-        self,
-        mock_batch,
-        mock_send_data_packet,
-        mock_produce_handler,
-        mock_clickhouse,
-    ):
-        # Arrange
-        mock_batch_instance = MagicMock()
-        mock_batch.return_value = mock_batch_instance
-        mock_batch_instance.complete_batch.return_value = "mock_data_packet"
-
-        sut = BufferedBatchSender(
-            collector_name="test-collector", produce_topics=["test_topic"]
-        )
-
-        key = "test_key"
-
-        # Act
-        sut._send_batch_for_key(key)
-
-        # Assert
-        mock_batch_instance.complete_batch.assert_called_once_with(key)
-        mock_send_data_packet.assert_called_once_with(key, "mock_data_packet")
-
-    @patch("src.logcollector.batch_handler.ClickHouseKafkaSender")
-    @patch("src.logcollector.batch_handler.ExactlyOnceKafkaProduceHandler")
-    @patch.object(BufferedBatchSender, "_send_data_packet")
-    @patch("src.logcollector.batch_handler.BufferedBatch")
-    def test_send_batch_for_key_value_error(
-        self,
-        mock_batch,
-        mock_send_data_packet,
-        mock_produce_handler,
-        mock_clickhouse,
-    ):
-        # Arrange
-        mock_batch_instance = MagicMock()
-        mock_batch.return_value = mock_batch_instance
-        mock_batch_instance.complete_batch.side_effect = ValueError("Mock exception")
-
-        sut = BufferedBatchSender(
-            collector_name="test-collector", produce_topics=["test_topic"]
-        )
-
-        key = "test_key"
-
-        # Act
-        sut._send_batch_for_key(key)
-
-        # Assert
-        mock_batch_instance.complete_batch.assert_called_once_with(key)
-        mock_send_data_packet.assert_not_called()
-
-
-class TestSendDataPacket(unittest.TestCase):
-    @patch("src.logcollector.batch_handler.ExactlyOnceKafkaProduceHandler")
-    @patch("src.logcollector.batch_handler.ClickHouseKafkaSender")
-    def test_send_data_packet(self, mock_clickhouse, mock_produce_handler):
-        # Arrange
-        mock_produce_handler_instance = MagicMock()
-        mock_produce_handler.return_value = mock_produce_handler_instance
-        mock_produce_handler_instance.send.return_value = None
-
-        key = "test_key"
-        data = {
-            "batch_id": uuid.UUID("b4b6f13e-d064-4ab7-94ed-d02b46063308"),
-            "begin_timestamp": datetime.datetime(2024, 12, 6, 13, 12, 30, 324015),
-            "end_timestamp": datetime.datetime(2024, 12, 6, 13, 12, 31, 832173),
-            "data": ["test_data"],
-        }
-
-        sut = BufferedBatchSender(
-            collector_name="test-collector", produce_topics=["test_topic"]
-        )
-
-        # Act
-        sut._send_data_packet(key, data)
-
-        # Assert
-        mock_produce_handler_instance.produce.assert_called_once_with(
-            topic="test_topic",
-            data='{"batch_id": "b4b6f13e-d064-4ab7-94ed-d02b46063308", "begin_timestamp": '
-            '"2024-12-06T13:12:30.324015", "end_timestamp": "2024-12-06T13:12:31.832173", '
-            '"data": ["test_data"]}',
-            key=key,
-        )
-
-
-class TestResetTimer(unittest.TestCase):
-    @patch("src.logcollector.batch_handler.get_batch_configuration")
-    @patch("src.logcollector.batch_handler.ExactlyOnceKafkaProduceHandler")
-    @patch("src.logcollector.batch_handler.Timer")
-    @patch("src.logcollector.batch_handler.ClickHouseKafkaSender")
-    def test_reset_timer_with_existing_timer(
-        self, mock_clickhouse, mock_timer, mock_produce_handler, mock_get_batch_config
-    ):
-        # Arrange
-        mock_get_batch_config.return_value = {
-            "batch_size": "200000",
-            "batch_timeout": 5.9,
-            "subnet_id": {"ipv4_prefix_length": "16", "ipv6_prefix_length": "32"},
-        }
-        mock_timer_instance = MagicMock()
-        mock_timer.return_value = mock_timer_instance
-        mock_produce_handler_instance = MagicMock()
-        mock_produce_handler.return_value = mock_produce_handler_instance
-
-        sut = BufferedBatchSender(
-            collector_name="test-collector", produce_topics=["test_topic"]
-        )
-
-        sut.timer = mock_timer_instance
-        sut._send_all_batches = MagicMock()
-
-        # Act
-        sut._reset_timer()
-
-        # Assert
-        self.assertIsNotNone(sut.timer)
-
-        mock_timer_instance.cancel.assert_called_once()
-        mock_timer.assert_called_once_with(5.9, sut._send_all_batches)
-        sut.timer.start.assert_called_once()
-
-    @patch("src.logcollector.batch_handler.get_batch_configuration")
-    @patch("src.logcollector.batch_handler.ExactlyOnceKafkaProduceHandler")
-    @patch("src.logcollector.batch_handler.Timer")
-    @patch("src.logcollector.batch_handler.ClickHouseKafkaSender")
-    def test_reset_timer_without_existing_timer(
-        self, mock_clickhouse, mock_timer, mock_produce_handler, mock_get_batch_config
-    ):
-
-        mock_get_batch_config.return_value = {
-            "batch_size": "200000",
-            "batch_timeout": 4.6,
-            "subnet_id": {"ipv4_prefix_length": "16", "ipv6_prefix_length": "32"},
-        }
-        # Arrange
-        mock_produce_handler_instance = MagicMock()
-        mock_produce_handler.return_value = mock_produce_handler_instance
-
-        sut = BufferedBatchSender(
-            collector_name="test-collector", produce_topics=["test_topic"]
-        )
-
-        sut._send_all_batches = MagicMock()
-
-        # Act
-        sut._reset_timer()
-
-        # Assert
-        self.assertIsNotNone(sut.timer)
-
-        mock_timer.assert_called_once_with(4.6, sut._send_all_batches)
-        sut.timer.start.assert_called_once()
+        with self.assertRaisesRegex(ValueError, "bad timestamp"):
+            self.accumulator.complete_all()
 
 
 if __name__ == "__main__":

@@ -2,8 +2,6 @@ import unittest
 from unittest.mock import patch, MagicMock, mock_open, call
 from src.inspector.plugins.stream_ad_inspector import StreamADInspector
 import importlib
-import os
-import sys
 import uuid
 from datetime import datetime, timedelta
 from enum import Enum, unique
@@ -13,13 +11,12 @@ import marshmallow_dataclass
 import numpy as np
 from streamad.util import StreamGenerator, CustomDS
 
-sys.path.append(os.getcwd())
 from src.base.clickhouse_kafka_sender import ClickHouseKafkaSender
 from src.base.data_classes.batch import Batch
+from src.base.kafka import ConsumedKafkaMessage
 from src.base.utils import (
     setup_config,
     get_zeek_sensor_topic_base_names,
-    generate_collisions_resistant_uuid,
 )
 from streamad.model import ZScoreDetector, RShashDetector
 
@@ -50,11 +47,16 @@ def create_test_batch():
     return test_batch
 
 
+def consumed_batch(key: str | None, batch: Batch) -> ConsumedKafkaMessage:
+    payload = marshmallow_dataclass.class_schema(Batch)().dumps(batch)
+    return ConsumedKafkaMessage(key, payload, "input", 0, 0)
+
+
 class TestStreamAdInspectorSetup(unittest.TestCase):
     @patch("src.inspector.inspector.PLUGIN_PATH", "src.inspector.plugins")
     @patch("src.inspector.inspector.ClickHouseKafkaSender")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaConsumeHandler")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaProduceHandler")
+    @patch("src.inspector.inspector.create_pipeline_consumer")
+    @patch("src.inspector.inspector.create_pipeline_producer")
     @patch("src.inspector.inspector.logger")
     def setUp(
         self, mock_logger, mock_consume_handler, mock_produce_handler, mock_clickhouse
@@ -90,8 +92,8 @@ class TestStreamAdInspectorSetup(unittest.TestCase):
 class TestStreamAdInspectorInvalidSetup(unittest.TestCase):
     @patch("src.inspector.inspector.PLUGIN_PATH", "src.inspector.plugins")
     @patch("src.inspector.inspector.ClickHouseKafkaSender")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaConsumeHandler")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaProduceHandler")
+    @patch("src.inspector.inspector.create_pipeline_consumer")
+    @patch("src.inspector.inspector.create_pipeline_producer")
     @patch("src.inspector.inspector.logger")
     def setUp(
         self, mock_logger, mock_consume_handler, mock_produce_handler, mock_clickhouse
@@ -115,8 +117,8 @@ class TestStreamAdInspectorInvalidSetup(unittest.TestCase):
         }
 
     @patch("src.inspector.inspector.logger")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaProduceHandler")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.inspector.inspector.create_pipeline_producer")
+    @patch("src.inspector.inspector.create_pipeline_consumer")
     @patch("src.inspector.inspector.ClickHouseKafkaSender")
     def test_inspect_ensemble_invalid(
         self,
@@ -141,7 +143,7 @@ class TestStreamAdInspectorInvalidSetup(unittest.TestCase):
 
         test_batch = create_test_batch()
         mock_kafka_consume_handler_instance = MagicMock()
-        mock_kafka_consume_handler_instance.consume_as_object.return_value = (
+        mock_kafka_consume_handler_instance.consume_one.return_value = consumed_batch(
             "test",
             test_batch,
         )
@@ -156,8 +158,8 @@ class TestStreamAdInspectorInvalidSetup(unittest.TestCase):
 
     @patch("src.inspector.inspector.logger")
     @patch("src.inspector.inspector.ClickHouseKafkaSender")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaProduceHandler")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.inspector.inspector.create_pipeline_producer")
+    @patch("src.inspector.inspector.create_pipeline_consumer")
     def test_invalid_model_univariate(
         self,
         mock_kafka_consume_handler,
@@ -176,8 +178,8 @@ class TestStreamAdInspectorInvalidSetup(unittest.TestCase):
 
     @patch("src.inspector.inspector.logger")
     @patch("src.inspector.inspector.ClickHouseKafkaSender")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaProduceHandler")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.inspector.inspector.create_pipeline_producer")
+    @patch("src.inspector.inspector.create_pipeline_consumer")
     def test_invalid_model_multivariate(
         self,
         mock_kafka_consume_handler,
@@ -194,8 +196,8 @@ class TestStreamAdInspectorInvalidSetup(unittest.TestCase):
 
     @patch("src.inspector.inspector.logger")
     @patch("src.inspector.inspector.ClickHouseKafkaSender")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaProduceHandler")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.inspector.inspector.create_pipeline_producer")
+    @patch("src.inspector.inspector.create_pipeline_consumer")
     def test_invalid_model_ensemble(
         self,
         mock_kafka_consume_handler,
@@ -219,8 +221,8 @@ class TestStreamAdInspectorInvalidSetup(unittest.TestCase):
 class TestStreamAdInspectorMeanPacketSize(unittest.TestCase):
     @patch("src.inspector.inspector.PLUGIN_PATH", "src.inspector.plugins")
     @patch("src.inspector.inspector.ClickHouseKafkaSender")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaConsumeHandler")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaProduceHandler")
+    @patch("src.inspector.inspector.create_pipeline_consumer")
+    @patch("src.inspector.inspector.create_pipeline_producer")
     @patch("src.inspector.inspector.logger")
     def setUp(
         self, mock_logger, mock_consume_handler, mock_produce_handler, mock_clickhouse
@@ -311,8 +313,8 @@ class TestInspectFunction(unittest.TestCase):
         }
 
     @patch("src.inspector.inspector.ClickHouseKafkaSender")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaConsumeHandler")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaProduceHandler")
+    @patch("src.inspector.inspector.create_pipeline_consumer")
+    @patch("src.inspector.inspector.create_pipeline_producer")
     @patch("src.inspector.inspector.logger")
     def test_inspect_none_models(
         self, mock_logger, mock_consume_handler, mock_produce_handler, mock_clickhouse
@@ -323,7 +325,7 @@ class TestInspectFunction(unittest.TestCase):
         test_batch = create_test_batch()
 
         mock_kafka_consume_handler_instance = MagicMock()
-        mock_kafka_consume_handler_instance.consume_as_object.return_value = (
+        mock_kafka_consume_handler_instance.consume_one.return_value = consumed_batch(
             "test",
             test_batch,
         )
@@ -335,8 +337,8 @@ class TestInspectFunction(unittest.TestCase):
 
     @patch("src.inspector.inspector.logger")
     @patch("src.inspector.inspector.ClickHouseKafkaSender")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaProduceHandler")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.inspector.inspector.create_pipeline_producer")
+    @patch("src.inspector.inspector.create_pipeline_consumer")
     def test_inspect_empty_models(
         self,
         mock_kafka_consume_handler,
@@ -349,7 +351,7 @@ class TestInspectFunction(unittest.TestCase):
         sut = StreamADInspector(self.consume_topic, self.produce_topics, self.config)
         test_batch = create_test_batch()
         mock_kafka_consume_handler_instance = MagicMock()
-        mock_kafka_consume_handler_instance.consume_as_object.return_value = (
+        mock_kafka_consume_handler_instance.consume_one.return_value = consumed_batch(
             "test",
             test_batch,
         )
@@ -361,8 +363,8 @@ class TestInspectFunction(unittest.TestCase):
             sut.inspect()
 
     @patch("src.inspector.inspector.logger")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaProduceHandler")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.inspector.inspector.create_pipeline_producer")
+    @patch("src.inspector.inspector.create_pipeline_consumer")
     @patch("src.inspector.inspector.ClickHouseKafkaSender")
     def test_inspect_univariate(
         self,
@@ -380,7 +382,7 @@ class TestInspectFunction(unittest.TestCase):
 
         mock_kafka_consume_handler_instance = MagicMock()
         mock_kafka_consume_handler.return_value = mock_kafka_consume_handler_instance
-        mock_kafka_consume_handler_instance.consume_as_object.return_value = (
+        mock_kafka_consume_handler_instance.consume_one.return_value = consumed_batch(
             "test",
             test_batch,
         )
@@ -391,8 +393,8 @@ class TestInspectFunction(unittest.TestCase):
         self.assertEqual([0, 0], sut.anomalies)
 
     @patch("src.inspector.inspector.logger")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaProduceHandler")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.inspector.inspector.create_pipeline_producer")
+    @patch("src.inspector.inspector.create_pipeline_consumer")
     @patch("src.inspector.inspector.ClickHouseKafkaSender")
     def test_inspect_univariate_model_init(
         self,
@@ -409,7 +411,7 @@ class TestInspectFunction(unittest.TestCase):
         test_batch = create_test_batch()
         mock_kafka_consume_handler_instance = MagicMock()
         mock_kafka_consume_handler.return_value = mock_kafka_consume_handler_instance
-        mock_kafka_consume_handler_instance.consume_as_object.return_value = (
+        mock_kafka_consume_handler_instance.consume_one.return_value = consumed_batch(
             "test",
             test_batch,
         )
@@ -422,8 +424,8 @@ class TestInspectFunction(unittest.TestCase):
         self.assertEqual(ZScoreDetector, type(sut.models[0]))
 
     @patch("src.inspector.inspector.logger")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaProduceHandler")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.inspector.inspector.create_pipeline_producer")
+    @patch("src.inspector.inspector.create_pipeline_consumer")
     @patch("src.inspector.inspector.ClickHouseKafkaSender")
     def test_inspect_univariate_2(
         self,
@@ -444,7 +446,7 @@ class TestInspectFunction(unittest.TestCase):
         test_batch = create_test_batch()
         mock_kafka_consume_handler_instance = MagicMock()
         mock_kafka_consume_handler.return_value = mock_kafka_consume_handler_instance
-        mock_kafka_consume_handler_instance.consume_as_object.return_value = (
+        mock_kafka_consume_handler_instance.consume_one.return_value = consumed_batch(
             "test",
             test_batch,
         )
@@ -455,8 +457,8 @@ class TestInspectFunction(unittest.TestCase):
         self.assertNotEqual([None, None], sut.anomalies)
 
     @patch("src.inspector.inspector.logger")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaProduceHandler")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.inspector.inspector.create_pipeline_producer")
+    @patch("src.inspector.inspector.create_pipeline_consumer")
     @patch("src.inspector.inspector.ClickHouseKafkaSender")
     def test_inspect_univariate_two_models(
         self,
@@ -474,7 +476,7 @@ class TestInspectFunction(unittest.TestCase):
         test_batch = create_test_batch()
         mock_kafka_consume_handler_instance = MagicMock()
         mock_kafka_consume_handler.return_value = mock_kafka_consume_handler_instance
-        mock_kafka_consume_handler_instance.consume_as_object.return_value = (
+        mock_kafka_consume_handler_instance.consume_one.return_value = consumed_batch(
             "test",
             test_batch,
         )
@@ -486,8 +488,8 @@ class TestInspectFunction(unittest.TestCase):
         self.assertTrue(isinstance(sut.models[0], ZScoreDetector))
 
     @patch("src.inspector.inspector.logger")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaProduceHandler")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.inspector.inspector.create_pipeline_producer")
+    @patch("src.inspector.inspector.create_pipeline_consumer")
     @patch("src.inspector.inspector.ClickHouseKafkaSender")
     def test_inspect_multivariate(
         self,
@@ -504,7 +506,7 @@ class TestInspectFunction(unittest.TestCase):
         test_batch = create_test_batch()
         mock_kafka_consume_handler_instance = MagicMock()
         mock_kafka_consume_handler.return_value = mock_kafka_consume_handler_instance
-        mock_kafka_consume_handler_instance.consume_as_object.return_value = (
+        mock_kafka_consume_handler_instance.consume_one.return_value = consumed_batch(
             "test",
             test_batch,
         )
@@ -515,8 +517,8 @@ class TestInspectFunction(unittest.TestCase):
         self.assertEqual([0, 0], sut.anomalies)
 
     @patch("src.inspector.inspector.logger")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaProduceHandler")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.inspector.inspector.create_pipeline_producer")
+    @patch("src.inspector.inspector.create_pipeline_consumer")
     @patch("src.inspector.inspector.ClickHouseKafkaSender")
     def test_inspect_multivariate_window_len(
         self,
@@ -537,7 +539,7 @@ class TestInspectFunction(unittest.TestCase):
         test_batch = create_test_batch()
         mock_kafka_consume_handler_instance = MagicMock()
         mock_kafka_consume_handler.return_value = mock_kafka_consume_handler_instance
-        mock_kafka_consume_handler_instance.consume_as_object.return_value = (
+        mock_kafka_consume_handler_instance.consume_one.return_value = consumed_batch(
             "test",
             test_batch,
         )
@@ -548,8 +550,8 @@ class TestInspectFunction(unittest.TestCase):
         self.assertNotEqual([None, None], sut.anomalies)
 
     @patch("src.inspector.inspector.logger")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaProduceHandler")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.inspector.inspector.create_pipeline_producer")
+    @patch("src.inspector.inspector.create_pipeline_consumer")
     @patch("src.inspector.inspector.ClickHouseKafkaSender")
     def test_inspect_multivariate_two_models(
         self,
@@ -567,7 +569,7 @@ class TestInspectFunction(unittest.TestCase):
         test_batch = create_test_batch()
         mock_kafka_consume_handler_instance = MagicMock()
         mock_kafka_consume_handler.return_value = mock_kafka_consume_handler_instance
-        mock_kafka_consume_handler_instance.consume_as_object.return_value = (
+        mock_kafka_consume_handler_instance.consume_one.return_value = consumed_batch(
             "test",
             test_batch,
         )
@@ -579,8 +581,8 @@ class TestInspectFunction(unittest.TestCase):
         self.assertTrue(isinstance(sut.models[0], RShashDetector))
 
     @patch("src.inspector.inspector.logger")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaProduceHandler")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.inspector.inspector.create_pipeline_producer")
+    @patch("src.inspector.inspector.create_pipeline_consumer")
     @patch("src.inspector.inspector.ClickHouseKafkaSender")
     def test_inspect_ensemble(
         self,
@@ -603,7 +605,7 @@ class TestInspectFunction(unittest.TestCase):
         test_batch = create_test_batch()
         mock_kafka_consume_handler_instance = MagicMock()
         mock_kafka_consume_handler.return_value = mock_kafka_consume_handler_instance
-        mock_kafka_consume_handler_instance.consume_as_object.return_value = (
+        mock_kafka_consume_handler_instance.consume_one.return_value = consumed_batch(
             "test",
             test_batch,
         )
@@ -614,8 +616,8 @@ class TestInspectFunction(unittest.TestCase):
         self.assertEqual([0, 0], sut.anomalies)
 
     @patch("src.inspector.inspector.logger")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaProduceHandler")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.inspector.inspector.create_pipeline_producer")
+    @patch("src.inspector.inspector.create_pipeline_consumer")
     @patch("src.inspector.inspector.ClickHouseKafkaSender")
     def test_inspect_ensemble_model_init(
         self,
@@ -646,7 +648,7 @@ class TestInspectFunction(unittest.TestCase):
         test_batch = create_test_batch()
         mock_kafka_consume_handler_instance = MagicMock()
         mock_kafka_consume_handler.return_value = mock_kafka_consume_handler_instance
-        mock_kafka_consume_handler_instance.consume_as_object.return_value = (
+        mock_kafka_consume_handler_instance.consume_one.return_value = consumed_batch(
             "test",
             test_batch,
         )
@@ -663,8 +665,8 @@ class TestInspectFunction(unittest.TestCase):
         self.assertEqual(ensemble, sut.ensemble)
 
     @patch("src.inspector.inspector.logger")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaProduceHandler")
-    @patch("src.inspector.inspector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.inspector.inspector.create_pipeline_producer")
+    @patch("src.inspector.inspector.create_pipeline_consumer")
     @patch("src.inspector.inspector.ClickHouseKafkaSender")
     def test_inspect_ensemble_window_len(
         self,
@@ -695,7 +697,7 @@ class TestInspectFunction(unittest.TestCase):
         test_batch = create_test_batch()
         mock_kafka_consume_handler_instance = MagicMock()
         mock_kafka_consume_handler.return_value = mock_kafka_consume_handler_instance
-        mock_kafka_consume_handler_instance.consume_as_object.return_value = (
+        mock_kafka_consume_handler_instance.consume_one.return_value = consumed_batch(
             "test",
             test_batch,
         )

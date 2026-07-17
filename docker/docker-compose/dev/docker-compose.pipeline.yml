@@ -1,3 +1,13 @@
+x-hamstring-kafka-environment: &hamstring-kafka-environment
+  KAFKA_PIPELINE_MODE: "${KAFKA_PIPELINE_MODE:-}"
+  KAFKA_MAX_RECORD_BYTES: "${KAFKA_MAX_RECORD_BYTES:-}"
+  KAFKA_TRANSACTION_BATCH_SIZE: "${KAFKA_TRANSACTION_BATCH_SIZE:-}"
+  KAFKA_TRANSACTION_BATCH_TIMEOUT_MS: "${KAFKA_TRANSACTION_BATCH_TIMEOUT_MS:-}"
+  KAFKA_TRANSACTION_COMMIT_TIMEOUT_MS: "${KAFKA_TRANSACTION_COMMIT_TIMEOUT_MS:-}"
+  KAFKA_TRANSACTION_TIMEOUT_MS: "${KAFKA_TRANSACTION_TIMEOUT_MS:-}"
+  KAFKA_TOPIC_PARTITIONS: "${KAFKA_TOPIC_PARTITIONS:-}"
+  KAFKA_TOPIC_REPLICATION_FACTOR: "${KAFKA_TOPIC_REPLICATION_FACTOR:-}"
+
 services:
   logserver:
     build:
@@ -6,8 +16,9 @@ services:
     volumes:
       - ../../../config.yaml:/app/config.yaml
     environment:
-      - GROUP_ID=log_storage
-      - HAMSTRING_WAIT_FOR=kafka
+      <<: *hamstring-kafka-environment
+      GROUP_ID: log_storage
+      HAMSTRING_WAIT_FOR: kafka
     deploy:
       mode: "replicated"
       replicas: 1
@@ -27,8 +38,9 @@ services:
     networks:
       hamstring:
     environment:
-      - GROUP_ID=log_collection
-      - HAMSTRING_WAIT_FOR=kafka
+      <<: *hamstring-kafka-environment
+      GROUP_ID: log_collection
+      HAMSTRING_WAIT_FOR: kafka
   prefilter:
     build:
       context: ../../..
@@ -42,8 +54,9 @@ services:
       mode: "replicated"
       replicas: 1
     environment:
-      - GROUP_ID=log_filtering
-      - HAMSTRING_WAIT_FOR=kafka
+      <<: *hamstring-kafka-environment
+      GROUP_ID: log_filtering
+      HAMSTRING_WAIT_FOR: kafka
   inspector:
     build:
       context: ../../..
@@ -65,9 +78,9 @@ services:
           cpus: '1'
           memory: 256m
     environment:
-      - GROUP_ID=data_inspection
-      - NUMBER_OF_INSTANCES=1
-      - HAMSTRING_WAIT_FOR=kafka
+      <<: *hamstring-kafka-environment
+      GROUP_ID: data_inspection
+      HAMSTRING_WAIT_FOR: kafka
   detector:
     build:
       context: ../../..
@@ -81,8 +94,9 @@ services:
       mode: "replicated"
       replicas: 1
     environment:
-      - GROUP_ID=data_analysis
-      - HAMSTRING_WAIT_FOR=kafka
+      <<: *hamstring-kafka-environment
+      GROUP_ID: data_analysis
+      HAMSTRING_WAIT_FOR: kafka
 
   detector-gpu:
     build:
@@ -103,10 +117,11 @@ services:
               count: all
               capabilities: [gpu]
     environment:
-      - GROUP_ID=data_analysis
-      - HAMSTRING_WAIT_FOR=kafka
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      <<: *hamstring-kafka-environment
+      GROUP_ID: data_analysis
+      HAMSTRING_WAIT_FOR: kafka
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
 
   alerter:
     build:
@@ -122,5 +137,6 @@ services:
       mode: "replicated"
       replicas: 1
     environment:
-      - GROUP_ID=data_alerting
-      - HAMSTRING_WAIT_FOR=kafka
+      <<: *hamstring-kafka-environment
+      GROUP_ID: data_alerting
+      HAMSTRING_WAIT_FOR: kafka

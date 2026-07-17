@@ -181,11 +181,18 @@ Kafka routing and exactly-once processing
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 HAMSTRING uses the canonical ``src_ip`` as the Kafka record key from logserver
-onward. This keeps one IP on one partition within a topic. Pipeline fan-out
-topics that must retain the same partition number for a key must have identical
-partition counts; HAMSTRING validates this when a stage starts. The original
-server message ID is transported in a Kafka header and is retained in the
-collector payload for monitoring correlation.
+onward. This keeps one IP on one partition within each topic. Different topics
+may use different partition counts; a key does not need the same numeric
+partition in every stage. The original server message ID is transported in a
+Kafka header and is retained in the collector payload for monitoring
+correlation.
+
+``environment.kafka_pipeline_mode`` selects the delivery implementation used
+by every pipeline stage. ``exactly_once`` atomically commits output records and
+consumed Kafka offsets in one transaction. ``simple`` publishes outputs before
+synchronously committing the input offsets and therefore provides
+at-least-once delivery. This guarantee covers Kafka records and offsets only;
+ClickHouse monitoring writes and alerter side effects are separate systems.
 
 ``pipeline.scaling``
 ^^^^^^^^^^^^^^^^^^^^
@@ -212,14 +219,14 @@ The instance names are the configured pipeline object names, not Docker service 
      scaling:
        defaults:
          executor: thread
-         max_workers: 1
+         threads_per_process: 1
        modules:
          log_collection.collector:
            executor: thread
-           max_workers: 2
+           threads_per_process: 2
            instances:
              dga_collector:
-               threads: 4
+               threads_per_process: 4
          data_analysis.detector:
            executor: process
            processes: 2
@@ -238,34 +245,23 @@ The instance names are the configured pipeline object names, not Docker service 
    * - ``executor``
      - ``thread``
      - Worker model. Valid values are ``thread``, ``process``, and ``hybrid``.
-   * - ``threads``
-     - ``1``
-     - Number of thread workers for ``executor: thread``. In ``executor: hybrid``, this is accepted as an alias for ``threads_per_process``.
    * - ``threads_per_process``
      - ``1``
-     - Number of thread workers inside each process for ``executor: hybrid``.
+     - Number of thread workers in the service process for ``thread`` or inside each process for ``hybrid``.
    * - ``processes``
      - ``1``
      - Number of worker processes for ``executor: process`` or ``executor: hybrid``.
-   * - ``max_workers``
-     - ``1``
-     - Backwards-compatible worker-count alias. For ``thread`` it maps to ``threads``; for pure ``process`` it maps to ``processes``.
-   * - ``workers``
-     - ``1``
-     - Alias for ``max_workers``.
    * - ``instances``
      - none
      - Per-configured-instance overrides. The nested keys must match the instance names listed below.
 
-``thread`` mode starts ``threads`` independent workers in the service process. ``process`` mode starts
+``thread`` mode starts ``threads_per_process`` independent workers in the service process. ``process`` mode starts
 ``processes`` worker processes with one worker each. ``hybrid`` mode starts ``processes`` processes with
 ``threads_per_process`` worker threads inside each process.
 
-If ``executor`` is omitted, HAMSTRING infers it from the worker-count keys:
-
-* ``threads`` only: ``thread``
-* ``processes`` only: ``process``
-* ``processes`` and ``threads`` or ``threads_per_process``: ``hybrid``
+If ``executor`` is omitted, HAMSTRING uses ``thread``. The only supported scaling
+keys are ``executor``, ``processes``, and ``threads_per_process``; unknown keys
+are rejected as configuration errors.
 
 For example, this starts two processes with four Kafka-consuming workers in each process:
 
@@ -278,17 +274,6 @@ For example, this starts two processes with four Kafka-consuming workers in each
            executor: hybrid
            processes: 2
            threads_per_process: 4
-
-This is equivalent, because ``threads`` is an alias for ``threads_per_process`` in hybrid mode:
-
-.. code-block:: yaml
-
-   pipeline:
-     scaling:
-       modules:
-         data_analysis.detector:
-           processes: 2
-           threads: 4
 
 Per-instance overrides are useful when one configured stage is more expensive than another. This example
 uses hybrid mode for all log collectors, but gives the ``dga_collector`` fewer workers and the
@@ -318,9 +303,10 @@ The effective number of Kafka consumers for one configured pipeline instance is:
    Docker service replicas * processes * threads_per_process
 
 For ``thread`` mode, ``processes`` is ``1``. For pure ``process`` mode, ``threads_per_process`` is ``1``.
-The consumed Kafka topic needs at least that many partitions to keep every worker busy. HAMSTRING requests
-at least the local worker count when creating or expanding topics; set ``NUMBER_OF_INSTANCES`` on the
-service when Docker Compose replicas are used so topic creation can account for the replica count as well.
+The consumed Kafka topic needs at least that many partitions to keep every worker busy. Configure the
+desired partition count for each newly created topic under ``environment.kafka_topics.stages`` or
+``environment.kafka_topics.topics``. HAMSTRING does not resize existing topics at application startup;
+change those topics explicitly with Kafka administration tooling when scaling requires more partitions.
 
 .. list-table:: Module and instance keys
    :header-rows: 1
@@ -370,15 +356,7 @@ For the development profile, use the ``-dev`` service names from ``docker/docker
 The compose fragments under ``docker/docker-compose/dev`` and ``docker/docker-compose/prod`` also contain
 ``deploy.replicas`` fields. Those fields document the intended replica count and are used by orchestrators
 that honor Compose ``deploy`` settings. For portable local Compose usage, prefer the explicit ``--scale``
-flag and keep ``NUMBER_OF_INSTANCES`` aligned with the replica count:
-
-.. code-block:: yaml
-
-   services:
-     detector:
-       environment:
-         - GROUP_ID=data_analysis
-         - NUMBER_OF_INSTANCES=2
+flag. Ensure that the consumed topic was created with enough partitions for the resulting worker count.
 
 .. code-block:: console
 
@@ -460,9 +438,6 @@ The following list shows the available configuration options.
    * - poll_timeout_ms
      - ``250``
      - Maximum Kafka poll wait while a partial batch is pending. It determines how quickly the collector notices the configured ``batch_timeout``; it does not shorten that timeout.
-   * - max_kafka_record_bytes
-     - ``900000``
-     - Maximum serialized Kafka record size for one logical batch fragment. Larger batches are split while retaining their batch ID, keeping them below Kafka's default 1 MiB broker limit.
    * - subnet_id.ipv4_prefix_length
      - ``24``
      - The number of bits to trim from the client's IPv4 address for use as `Subnet ID`.
@@ -531,10 +506,10 @@ To entirely skip the anomaly detection phase, you can set ``inspector_module_nam
      - A unique name amongst the detector configurations top identify the detector instance.
    * - inspector_name
      -
-     - The name of the inspector configuration the detector consumes data from. The same inspector name can be referenced in multiple detector configurations. Omit this or set ``consume_from: detector`` when the detector consumes from another detector.
+     - The name of the inspector configuration the detector consumes data from. The same inspector name can be referenced in multiple detector configurations. Omit it when ``consume_from`` is ``detector``.
    * - consume_from
      - ``inspector``
-     - Set to ``detector`` for detector instances that consume from the detector-to-detector topic instead of an inspector.
+     - Accepts only ``inspector`` or ``detector``. The latter consumes from the detector-to-detector topic instead of an inspector.
    * - detector_module_name
      -
      - Name of the python file in ``"src/detector/plugins/"`` the detector should use.
@@ -555,10 +530,10 @@ To entirely skip the anomaly detection phase, you can set ``inspector_module_nam
      - Threshold for the detector's classification.
    * - produce_topics
      - ``(empty)``
-     - (Optional) Comma-separated list of alerter topic suffixes to produce alerts to. If left empty, defaults to the ``generic`` alerter topic. Use ``send_to_alerter: false`` or ``produce_topics: []`` for intermediary detectors that should not produce to an alerter.
+     - Optional YAML list of alerter topic suffixes. An omitted or empty list uses the ``generic`` alerter topic. Set ``send_to_alerter: false`` for intermediary detectors that should not produce to an alerter.
    * - next_detectors
      - ``(empty)``
-     - (Optional) Comma-separated list of detector instance names that should receive this detector's suspicious output on detector-to-detector topics.
+     - Optional YAML list of detector instance names that should receive this detector's suspicious output on detector-to-detector topics.
    * - send_to_alerter
      - ``true``
      - Set to ``false`` to disable the detector-to-alerter Kafka output while still allowing detector-to-detector forwarding.
@@ -609,12 +584,15 @@ To entirely skip the anomaly detection phase, you can set ``inspector_module_nam
    * - Parameter
      - Default Value
      - Description
+   * - kafka_consumer.batch_size
+     - ``5000``
+     - Maximum number of monitoring Kafka records fetched before one offset commit. This is independent of the per-table ClickHouse insert batch size.
+   * - kafka_consumer.timeout_ms
+     - ``250``
+     - Maximum wait in milliseconds for a partial monitoring Kafka fetch.
    * - clickhouse_connector.batch_size
      - ``50``
      - Number of monitoring rows written to ClickHouse in one batch.
-   * - clickhouse_connector.batch_timeout
-     - ``2.0``
-     - Maximum time in seconds before a partial monitoring batch is written.
 
 ``pipeline.zeek``
 ^^^^^^^^^^^^^^^^^
@@ -662,6 +640,14 @@ The following parameters control the infrastructure of the software.
    * - kafka_consumer.max_poll_interval_ms
      - ``1800000``
      - Maximum time in milliseconds between Kafka consumer polls before Kafka removes the consumer from its group. Increase this for long-running detector batches.
+   * - kafka_pipeline_mode
+     - ``exactly_once``
+     - Delivery implementation used consistently by all pipeline stages. Supported values are
+       ``exactly_once`` and ``simple`` (synchronous at-least-once).
+   * - kafka_max_record_bytes
+     - ``900000``
+     - Maximum Kafka application record size. Collector batches are split below this boundary so
+       records remain below the broker's configured maximum.
    * - kafka_transaction_batch.size
      - ``100``
      - Maximum number of source records committed in one transactional Kafka batch by the logserver.
@@ -678,12 +664,11 @@ The following parameters control the infrastructure of the software.
    * - kafka_topics.replication_factor
      - ``3``
      - Replication factor used when creating new Kafka topics. At runtime this is capped to the number of configured Kafka brokers.
-   * - kafka_topics.auto_expand_partitions
-     - ``true``
-     - If enabled, existing HAMSTRING topics with fewer than the desired partition count are automatically expanded on consumer startup. Kafka does not support shrinking partition counts, so topics that are already larger are left unchanged.
    * - kafka_topics.stages
      - See ``config.yaml``
-     - Per-pipeline-stage topic settings. Keys match ``environment.kafka_topics_prefix.pipeline`` keys. Each stage can set ``partitions`` and ``replication_factor`` for topics whose names use that stage prefix.
+     - Per-pipeline-stage settings used when creating missing topics. Keys match
+       ``environment.kafka_topics_prefix.pipeline`` keys. Each stage independently sets
+       ``partitions`` and ``replication_factor`` for topics using that prefix.
    * - kafka_topics.topics
      - See ``config.yaml``
      - Exact per-topic settings for topics that are not represented by a pipeline prefix, for example external alert topics. Topics without a stage or exact entry use 12 partitions and the default replication factor.
@@ -700,6 +685,10 @@ Deployment Environment Variables
 
 The Docker Compose and Docker Swarm files expose the following environment variables. Values shown here
 are the defaults used when no override is provided.
+
+Set overrides in the deployment shell or its ``.env`` file. If an application
+override is unset, the service uses the corresponding value from the mounted
+``config.yaml`` instead.
 
 Service readiness
 ^^^^^^^^^^^^^^^^^
@@ -772,13 +761,6 @@ Application service variables
    * - ``ALERTER_GROUP_ID``
      - ``data_alerting``
      - Swarm override for the alerter ``GROUP_ID``.
-   * - ``NUMBER_OF_INSTANCES``
-     - ``1``
-     - Replica count hint used by Kafka topic creation. Set this to the Docker service replica count
-       when scaling a consumer service.
-   * - ``INSPECTOR_NUMBER_OF_INSTANCES``
-     - ``1``
-     - Swarm override for inspector ``NUMBER_OF_INSTANCES``.
    * - ``KAFKA_TOPIC_PARTITIONS``
      - ``12``
      - Default partition count requested for new HAMSTRING Kafka topics.
@@ -786,9 +768,17 @@ Application service variables
      - from ``environment.kafka_topics.replication_factor``
      - Replication factor requested for new HAMSTRING Kafka topics. At runtime this is capped to the
        configured broker count.
-   * - ``KAFKA_TOPIC_MIN_PARTITIONS``
-     - ``1``
-     - Runtime lower bound for topic partition creation and expansion.
+   * - ``KAFKA_PIPELINE_MODE``
+     - from ``environment.kafka_pipeline_mode``
+     - Selects ``exactly_once`` or ``simple`` delivery for all pipeline consumers and producers.
+   * - ``KAFKA_MAX_RECORD_BYTES``
+     - from ``environment.kafka_max_record_bytes``
+     - Overrides the application record-size ceiling used by producers and collector packet splitting.
+   * - ``KAFKA_BROKER_MAX_RECORD_BYTES``
+     - ``2097152``
+     - Broker record-batch ceiling for Compose and Swarm. Keep this above
+       ``KAFKA_MAX_RECORD_BYTES`` because a producer batch includes framing and may close after
+       adding one final record beyond its target batch size.
    * - ``KAFKA_TRANSACTION_BATCH_SIZE``
      - from ``environment.kafka_transaction_batch.size``
      - Maximum number of source records processed in one logserver Kafka transaction.

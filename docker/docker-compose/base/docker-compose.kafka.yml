@@ -9,6 +9,11 @@ x-kafka-broker-env: &kafka-broker-env
   KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
   KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
   KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+  # librdkafka may exceed its client-side message.max.bytes by one record when
+  # closing a record batch. Keep broker headroom above HAMSTRING's 900 KB
+  # application payload ceiling so a valid payload cannot poison a transaction.
+  KAFKA_MESSAGE_MAX_BYTES: "${KAFKA_BROKER_MAX_RECORD_BYTES:-2097152}"
+  KAFKA_REPLICA_FETCH_MAX_BYTES: "${KAFKA_BROKER_MAX_RECORD_BYTES:-2097152}"
   # Retention is evaluated only for closed log segments.  Keep the segment
   # smaller and roll it frequently so that the four-hour retention period is
   # effective even for low-volume partitions.
@@ -23,6 +28,13 @@ x-kafka-broker-env: &kafka-broker-env
   KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: "${KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS:-300000}"
   KAFKA_LOG_CLEANUP_POLICY: "${KAFKA_LOG_CLEANUP_POLICY:-delete}"
 
+x-kafka-healthcheck: &kafka-healthcheck
+  interval: 15s
+  timeout: 20s
+  retries: 5
+  start_period: 60s
+  start_interval: 5s
+
 services:
   kafka1:
     image: "${KAFKA_IMAGE_REPOSITORY:-confluentinc/cp-kafka}:${KAFKA_IMAGE_TAG:-8.2.2}"
@@ -33,10 +45,8 @@ services:
     ports:
       - "8097:8097"
     healthcheck:
+      <<: *kafka-healthcheck
       test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:19092 >/dev/null 2>&1"]
-      interval: 30s
-      timeout: 10s
-      retries: 10
     environment:
       <<: *kafka-broker-env
       KAFKA_NODE_ID: 1
@@ -54,10 +64,8 @@ services:
     ports:
       - "8098:8098"
     healthcheck:
+      <<: *kafka-healthcheck
       test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:19093 >/dev/null 2>&1"]
-      interval: 30s
-      timeout: 10s
-      retries: 10
     environment:
       <<: *kafka-broker-env
       KAFKA_NODE_ID: 2
@@ -76,10 +84,8 @@ services:
     ports:
       - "8099:8099"
     healthcheck:
+      <<: *kafka-healthcheck
       test: ["CMD-SHELL", "kafka-broker-api-versions --bootstrap-server localhost:19094 >/dev/null 2>&1"]
-      interval: 30s
-      timeout: 10s
-      retries: 10
     environment:
       <<: *kafka-broker-env
       KAFKA_NODE_ID: 3

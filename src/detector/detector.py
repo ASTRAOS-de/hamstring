@@ -3,8 +3,8 @@ import hashlib
 import json
 import os
 import pickle
-import sys
 import tempfile
+import uuid
 import asyncio
 import numpy as np
 import requests
@@ -14,19 +14,19 @@ from abc import ABC, abstractmethod
 import importlib
 from typing import Any
 
-sys.path.append(os.getcwd())
 from src.base.clickhouse_kafka_sender import ClickHouseKafkaSender
 from src.base.data_classes.batch import Batch
-from src.base.utils import setup_config, generate_collisions_resistant_uuid
+from src.base.utils import setup_config
 from src.base.acceleration import (
     apply_model_acceleration,
     resolve_acceleration_config,
 )
-from src.base.eos import EosWorkerContext
-from src.base.kafka_handler import (
-    ExactlyOnceKafkaConsumeHandler,
-    ExactlyOnceKafkaProduceHandler,
+from src.base.kafka import (
     KafkaMessageFetchException,
+    KafkaProduceRecord,
+    create_pipeline_consumer,
+    create_pipeline_producer,
+    decode_batch_record,
 )
 from src.base.log_config import get_logger
 from src.base.execution import (
@@ -38,8 +38,6 @@ from src.base.execution import (
 module_name = "data_analysis.detector"
 logger = get_logger(module_name)
 
-BUF_SIZE = 65536  # let's read stuff in 64kb chunks!
-
 config = setup_config()
 INSPECTORS = config["pipeline"]["data_inspection"]
 DETECTORS = config["pipeline"]["data_analysis"]
@@ -47,35 +45,18 @@ DETECTORS = config["pipeline"]["data_analysis"]
 PIPELINE_TOPIC_PREFIXES = config["environment"]["kafka_topics_prefix"]["pipeline"]
 INSPECTOR_TO_DETECTOR_TOPIC_PREFIX = PIPELINE_TOPIC_PREFIXES["inspector_to_detector"]
 DETECTOR_TO_ALERTER_TOPIC_PREFIX = PIPELINE_TOPIC_PREFIXES["detector_to_alerter"]
-DETECTOR_TO_DETECTOR_TOPIC_PREFIX = PIPELINE_TOPIC_PREFIXES.get(
-    "detector_to_detector", "pipeline-detector_to_detector"
-)
-
-# Backwards-compatible aliases for tests and external imports.
-CONSUME_TOPIC_PREFIX = INSPECTOR_TO_DETECTOR_TOPIC_PREFIX
-PRODUCE_TOPIC_PREFIX = DETECTOR_TO_ALERTER_TOPIC_PREFIX
+DETECTOR_TO_DETECTOR_TOPIC_PREFIX = PIPELINE_TOPIC_PREFIXES["detector_to_detector"]
 
 PLUGIN_PATH = "src.detector.plugins"
-
-
-def _normalize_topic_suffixes(topic_suffixes) -> list[str]:
-    if topic_suffixes is None:
-        return []
-    if isinstance(topic_suffixes, str):
-        return [
-            suffix.strip() for suffix in topic_suffixes.split(",") if suffix.strip()
-        ]
-    if isinstance(topic_suffixes, (list, tuple, set)):
-        return [str(suffix).strip() for suffix in topic_suffixes if str(suffix).strip()]
-    return [str(topic_suffixes).strip()]
 
 
 def build_alerter_topics(detector_config: dict) -> list[str]:
     if detector_config.get("send_to_alerter") is False:
         return []
 
-    topic_suffixes = detector_config.get("produce_topics", "")
-    topic_suffixes = _normalize_topic_suffixes(topic_suffixes)
+    topic_suffixes = detector_config.get("produce_topics", [])
+    if not isinstance(topic_suffixes, list):
+        raise TypeError("Detector produce_topics must be a list")
     if not topic_suffixes:
         topic_suffixes = ["generic"]
 
@@ -86,32 +67,21 @@ def build_alerter_topics(detector_config: dict) -> list[str]:
 
 
 def build_downstream_detector_topics(detector_config: dict) -> list[str]:
-    detector_names = []
-    for config_key in ("next_detectors", "produce_detector_topics"):
-        detector_names.extend(
-            _normalize_topic_suffixes(detector_config.get(config_key))
-        )
+    detector_names = detector_config.get("next_detectors", [])
+    if not isinstance(detector_names, list):
+        raise TypeError("Detector next_detectors must be a list")
 
     return [
         f"{DETECTOR_TO_DETECTOR_TOPIC_PREFIX}-{detector_name}"
-        for detector_name in dict.fromkeys(detector_names)
+        for detector_name in detector_names
     ]
 
 
 def detector_consumes_from_detector(detector_config: dict) -> bool:
-    consume_from = str(detector_config.get("consume_from", "")).strip().lower()
-    if consume_from:
-        return consume_from == "detector"
-
-    detector_source_keys = (
-        "upstream_detector_name",
-        "source_detector_name",
-        "input_detector_name",
-    )
-    if any(detector_config.get(source_key) for source_key in detector_source_keys):
-        return True
-
-    return not detector_config.get("inspector_name")
+    consume_from = detector_config.get("consume_from", "inspector")
+    if consume_from not in {"inspector", "detector"}:
+        raise ValueError("Detector consume_from must be 'inspector' or 'detector'")
+    return consume_from == "detector"
 
 
 def build_detector_consume_topic(detector_config: dict) -> str:
@@ -122,8 +92,6 @@ def build_detector_consume_topic(detector_config: dict) -> str:
 
 class WrongChecksum(Exception):  # pragma: no cover
     """Raises when model checksum validation fails."""
-
-    pass
 
 
 class DetectorAbstractBase(ABC):  # pragma: no cover
@@ -180,6 +148,7 @@ class DetectorBase(DetectorAbstractBase):
         consume_topic,
         produce_topics=None,
         downstream_detector_topics=None,
+        worker_id="default",
     ) -> None:
         """
         Initialize the detector with configuration and Kafka topic settings.
@@ -213,17 +182,15 @@ class DetectorBase(DetectorAbstractBase):
         self.consume_topic = consume_topic
         if produce_topics is None:
             self.produce_topics = [f"{DETECTOR_TO_ALERTER_TOPIC_PREFIX}-generic"]
-        elif isinstance(produce_topics, str):
-            self.produce_topics = _normalize_topic_suffixes(produce_topics)
+        elif not isinstance(produce_topics, list):
+            raise TypeError("Detector produce_topics must be a list")
         else:
             self.produce_topics = produce_topics
 
         if downstream_detector_topics is None:
             self.downstream_detector_topics = []
-        elif isinstance(downstream_detector_topics, str):
-            self.downstream_detector_topics = _normalize_topic_suffixes(
-                downstream_detector_topics
-            )
+        elif not isinstance(downstream_detector_topics, list):
+            raise TypeError("Detector downstream_detector_topics must be a list")
         else:
             self.downstream_detector_topics = downstream_detector_topics
         self.suspicious_batch_id = None
@@ -239,15 +206,15 @@ class DetectorBase(DetectorAbstractBase):
             tempfile.gettempdir(), f"{self.model_name}_{self.checksum}_scaler.pickle"
         )
 
-        self.kafka_consume_handler = ExactlyOnceKafkaConsumeHandler(self.consume_topic)
-        self.kafka_produce_handler = None
-        self.eos_context = EosWorkerContext(
+        self.kafka_consume_handler = create_pipeline_consumer(self.consume_topic)
+        self.source_message = None
+        self.worker_id = worker_id or "default"
+        self.kafka_produce_handler = create_pipeline_producer(
             stage=module_name,
             consume_topic=consume_topic,
             instance_name=self.name,
-            worker_id=worker_id,
+            worker_id=self.worker_id,
         )
-        self.worker_id = self.eos_context.worker_id
 
         self.model, self.scaler = self._get_model()
         self.monitoring_kafka_producer = ClickHouseKafkaSender.create_shared_producer()
@@ -293,7 +260,9 @@ class DetectorBase(DetectorAbstractBase):
                 "current workload."
             )
             return
-        key, data = self.kafka_consume_handler.consume_as_object()
+        self.source_message = self.kafka_consume_handler.consume_one()
+        data = decode_batch_record(self.source_message)
+        key = self.source_message.key
         if data.data:
             self.parent_row_id = data.batch_tree_row_id
             self.suspicious_batch_id = data.batch_id
@@ -313,7 +282,7 @@ class DetectorBase(DetectorAbstractBase):
                 message_count=len(self.messages),
             )
         )
-        row_id = generate_collisions_resistant_uuid()
+        row_id = str(uuid.uuid4())
 
         self.batch_tree.insert(
             dict(
@@ -360,17 +329,8 @@ class DetectorBase(DetectorAbstractBase):
         Returns:
             str: Hexadecimal string representation of the SHA256 checksum.
         """
-        h = hashlib.sha256()
-
         with open(file_path, "rb") as file:
-            while True:
-                # Reading is buffered, so we can read smaller chunks.
-                chunk = file.read(h.block_size)
-                if not chunk:
-                    break
-                h.update(chunk)
-
-        return h.hexdigest()
+            return hashlib.file_digest(file, "sha256").hexdigest()
 
     def get_model_download_url(self):
         """
@@ -506,7 +466,7 @@ class DetectorBase(DetectorAbstractBase):
         self.end_timestamp = None
         self.warnings = []
 
-    def send_warning(self) -> None:
+    def send_warning(self) -> list[KafkaProduceRecord]:
         """
         Dispatch detected warnings to the appropriate systems.
 
@@ -519,8 +479,9 @@ class DetectorBase(DetectorAbstractBase):
         The method updates multiple database tables to maintain the pipeline's
         state tracking and provides detailed information about detected threats.
         """
-        row_id = generate_collisions_resistant_uuid()
+        row_id = str(uuid.uuid4())
         downstream_messages = []
+        records = []
         if len(self.warnings) > 0:
             logger.info("Begin warning computation...")
             overall_score = median(
@@ -540,17 +501,14 @@ class DetectorBase(DetectorAbstractBase):
                 kafka_alert = self._build_kafka_alert(alert)
                 logger.debug(f"Producing compact alert to Kafka: {kafka_alert}")
 
-                if self.kafka_produce_handler is None:
-                    self.kafka_produce_handler = self.eos_context.create_producer(
-                        ExactlyOnceKafkaProduceHandler
-                    )
-
-                for topic in self.produce_topics:
-                    self.kafka_produce_handler.produce(
+                records.extend(
+                    KafkaProduceRecord(
                         topic=topic,
                         data=json.dumps(kafka_alert),
                         key=self.key,
                     )
+                    for topic in self.produce_topics
+                )
             else:
                 logger.info("No alerter topics configured. Skipping alert output.")
 
@@ -628,7 +586,9 @@ class DetectorBase(DetectorAbstractBase):
         )
 
         if downstream_messages:
-            self._send_detector_batch(row_id, downstream_messages)
+            records.extend(
+                self._build_detector_batch_records(row_id, downstream_messages)
+            )
 
         self.fill_levels.insert(
             dict(
@@ -638,10 +598,13 @@ class DetectorBase(DetectorAbstractBase):
                 entry_count=0,
             )
         )
+        return records
 
-    def _send_detector_batch(self, parent_row_id, messages) -> None:
+    def _build_detector_batch_records(
+        self, parent_row_id, messages
+    ) -> list[KafkaProduceRecord]:
         if not self.downstream_detector_topics:
-            return
+            return []
 
         logger.debug(
             f"Producing detector output to Kafka topics: {self.downstream_detector_topics}"
@@ -655,17 +618,14 @@ class DetectorBase(DetectorAbstractBase):
         }
         batch_schema = marshmallow_dataclass.class_schema(Batch)()
 
-        if self.kafka_produce_handler is None:
-            self.kafka_produce_handler = self.eos_context.create_producer(
-                ExactlyOnceKafkaProduceHandler
-            )
-
-        for topic in self.downstream_detector_topics:
-            self.kafka_produce_handler.produce(
+        return [
+            KafkaProduceRecord(
                 topic=topic,
                 data=batch_schema.dumps(data_to_send),
                 key=self.key,
             )
+            for topic in self.downstream_detector_topics
+        ]
 
     def _build_persisted_warnings(self) -> list[dict]:
         return [
@@ -867,8 +827,12 @@ class DetectorBase(DetectorAbstractBase):
                 logger.debug("Inspect Data")
                 self.detect()
                 logger.debug("Send warnings")
-                self.send_warning()
-                self.kafka_consume_handler.commit()
+                records = self.send_warning()
+                self.kafka_produce_handler.complete(
+                    records,
+                    consumer=self.kafka_consume_handler,
+                    consumed_messages=[self.source_message],
+                )
             except KafkaMessageFetchException as e:  # pragma: no cover
                 logger.debug(e)
             except IOError as e:

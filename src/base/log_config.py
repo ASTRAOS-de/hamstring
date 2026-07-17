@@ -101,6 +101,7 @@ def get_logger(module_name: str = "base") -> logging.Logger:
 
     handler = CustomHandler()
     logger.addHandler(handler)
+    logger.propagate = False
 
     # Default to base debug setting
     debug_enabled = config["logging"]["base"]["debug"]

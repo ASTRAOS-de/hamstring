@@ -36,60 +36,58 @@ pipeline:
   scaling:
     defaults:
       executor: thread
-      max_workers: 1
+      threads_per_process: 1
     modules:
       log_storage.logserver:
         executor: thread
-        max_workers: 1
+        threads_per_process: 1
       log_collection.collector:
         executor: thread
-        max_workers: 1
+        threads_per_process: 1
         instances:
           dga_collector:
-            max_workers: 1
+            threads_per_process: 1
           domainator_collector:
-            max_workers: 1
+            threads_per_process: 1
       log_filtering.prefilter:
         executor: thread
-        max_workers: 1
+        threads_per_process: 1
         instances:
           dga_filter:
-            max_workers: 1
-          no_filter:
-            max_workers: 1
+            threads_per_process: 1
+          domainator_filter:
+            threads_per_process: 1
       data_inspection.inspector:
         executor: thread
-        max_workers: 1
+        threads_per_process: 1
         instances:
           dga_inspector:
-            max_workers: 1
-          no_inspector:
-            max_workers: 1
+            threads_per_process: 1
+          domainator_inspector:
+            threads_per_process: 1
       data_analysis.detector:
         executor: thread
-        max_workers: 1
+        threads_per_process: 1
         instances:
           RF-dga_detector:
-            max_workers: 1
+            threads_per_process: 1
           domainator:
-            max_workers: 1
-          domainator_attributor:
-            max_workers: 2
+            threads_per_process: 1
           domainator_attributor_behaviour:
-            max_workers: 1
+            threads_per_process: 1
           domainator_attributor_identification_behaviour:
-            max_workers: 1
+            threads_per_process: 1
           domainator_attributor_identification:
-            max_workers: 1
+            threads_per_process: 1
       pipeline.alerter:
         executor: thread
-        max_workers: 1
+        threads_per_process: 1
         instances:
           generic:
-            max_workers: 1
+            threads_per_process: 1
       monitoring.agent:
         executor: thread
-        max_workers: 1
+        threads_per_process: 1
   log_storage:
     logserver:
       input_file: "/opt/file.txt"
@@ -101,6 +99,9 @@ pipeline:
     default_batch_handler_config:
       batch_size: 2000
       batch_timeout: 30.0
+      # How long the collector waits in one Kafka poll while a partial batch
+      # is pending. This controls timeout-check responsiveness, not batch age.
+      poll_timeout_ms: 250
       subnet_id:
         ipv4_prefix_length: 24
         ipv6_prefix_length: 64
@@ -180,9 +181,9 @@ pipeline:
       threshold: 0.5
       consume_from: inspector
       inspector_name: dga_inspector
-      next_detectors: ""
+      next_detectors: []
       send_to_alerter: true
-      produce_topics: ""
+      produce_topics: []
       acceleration:
         enabled: true
         device: auto
@@ -203,7 +204,7 @@ pipeline:
         - "domainator_attributor_identification_behaviour"
         - "domainator_attributor_identification"
       send_to_alerter: true
-      produce_topics: ""
+      produce_topics: []
       acceleration:
         enabled: true
         device: auto
@@ -218,10 +219,9 @@ pipeline:
       base_url: https://heibox.uni-heidelberg.de/d/0d5cbcbe16cd46a58021/
       threshold: 0.5
       consume_from: detector
-      detector_name: "domainator"
-      next_detectors: ""
+      next_detectors: []
       send_to_alerter: true
-      produce_topics: ""
+      produce_topics: []
       acceleration:
         enabled: true
         device: auto
@@ -236,10 +236,9 @@ pipeline:
       base_url: https://heibox.uni-heidelberg.de/d/0d5cbcbe16cd46a58021/
       threshold: 0.5
       consume_from: detector
-      detector_name: "domainator"
-      next_detectors: ""
+      next_detectors: []
       send_to_alerter: true
-      produce_topics: ""
+      produce_topics: []
       acceleration:
         enabled: true
         device: auto
@@ -254,10 +253,9 @@ pipeline:
       base_url: https://heibox.uni-heidelberg.de/d/0d5cbcbe16cd46a58021/
       threshold: 0.5
       consume_from: detector
-      detector_name: "domainator"
-      next_detectors: ""
+      next_detectors: []
       send_to_alerter: true
-      produce_topics: ""
+      produce_topics: []
       acceleration:
         enabled: true
         device: auto
@@ -274,9 +272,14 @@ pipeline:
     external_kafka_topic: "hamstring_alerts"
     plugins: []
   monitoring:
+    kafka_consumer:
+      # Monitoring fans out several records for each pipeline logline. Fetch a
+      # large cross-topic block so ClickHouse receives full table batches and
+      # Kafka offset commits are amortized across more than a few rows.
+      batch_size: 5000
+      timeout_ms: 250
     clickhouse_connector:
       batch_size: 50  # do not set higher
-      batch_timeout: 2.0
 
 
   zeek:
@@ -307,6 +310,12 @@ environment:
     # Default librdkafka value is 300000 ms (5 minutes), which can be too short
     # for model inference plus downstream alert/monitoring writes.
     max_poll_interval_ms: 1800000
+  # One shared application payload ceiling below Kafka's default 1 MiB broker
+  # record limit. Collector batches are split at this boundary.
+  kafka_max_record_bytes: 900000
+  # Switch the complete pipeline between Kafka transactions and synchronous
+  # at-least-once publication without changing stage code.
+  kafka_pipeline_mode: exactly_once
   kafka_transaction_batch:
     # Commit one Kafka transaction for a bounded group of source records,
     # rather than opening and committing a transaction per logline.
@@ -318,7 +327,6 @@ environment:
     transaction_timeout_ms: 30000
   kafka_topics:
     replication_factor: 1
-    auto_expand_partitions: true
     stages:
       logserver_in:
         partitions: 24

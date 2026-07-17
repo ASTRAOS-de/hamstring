@@ -1,12 +1,10 @@
 import os
-import sys
 from dataclasses import dataclass
 from typing import Callable, List
 
 import polars as pl
 from torch.utils.data.dataset import Dataset
 
-sys.path.append(os.getcwd())
 from src.base.log_config import get_logger
 
 logger = get_logger("train.dataset")

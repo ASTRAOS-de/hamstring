@@ -1,18 +1,15 @@
 import asyncio
 import datetime
-import os
-import sys
 import uuid
 
 import aiofiles
 
-sys.path.append(os.getcwd())
-from src.base.eos import EosWorkerContext
-from src.base.kafka_handler import (
-    ExactlyOnceKafkaConsumeHandler,
-    ExactlyOnceKafkaProduceHandler,
+from src.base.kafka import (
     KafkaProduceRecord,
+    create_pipeline_consumer,
+    create_pipeline_producer,
 )
+from src.base.pipeline_routing import SERVER_MESSAGE_ID_HEADER, source_ip_routing_key
 from src.base.clickhouse_kafka_sender import ClickHouseKafkaSender
 from src.base.utils import setup_config, get_zeek_sensor_topic_base_names
 from src.base.execution import (
@@ -53,16 +50,13 @@ class LogServer:
 
         self.consume_topic = consume_topic
         self.produce_topics = produce_topics
-        self.eos_context = EosWorkerContext(
+        self.worker_id = worker_id or "default"
+
+        self.kafka_consume_handler = create_pipeline_consumer(consume_topic)
+        self.kafka_produce_handler = create_pipeline_producer(
             stage=module_name,
             consume_topic=consume_topic,
-            worker_id=worker_id,
-        )
-        self.worker_id = self.eos_context.worker_id
-
-        self.kafka_consume_handler = ExactlyOnceKafkaConsumeHandler(consume_topic)
-        self.kafka_produce_handler = self.eos_context.create_producer(
-            ExactlyOnceKafkaProduceHandler
+            worker_id=self.worker_id,
         )
         self.monitoring_kafka_producer = ClickHouseKafkaSender.create_shared_producer()
 
@@ -100,13 +94,10 @@ class LogServer:
             message_id (uuid.UUID): UUID of the message to be sent.
             message (str): Message to be sent.
         """
-        for topic in self.produce_topics:
-            self.kafka_produce_handler.produce(
-                topic=topic,
-                data=message,
-                key=str(message_id),
-            )
-            logger.debug(f"Sent: '{message}' to topic {topic}")
+        self.kafka_produce_handler.publish(
+            self._build_output_records(message_id, message)
+        )
+        logger.debug("Sent message %s to topics %s", message_id, self.produce_topics)
 
         self.server_logs_timestamps.insert(
             dict(
@@ -147,9 +138,9 @@ class LogServer:
                     self._build_output_records(message_id, message.value)
                 )
 
-            self.kafka_produce_handler.produce_batch(
+            self.kafka_produce_handler.complete(
                 produced_records,
-                consumer=self.kafka_consume_handler.consumer,
+                consumer=self.kafka_consume_handler,
                 consumed_messages=messages,
             )
             for message_id, message in monitoring_records:
@@ -176,8 +167,15 @@ class LogServer:
         self, message_id: uuid.UUID, message: str
     ) -> list[KafkaProduceRecord]:
         """Build the fan-out records committed with the source offset batch."""
+        routing_key = source_ip_routing_key(message)
+        headers = ((SERVER_MESSAGE_ID_HEADER, str(message_id).encode("utf-8")),)
         return [
-            KafkaProduceRecord(topic=topic, data=message, key=str(message_id))
+            KafkaProduceRecord(
+                topic=topic,
+                data=message,
+                key=routing_key,
+                headers=headers,
+            )
             for topic in self.produce_topics
         ]
 

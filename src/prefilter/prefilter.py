@@ -1,20 +1,17 @@
 import datetime
-import os
-import sys
 import uuid
 import asyncio
 import marshmallow_dataclass
 from collections import defaultdict
 
-sys.path.append(os.getcwd())
 from src.base.clickhouse_kafka_sender import ClickHouseKafkaSender
 from src.base.data_classes.batch import Batch
-from src.base.eos import EosWorkerContext
 from src.base.logline_handler import LoglineHandler
-from src.base.kafka_handler import (
-    ExactlyOnceKafkaProduceHandler,
-    ExactlyOnceKafkaConsumeHandler,
-    KafkaMessageFetchException,
+from src.base.kafka import (
+    KafkaProduceRecord,
+    create_pipeline_consumer,
+    create_pipeline_producer,
+    decode_batch_record,
 )
 from src.base.log_config import get_logger
 from src.base.execution import (
@@ -25,7 +22,6 @@ from src.base.execution import (
 from src.base.utils import (
     setup_config,
     get_zeek_sensor_topic_base_names,
-    generate_collisions_resistant_uuid,
 )
 
 module_name = "log_filtering.prefilter"
@@ -77,27 +73,25 @@ class Prefilter:
         self.name = instance_name
         self.consume_topic = consume_topic
         self.produce_topics = produce_topics
-        self.eos_context = EosWorkerContext(
-            stage=module_name,
-            consume_topic=consume_topic,
-            instance_name=instance_name,
-            worker_id=worker_id,
-        )
-        self.worker_id = self.eos_context.worker_id
+        self.worker_id = worker_id or "default"
         self.batch_id = None
         self.begin_timestamp = None
         self.end_timestamp = None
         self.subnet_id = None
         self.parent_row_id = None
+        self.source_message = None
         self.relevance_function_name = relevance_function_name
 
         self.unfiltered_data = []
         self.filtered_data = []
 
         self.logline_handler = LoglineHandler(validation_config)
-        self.kafka_consume_handler = ExactlyOnceKafkaConsumeHandler(self.consume_topic)
-        self.kafka_produce_handler = self.eos_context.create_producer(
-            ExactlyOnceKafkaProduceHandler
+        self.kafka_consume_handler = create_pipeline_consumer(self.consume_topic)
+        self.kafka_produce_handler = create_pipeline_producer(
+            stage=module_name,
+            consume_topic=consume_topic,
+            instance_name=instance_name,
+            worker_id=self.worker_id,
         )
         self.monitoring_kafka_producer = ClickHouseKafkaSender.create_shared_producer()
 
@@ -140,8 +134,9 @@ class Prefilter:
         """
 
         self.clear_data()  # clear in case we already have data stored
-        key, data = self.kafka_consume_handler.consume_as_object()
-        self.subnet_id = key
+        self.source_message = self.kafka_consume_handler.consume_one()
+        data = decode_batch_record(self.source_message)
+        self.subnet_id = self.source_message.key
         if data.data:
             self.parent_row_id = data.batch_tree_row_id
             self.batch_id = data.batch_id
@@ -160,7 +155,7 @@ class Prefilter:
             )
         )
 
-        row_id = generate_collisions_resistant_uuid()
+        row_id = str(uuid.uuid4())
 
         self.batch_tree.insert(
             dict(
@@ -250,10 +245,15 @@ class Prefilter:
             ValueError: If there is no filtered data to send
         """
 
-        row_id = generate_collisions_resistant_uuid()
+        row_id = str(uuid.uuid4())
 
         if not self.filtered_data:
             logger.debug("Failed to send data: No filtered data.")
+            self.kafka_produce_handler.complete(
+                [],
+                consumer=self.kafka_consume_handler,
+                consumed_messages=[self.source_message],
+            )
             return
         data_to_send = {
             "batch_tree_row_id": row_id,
@@ -298,13 +298,19 @@ class Prefilter:
         )
 
         batch_schema = marshmallow_dataclass.class_schema(Batch)()
-        for topic in self.produce_topics:
-
-            self.kafka_produce_handler.produce(
+        records = [
+            KafkaProduceRecord(
                 topic=topic,
                 data=batch_schema.dumps(data_to_send),
                 key=self.subnet_id,
             )
+            for topic in self.produce_topics
+        ]
+        self.kafka_produce_handler.complete(
+            records,
+            consumer=self.kafka_consume_handler,
+            consumed_messages=[self.source_message],
+        )
 
         logger.info(
             f"Filtered data was successfully sent:\n"
@@ -334,7 +340,6 @@ class Prefilter:
             self.get_and_fill_data()
             self.check_data_relevance_using_rules()
             self.send_filtered_data()
-            self.kafka_consume_handler.commit()
 
     async def start(self):  # pragma: no cover
         """Starts the ``Prefilter`` processing loop.

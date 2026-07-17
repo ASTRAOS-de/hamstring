@@ -20,4 +20,4 @@ COPY src/base /app/src/base
 COPY src/alerter /app/src/alerter
 WORKDIR /app
 ENTRYPOINT ["/venv/bin/python3", "-m", "src.base.service_entrypoint"]
-CMD ["src/alerter/alerter.py"]
+CMD ["-m", "src.alerter.alerter"]

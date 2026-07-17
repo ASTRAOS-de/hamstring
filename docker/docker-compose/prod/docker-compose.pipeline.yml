@@ -1,27 +1,39 @@
+x-hamstring-kafka-environment: &hamstring-kafka-environment
+  KAFKA_PIPELINE_MODE: "${KAFKA_PIPELINE_MODE:-}"
+  KAFKA_MAX_RECORD_BYTES: "${KAFKA_MAX_RECORD_BYTES:-}"
+  KAFKA_TRANSACTION_BATCH_SIZE: "${KAFKA_TRANSACTION_BATCH_SIZE:-}"
+  KAFKA_TRANSACTION_BATCH_TIMEOUT_MS: "${KAFKA_TRANSACTION_BATCH_TIMEOUT_MS:-}"
+  KAFKA_TRANSACTION_COMMIT_TIMEOUT_MS: "${KAFKA_TRANSACTION_COMMIT_TIMEOUT_MS:-}"
+  KAFKA_TRANSACTION_TIMEOUT_MS: "${KAFKA_TRANSACTION_TIMEOUT_MS:-}"
+  KAFKA_TOPIC_PARTITIONS: "${KAFKA_TOPIC_PARTITIONS:-}"
+  KAFKA_TOPIC_REPLICATION_FACTOR: "${KAFKA_TOPIC_REPLICATION_FACTOR:-}"
+
 services:
   logserver:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-logserver:${HAMSTRING_LOGSERVER_IMAGE_TAG:-v2.2.1}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-logserver:${HAMSTRING_LOGSERVER_IMAGE_TAG:-v2.3.0}"
     restart: "unless-stopped"
     networks:
       hamstring:
     volumes:
       - ../../../config.yaml:/app/config.yaml
     environment:
-      - GROUP_ID=log_storage
-      - HAMSTRING_WAIT_FOR=kafka
+      <<: *hamstring-kafka-environment
+      GROUP_ID: log_storage
+      HAMSTRING_WAIT_FOR: kafka
   logcollector:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-logcollector:${HAMSTRING_LOGCOLLECTOR_IMAGE_TAG:-v2.2.1}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-logcollector:${HAMSTRING_LOGCOLLECTOR_IMAGE_TAG:-v2.3.0}"
     restart: "unless-stopped"
     volumes:
       - ../../../config.yaml:/app/config.yaml
     networks:
       hamstring:
     environment:
-      - GROUP_ID=log_collection
-      - HAMSTRING_WAIT_FOR=kafka
+      <<: *hamstring-kafka-environment
+      GROUP_ID: log_collection
+      HAMSTRING_WAIT_FOR: kafka
 
   prefilter:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-prefilter:${HAMSTRING_PREFILTER_IMAGE_TAG:-v2.2.1}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-prefilter:${HAMSTRING_PREFILTER_IMAGE_TAG:-v2.3.0}"
     restart: "unless-stopped"
     volumes:
       - ../../../config.yaml:/app/config.yaml
@@ -31,11 +43,12 @@ services:
       mode: "replicated"
       replicas: 1
     environment:
-      - GROUP_ID=log_filtering
-      - HAMSTRING_WAIT_FOR=kafka
+      <<: *hamstring-kafka-environment
+      GROUP_ID: log_filtering
+      HAMSTRING_WAIT_FOR: kafka
 
   inspector:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-inspector:${HAMSTRING_INSPECTOR_IMAGE_TAG:-v2.2.1}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-inspector:${HAMSTRING_INSPECTOR_IMAGE_TAG:-v2.3.0}"
     restart: "unless-stopped"
     volumes:
       - ../../../config.yaml:/app/config.yaml
@@ -52,12 +65,12 @@ services:
           cpus: '1'
           memory: 256m
     environment:
-      - GROUP_ID=data_inspection
-      - NUMBER_OF_INSTANCES=1
-      - HAMSTRING_WAIT_FOR=kafka
+      <<: *hamstring-kafka-environment
+      GROUP_ID: data_inspection
+      HAMSTRING_WAIT_FOR: kafka
 
   detector:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-detector:${HAMSTRING_DETECTOR_IMAGE_TAG:-v2.2.1}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-detector:${HAMSTRING_DETECTOR_IMAGE_TAG:-v2.3.0}"
     restart: "unless-stopped"
     volumes:
       - ../../../config.yaml:/app/config.yaml
@@ -67,11 +80,12 @@ services:
       mode: "replicated"
       replicas: 1
     environment:
-      - GROUP_ID=data_analysis
-      - HAMSTRING_WAIT_FOR=kafka
+      <<: *hamstring-kafka-environment
+      GROUP_ID: data_analysis
+      HAMSTRING_WAIT_FOR: kafka
 
   detector-gpu:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-detector:${HAMSTRING_DETECTOR_IMAGE_TAG:-v2.2.1}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-detector:${HAMSTRING_DETECTOR_IMAGE_TAG:-v2.3.0}"
     restart: "unless-stopped"
     volumes:
       - ../../../config.yaml:/app/config.yaml
@@ -87,13 +101,14 @@ services:
               count: all
               capabilities: [gpu]
     environment:
-      - GROUP_ID=data_analysis
-      - HAMSTRING_WAIT_FOR=kafka
-      - NVIDIA_VISIBLE_DEVICES=all
-      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      <<: *hamstring-kafka-environment
+      GROUP_ID: data_analysis
+      HAMSTRING_WAIT_FOR: kafka
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,utility
 
   alerter:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-alerter:${HAMSTRING_ALERTER_IMAGE_TAG:-v2.2.1}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-alerter:${HAMSTRING_ALERTER_IMAGE_TAG:-v2.3.0}"
     restart: "unless-stopped"
     volumes:
       - ../../../config.yaml:/app/config.yaml
@@ -104,5 +119,6 @@ services:
       mode: "replicated"
       replicas: 1
     environment:
-      - GROUP_ID=data_alerting
-      - HAMSTRING_WAIT_FOR=kafka
+      <<: *hamstring-kafka-environment
+      GROUP_ID: data_alerting
+      HAMSTRING_WAIT_FOR: kafka

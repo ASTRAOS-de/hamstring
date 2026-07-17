@@ -5,12 +5,13 @@ from __future__ import annotations
 import http.client
 import logging
 import os
-import socket
 import sys
 import time
 from collections.abc import Callable
 
 import yaml
+from confluent_kafka import KafkaException
+from confluent_kafka.admin import AdminClient
 
 
 logging.basicConfig(
@@ -82,11 +83,11 @@ def setup_config() -> dict:
         return yaml.safe_load(file)
 
 
-def can_connect(host: str, port: int, timeout_seconds: float) -> bool:
+def can_query_kafka(admin_client: AdminClient, timeout_seconds: float) -> bool:
     try:
-        with socket.create_connection((host, port), timeout=timeout_seconds):
-            return True
-    except OSError:
+        admin_client.list_topics(timeout=timeout_seconds)
+        return True
+    except KafkaException:
         return False
 
 
@@ -144,17 +145,16 @@ def wait_for_dependencies(dependencies: list[str]) -> None:
     for dependency in dependencies:
         if dependency == "kafka":
             endpoints = get_kafka_endpoints(config)
-            for host, port in endpoints:
-                wait_until_ready(
-                    f"kafka at {host}:{port}",
-                    lambda host=host, port=port: can_connect(
-                        host,
-                        port,
-                        timeout_seconds=2,
-                    ),
-                    timeout_seconds,
-                    interval_seconds,
-                )
+            bootstrap_servers = ",".join(
+                f"{host}:{port}" for host, port in endpoints
+            )
+            admin_client = AdminClient({"bootstrap.servers": bootstrap_servers})
+            wait_until_ready(
+                f"kafka at {bootstrap_servers}",
+                lambda: can_query_kafka(admin_client, timeout_seconds=2),
+                timeout_seconds,
+                interval_seconds,
+            )
         elif dependency == "clickhouse":
             host, port = get_clickhouse_endpoint(config)
             wait_until_ready(
@@ -172,7 +172,9 @@ def wait_for_dependencies(dependencies: list[str]) -> None:
 
 def main() -> None:
     if len(sys.argv) < 2:
-        raise SystemExit("Usage: service_entrypoint.py <python-script> [args...]")
+        raise SystemExit(
+            "Usage: python -m src.base.service_entrypoint -m <module> [args...]"
+        )
 
     wait_for_dependencies(parse_dependency_names(os.getenv("HAMSTRING_WAIT_FOR")))
     os.execv(sys.executable, [sys.executable, *sys.argv[1:]])

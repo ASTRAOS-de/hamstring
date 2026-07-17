@@ -1,51 +1,29 @@
 import unittest
-from unittest.mock import patch, Mock
+from unittest.mock import patch
 
-from src.base.kafka_handler import KafkaProduceHandler
-
-
-class TestInit(unittest.TestCase):
-    def test_successful(self):
-        # Arrange
-        conf = "test_conf"
-
-        # Act
-        with patch("src.base.kafka_handler.Producer") as mock_producer:
-            mock_producer_instance = Mock()
-            mock_producer.return_value = mock_producer_instance
-
-            sut = KafkaProduceHandler(conf)
-
-        # Assert
-        self.assertEqual(None, sut.consumer)
-        self.assertEqual(mock_producer_instance, sut.producer)
-        mock_producer.assert_called_once_with(conf)
+from src.base.kafka import KafkaProduceHandler
 
 
-class TestProduce(unittest.TestCase):
-    @patch("src.base.kafka_handler.Producer")
-    def test_not_implemented(self, mock_producer):
-        # Arrange
-        sut = KafkaProduceHandler("test_conf")
+class ConcreteProducer(KafkaProduceHandler):
+    def publish(self, records):
+        return None
 
-        # Act and Assert
-        with self.assertRaises(NotImplementedError):
-            sut.produce()
+    def complete(self, records, consumer, consumed_messages):
+        return None
 
 
-class TestDel(unittest.TestCase):
-    @patch("src.base.kafka_handler.Producer")
-    def test_not_implemented(self, mock_producer):
-        # Arrange
-        mock_producer_instance = Mock()
-        mock_producer.return_value = mock_producer_instance
-        sut = KafkaProduceHandler("test_conf")
+class TestKafkaProduceHandler(unittest.TestCase):
+    @patch("src.base.kafka.producer.Producer")
+    def test_constructs_and_explicitly_closes_producer(self, producer_type):
+        handler = ConcreteProducer({"bootstrap.servers": "kafka:9092"})
 
-        # Act
-        del sut
+        producer_type.assert_called_once_with({"bootstrap.servers": "kafka:9092"})
+        handler.close(3.5)
+        producer_type.return_value.flush.assert_called_once_with(3.5)
 
-        # Assert
-        mock_producer_instance.flush.assert_called_once()
+    def test_base_type_is_abstract(self):
+        with self.assertRaises(TypeError):
+            KafkaProduceHandler({})
 
 
 if __name__ == "__main__":

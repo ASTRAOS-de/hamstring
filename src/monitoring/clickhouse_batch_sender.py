@@ -1,30 +1,39 @@
 import datetime
 import os
-import sys
 import uuid
 from dataclasses import dataclass
-from threading import Timer, Lock
 from typing import Any, Optional, get_origin
 
 import clickhouse_connect
+from clickhouse_connect.driver.exceptions import (
+    InterfaceError,
+    OperationalError,
+    StreamClosedError,
+    StreamFailureError,
+)
 
-sys.path.append(os.getcwd())
 from src.base.log_config import get_logger
-from src.base.retry import retry_forever
+from src.base.retry import load_retry_settings, retry_forever
 from src.base.utils import setup_config
 
 logger = get_logger()
 
 CONFIG = setup_config()
+RETRY_SETTINGS = load_retry_settings(CONFIG)
 CLICKHOUSE_HOSTNAME = CONFIG["environment"]["monitoring"]["clickhouse_server"][
     "hostname"
 ]
 CLICKHOUSE_USERNAME = os.getenv("CLICKHOUSE_USER", "default")
 CLICKHOUSE_PASSWORD = os.getenv("CLICKHOUSE_PASSWORD", "hamstring")
 BATCH_SIZE = CONFIG["pipeline"]["monitoring"]["clickhouse_connector"]["batch_size"]
-BATCH_TIMEOUT = CONFIG["pipeline"]["monitoring"]["clickhouse_connector"][
-    "batch_timeout"
-]
+
+CLICKHOUSE_RETRYABLE_EXCEPTIONS = (
+    InterfaceError,
+    OperationalError,
+    StreamClosedError,
+    StreamFailureError,
+    OSError,
+)
 
 
 def create_clickhouse_client():
@@ -228,17 +237,16 @@ class ClickHouseBatchSender:
         }
 
         self.max_batch_size = BATCH_SIZE
-        self.batch_timeout = BATCH_TIMEOUT
 
-        self.timer = None
         self.batch = {key: [] for key in self.tables}
         self._client = self._connect_client()
-        self.lock = Lock()
 
     def _connect_client(self):
         return retry_forever(
             create_clickhouse_client,
             "ClickHouse client connection",
+            RETRY_SETTINGS,
+            retryable=CLICKHOUSE_RETRYABLE_EXCEPTIONS,
         )
 
     def _reset_client(self) -> None:
@@ -251,9 +259,6 @@ class ClickHouseBatchSender:
                 exception,
             )
         self._client = self._connect_client()
-
-    def __del__(self):
-        self.insert_all()
 
     def add(self, table_name: str, data: dict[str, Any]):
         """Adds the data to the batch for the table.
@@ -278,9 +283,6 @@ class ClickHouseBatchSender:
         if len(self.batch.get(table_name)) >= self.max_batch_size:
             self.insert(table_name)
 
-        if not self.timer:
-            self._start_timer()
-
     def insert(self, table_name: str):
         """Inserts the batch for the given table.
 
@@ -291,54 +293,42 @@ class ClickHouseBatchSender:
             table_name (str): Name of the table to insert data to.
         """
         if self.batch[table_name]:
-            with self.lock:
-                pending_rows = self.batch.get(table_name)
-                column_names = list(self.tables.get(table_name).columns)
+            pending_rows = self.batch.get(table_name)
+            column_names = list(self.tables.get(table_name).columns)
 
-                def insert_batch():
-                    try:
-                        self._client.insert(
-                            table_name,
-                            pending_rows,
-                            column_names=column_names,
-                        )
-                    except Exception as exception:
-                        logger.warning(
-                            "ClickHouse insert for table '%s' failed, reconnecting: %s",
-                            table_name,
-                            exception,
-                        )
-                        self._reset_client()
-                        raise
+            def insert_batch():
+                try:
+                    self._client.insert(
+                        table_name,
+                        pending_rows,
+                        column_names=column_names,
+                    )
+                except CLICKHOUSE_RETRYABLE_EXCEPTIONS as exception:
+                    logger.warning(
+                        "ClickHouse insert for table '%s' failed, reconnecting: %s",
+                        table_name,
+                        exception,
+                    )
+                    self._reset_client()
+                    raise
 
-                retry_forever(
-                    insert_batch, f"ClickHouse insert for table '{table_name}'"
-                )
-                logger.debug(f"Inserted {table_name=},{pending_rows=},{column_names=}")
-                self.batch[table_name] = []
+            retry_forever(
+                insert_batch,
+                f"ClickHouse insert for table '{table_name}'",
+                RETRY_SETTINGS,
+                retryable=CLICKHOUSE_RETRYABLE_EXCEPTIONS,
+            )
+            logger.debug(f"Inserted {table_name=},{pending_rows=},{column_names=}")
+            self.batch[table_name] = []
 
     def insert_all(self):
         """Inserts the batch for every table.
 
-        Executes batch insert operations for all tables with pending data
-        and cancels the current timer if active.
+        Executes batch insert operations for all tables with pending data.
         """
         for table in self.batch:
             self.insert(table)
 
-        if self.timer:
-            self.timer.cancel()
-
-        self.timer = None
-
-    def _start_timer(self):
-        """Sets the timer for batch processing of data insertion.
-
-        Cancels any existing timer and starts a new one that will trigger
-        batch insertion after the configured timeout period.
-        """
-        if self.timer:
-            self.timer.cancel()
-
-        self.timer = Timer(BATCH_TIMEOUT, self.insert_all)
-        self.timer.start()
+    def close(self) -> None:
+        self.insert_all()
+        self._client.close()

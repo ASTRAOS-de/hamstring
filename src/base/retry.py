@@ -2,7 +2,6 @@ import os
 import random
 import time
 from dataclasses import dataclass
-from functools import lru_cache
 from typing import Any, Callable, TypeVar
 
 from src.base.log_config import get_logger
@@ -32,16 +31,9 @@ class RetrySettings:
     log_every_attempts: int
 
 
-@lru_cache(maxsize=1)
-def _load_resilience_config() -> dict[str, Any]:
-    """Load the retry settings once for the lifetime of this process.
-
-    Retrying is used on successful high-volume producer calls as well as error
-    paths. Reading and parsing ``config.yaml`` for every call can therefore
-    become a throughput bottleneck. Configuration changes take effect after a
-    normal service restart, like the rest of the process-level configuration.
-    """
-    config = setup_config()
+def load_retry_settings(config: dict[str, Any] | None = None) -> RetrySettings:
+    """Build validated retry settings from application configuration."""
+    config = setup_config() if config is None else config
     retry_config = (
         config.get("pipeline", {}).get("resilience", {}).get("retry", {})
         if isinstance(config, dict)
@@ -50,16 +42,7 @@ def _load_resilience_config() -> dict[str, Any]:
     merged = dict(_DEFAULT_CONFIG)
     if isinstance(retry_config, dict):
         merged.update(retry_config)
-    return merged
-
-
-def resilience_config() -> dict[str, Any]:
-    """Return a copy of the cached retry settings.
-
-    The copy prevents callers from mutating the cached process configuration.
-    Tests that need fresh settings may call ``_load_resilience_config.cache_clear``.
-    """
-    return dict(_load_resilience_config())
+    return _settings_from_config(merged)
 
 
 def _settings_from_config(config: dict[str, Any]) -> RetrySettings:
@@ -71,31 +54,19 @@ def _settings_from_config(config: dict[str, Any]) -> RetrySettings:
         max_delay_seconds=max(
             initial_delay, _float_setting(config, "max_delay_seconds")
         ),
-        backoff_multiplier=max(
-            1.0, _float_setting(config, "backoff_multiplier")
-        ),
+        backoff_multiplier=max(1.0, _float_setting(config, "backoff_multiplier")),
         jitter_seconds=max(0.0, _float_setting(config, "jitter_seconds")),
         log_every_attempts=max(1, _int_setting(config, "log_every_attempts")),
     )
 
 
-@lru_cache(maxsize=1)
-def _default_retry_settings() -> RetrySettings:
-    """Return process-wide retry settings without per-message config work."""
-    return _settings_from_config(_load_resilience_config())
-
-
 def retry_forever(
     operation: Callable[[], T],
     description: str,
-    retry_config: dict[str, Any] | None = None,
+    settings: RetrySettings,
     retryable: tuple[type[BaseException], ...] = (Exception,),
+    retry_if: Callable[[BaseException], bool] | None = None,
 ) -> T:
-    settings = (
-        _settings_from_config(retry_config)
-        if retry_config is not None
-        else _default_retry_settings()
-    )
     initial_delay = settings.initial_delay_seconds
     max_delay = settings.max_delay_seconds
     multiplier = settings.backoff_multiplier
@@ -109,6 +80,8 @@ def retry_forever(
         try:
             return operation()
         except retryable as exception:
+            if retry_if is not None and not retry_if(exception):
+                raise
             attempt += 1
             if attempt == 1 or attempt % log_every == 0:
                 logger.warning(

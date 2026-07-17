@@ -2,14 +2,20 @@ import asyncio
 import datetime
 import ipaddress
 import json
-import os
-import sys
+import time
 import uuid
 
-sys.path.append(os.getcwd())
+import marshmallow_dataclass
+
 from src.base.clickhouse_kafka_sender import ClickHouseKafkaSender
-from src.base.eos import EosWorkerContext
-from src.base.kafka_handler import ExactlyOnceKafkaConsumeHandler
+from src.base.data_classes.batch import Batch
+from src.base.kafka import (
+    KAFKA_SETTINGS,
+    KafkaProduceRecord,
+    create_pipeline_consumer,
+    create_pipeline_producer,
+)
+from src.base.pipeline_routing import server_message_id_from_headers
 from src.base.logline_handler import LoglineHandler
 from src.base import utils
 from src.base.execution import (
@@ -17,9 +23,8 @@ from src.base.execution import (
     run_thread_worker_pool,
     start_pipeline_worker_replicas,
 )
-from src.logcollector.batch_handler import BufferedBatchSender
 from src.base.log_config import get_logger
-from collections import defaultdict
+from src.logcollector.batch_handler import BatchAccumulator
 
 module_name = "log_collection.collector"
 logger = get_logger(module_name)
@@ -73,23 +78,27 @@ class LogCollector:
         self.collector_name = collector_name
         self.protocol = protocol
         self.consume_topic = consume_topic
-        self.eos_context = EosWorkerContext(
+        self.worker_id = worker_id or "default"
+        self.kafka_consume_handler = create_pipeline_consumer(consume_topic)
+        self.batch_configuration = utils.get_batch_configuration(collector_name)
+        self.monitoring_kafka_producer = ClickHouseKafkaSender.create_shared_producer()
+        self.produce_topics = produce_topics
+        self.batch_handler = BatchAccumulator(
+            collector_name=collector_name,
+            monitoring_kafka_producer=self.monitoring_kafka_producer,
+        )
+        self.kafka_produce_handler = create_pipeline_producer(
             stage=module_name,
             consume_topic=consume_topic,
             instance_name=collector_name,
-            worker_id=worker_id,
+            worker_id=self.worker_id,
         )
-        self.worker_id = self.eos_context.worker_id
-        self.kafka_consume_handler = ExactlyOnceKafkaConsumeHandler(consume_topic)
-        self.batch_configuration = utils.get_batch_configuration(collector_name)
-        self.loglines = asyncio.Queue()
-        self.monitoring_kafka_producer = ClickHouseKafkaSender.create_shared_producer()
-        self.batch_handler = BufferedBatchSender(
-            produce_topics=produce_topics,
-            collector_name=collector_name,
-            monitoring_kafka_producer=self.monitoring_kafka_producer,
-            transactional_id=self.eos_context.transactional_id,
-        )
+        self.pending_source_records = []
+        self.pending_batch_started_at = None
+        self.poll_timeout_ms = max(1, int(self.batch_configuration["poll_timeout_ms"]))
+        self.max_kafka_record_bytes = KAFKA_SETTINGS.max_record_bytes
+        if self.max_kafka_record_bytes <= 0:
+            raise ValueError("max_kafka_record_bytes must be greater than zero.")
         self.logline_handler = LoglineHandler(validation_config)
 
         # databases
@@ -155,17 +164,41 @@ class LogCollector:
         """
 
         while True:
-            key, value, topic = self.kafka_consume_handler.consume()
-            logger.debug(f"From Kafka: '{value}'")
-            self.send(datetime.datetime.now(), value, server_message_id=key)
-            self.kafka_consume_handler.commit()
+            source_records = self.kafka_consume_handler.consume_batch(
+                max_messages=self.batch_configuration["batch_size"],
+                timeout_ms=self.poll_timeout_ms,
+            )
+            for source_record in source_records:
+                if source_record.value is None:
+                    raise ValueError(
+                        "Logcollector received Kafka record without a value."
+                    )
+                if not self.pending_source_records:
+                    self.pending_batch_started_at = time.monotonic()
+                self.pending_source_records.append(source_record)
+                logger.debug(f"From Kafka: '{source_record.value}'")
+                result = self.send(
+                    datetime.datetime.now(),
+                    source_record.value,
+                    server_message_id=server_message_id_from_headers(
+                        source_record.headers
+                    ),
+                )
+                if result is not None:
+                    subnet_id, message = result
+                    batch_size = self.batch_handler.add_message(subnet_id, message)
+                    if batch_size >= self.batch_configuration["batch_size"]:
+                        self._flush_pending_batches()
+
+            if self._pending_batch_timed_out():
+                self._flush_pending_batches()
 
     def send(
         self,
         timestamp_in: datetime.datetime,
         message: str,
         server_message_id: str | uuid.UUID | None = None,
-    ) -> None:
+    ) -> tuple[str, str] | None:
         """Processes and sends a log line to the batch handler after validation.
 
         This method:
@@ -250,8 +283,83 @@ class LogCollector:
                 is_active=True,
             )
         )
-        self.batch_handler.add_message(subnet_id, json.dumps(message_fields))
+        message = json.dumps(message_fields)
         logger.debug(f"Sent: {message}")
+        return subnet_id, message
+
+    def _pending_batch_timed_out(self) -> bool:
+        """Return whether the configured batch timeout elapsed."""
+        return (
+            self.pending_batch_started_at is not None
+            and time.monotonic() - self.pending_batch_started_at
+            >= self.batch_configuration["batch_timeout"]
+        )
+
+    def _flush_pending_batches(self) -> None:
+        """Publish completed batches and their source offsets atomically."""
+        if not self.pending_source_records:
+            return
+
+        schema = marshmallow_dataclass.class_schema(Batch)()
+        records = []
+        for subnet_id, data in self.batch_handler.complete_all():
+            for payload in self._serialize_batch_packets(data, schema):
+                records.extend(
+                    KafkaProduceRecord(topic=topic, data=payload, key=subnet_id)
+                    for topic in self.produce_topics
+                )
+
+        self.kafka_produce_handler.complete(
+            records,
+            consumer=self.kafka_consume_handler,
+            consumed_messages=self.pending_source_records,
+        )
+        self.pending_source_records.clear()
+        self.pending_batch_started_at = None
+
+    def _serialize_batch_packets(self, data: dict, schema) -> list[str]:
+        """Serialize one logical batch into broker-safe Kafka record payloads.
+
+        The logical collector batch may be larger than one Kafka record. Keep
+        its batch identity and split only its ``data`` list into independently
+        consumable records. Candidate payloads are serialized before measuring
+        them so JSON escaping and schema formatting cannot invalidate the limit.
+        """
+        messages = data["data"]
+        packets = []
+        current_messages = []
+        current_payload = None
+        framing_reserve = min(16_384, max(1, self.max_kafka_record_bytes // 10))
+        payload_limit = self.max_kafka_record_bytes - framing_reserve
+
+        for message in messages:
+            candidate_messages = [*current_messages, message]
+            candidate_payload = schema.dumps(
+                {**data, "data": candidate_messages}
+            )
+            if len(candidate_payload.encode("utf-8")) <= payload_limit:
+                current_messages = candidate_messages
+                current_payload = candidate_payload
+                continue
+
+            if current_payload is not None:
+                packets.append(current_payload)
+
+            single_message_payload = schema.dumps({**data, "data": [message]})
+            single_message_size = len(single_message_payload.encode("utf-8"))
+            if single_message_size > payload_limit:
+                raise ValueError(
+                    "One serialized logline packet exceeds the Kafka payload limit "
+                    f"({single_message_size}/{payload_limit} bytes). Reduce the "
+                    "logline size or increase KAFKA_MAX_RECORD_BYTES together with "
+                    "KAFKA_BROKER_MAX_RECORD_BYTES."
+                )
+            current_messages = [message]
+            current_payload = single_message_payload
+
+        if current_payload is not None:
+            packets.append(current_payload)
+        return packets
 
     @staticmethod
     def _parse_server_message_id(
@@ -288,18 +396,17 @@ class LogCollector:
             ValueError: If the address is neither IPv4 nor IPv6 address type
 
         """
-        if isinstance(address, ipaddress.IPv4Address):
-            normalized_ip_address, prefix_length = utils.normalize_ipv4_address(
-                address, self.batch_configuration["subnet_id"]["ipv4_prefix_length"]
-            )
-        elif isinstance(address, ipaddress.IPv6Address):
-            normalized_ip_address, prefix_length = utils.normalize_ipv6_address(
-                address, self.batch_configuration["subnet_id"]["ipv6_prefix_length"]
-            )
-        else:
+        if not isinstance(
+            address, (ipaddress.IPv4Address, ipaddress.IPv6Address)
+        ):
             raise ValueError("Unsupported IP address type")
 
-        return f"{normalized_ip_address}_{prefix_length}"
+        address_family = "ipv4" if address.version == 4 else "ipv6"
+        prefix_length = self.batch_configuration["subnet_id"][
+            f"{address_family}_prefix_length"
+        ]
+        network = ipaddress.ip_network((address, prefix_length), strict=False)
+        return f"{network.network_address}_{network.prefixlen}"
 
 
 def build_logcollector_worker(

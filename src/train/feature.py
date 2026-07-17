@@ -1,5 +1,3 @@
-import os
-import sys
 from string import ascii_lowercase as alc
 from typing import List
 
@@ -11,7 +9,6 @@ import itertools
 import pylcs
 import Levenshtein
 
-sys.path.append(os.getcwd())
 from src.base.log_config import get_logger
 
 logger = get_logger("train.feature")

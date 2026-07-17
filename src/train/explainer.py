@@ -1,5 +1,4 @@
 import os
-import sys
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -11,7 +10,6 @@ from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 from te2rules.explainer import ModelExplainer
 
-sys.path.append(os.getcwd())
 from src.base.log_config import get_logger
 from src.train import RESULT_FOLDER, SEED
 from src.train.dataset import Dataset

@@ -1,7 +1,8 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from src.base.clickhouse_kafka_sender import ClickHouseKafkaSender
+from src.base.kafka import KafkaProduceRecord
 
 
 class TestInit(unittest.TestCase):
@@ -10,8 +11,7 @@ class TestInit(unittest.TestCase):
     def test_init(self, mock_produce_handler, mock_marshmallow):
         # Arrange
         table_name = "test_table"
-        mock_produce_handler_instance = mock_produce_handler
-        mock_produce_handler.return_value = mock_produce_handler_instance
+        mock_produce_handler_instance = mock_produce_handler.return_value
 
         # Act
         sut = ClickHouseKafkaSender(table_name)
@@ -42,15 +42,25 @@ class TestInsert(unittest.TestCase):
     @patch("src.base.clickhouse_kafka_sender.BufferedKafkaProduceHandler")
     def test_insert(self, mock_produce_handler, mock_marshmallow):
         # Arrange
-        mock_produce_handler_instance = mock_produce_handler
+        mock_produce_handler_instance = MagicMock()
         mock_produce_handler.return_value = mock_produce_handler_instance
+        mock_marshmallow.class_schema.return_value.return_value.dumps.return_value = (
+            '{"test_key": "test_value"}'
+        )
         sut = ClickHouseKafkaSender("test_table")
 
         # Act
         sut.insert({"test_key": "test_value"})
 
         # Assert
-        mock_produce_handler_instance.produce.assert_called_once()
+        mock_produce_handler_instance.publish.assert_called_once_with(
+            [
+                KafkaProduceRecord(
+                    topic="clickhouse_test_table",
+                    data='{"test_key": "test_value"}',
+                )
+            ]
+        )
 
 
 if __name__ == "__main__":

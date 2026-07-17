@@ -1,6 +1,5 @@
 import unittest
 import asyncio
-import os
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 from unittest.mock import patch
 
@@ -18,7 +17,7 @@ class TestPipelineExecutorConfig(unittest.TestCase):
                 "scaling": {
                     "defaults": {
                         "executor": "thread",
-                        "max_workers": 3,
+                        "threads_per_process": 3,
                     }
                 }
             }
@@ -27,7 +26,7 @@ class TestPipelineExecutorConfig(unittest.TestCase):
         result = get_pipeline_executor_config(config, "data_analysis.detector")
 
         self.assertEqual("thread", result.executor)
-        self.assertEqual(3, result.max_workers)
+        self.assertEqual(3, result.total_workers)
         self.assertEqual(1, result.processes)
         self.assertEqual(3, result.threads_per_process)
 
@@ -35,7 +34,10 @@ class TestPipelineExecutorConfig(unittest.TestCase):
         config = {
             "pipeline": {
                 "scaling": {
-                    "defaults": {"executor": "thread", "max_workers": 1},
+                    "defaults": {
+                        "executor": "thread",
+                        "threads_per_process": 1,
+                    },
                     "modules": {
                         "data_analysis.detector": {
                             "executor": "process",
@@ -49,7 +51,7 @@ class TestPipelineExecutorConfig(unittest.TestCase):
         result = get_pipeline_executor_config(config, "data_analysis.detector")
 
         self.assertEqual("process", result.executor)
-        self.assertEqual(4, result.max_workers)
+        self.assertEqual(4, result.total_workers)
         self.assertEqual(4, result.processes)
         self.assertEqual(1, result.threads_per_process)
 
@@ -57,13 +59,16 @@ class TestPipelineExecutorConfig(unittest.TestCase):
         config = {
             "pipeline": {
                 "scaling": {
-                    "defaults": {"executor": "thread", "max_workers": 1},
+                    "defaults": {
+                        "executor": "thread",
+                        "threads_per_process": 1,
+                    },
                     "modules": {
                         "log_collection.collector": {
-                            "threads": 2,
+                            "threads_per_process": 2,
                             "instances": {
                                 "dga_collector": {
-                                    "threads": 5,
+                                    "threads_per_process": 5,
                                 }
                             },
                         }
@@ -77,7 +82,7 @@ class TestPipelineExecutorConfig(unittest.TestCase):
         )
 
         self.assertEqual("thread", result.executor)
-        self.assertEqual(5, result.max_workers)
+        self.assertEqual(5, result.total_workers)
         self.assertEqual(1, result.processes)
         self.assertEqual(5, result.threads_per_process)
 
@@ -101,27 +106,34 @@ class TestPipelineExecutorConfig(unittest.TestCase):
         self.assertEqual("hybrid", result.executor)
         self.assertEqual(2, result.processes)
         self.assertEqual(4, result.threads_per_process)
-        self.assertEqual(8, result.max_workers)
+        self.assertEqual(8, result.total_workers)
 
-    def test_processes_and_threads_infer_hybrid(self):
+    def test_legacy_scaling_options_are_rejected(self):
         config = {
             "pipeline": {
                 "scaling": {
-                    "modules": {
-                        "data_analysis.detector": {
-                            "processes": 2,
-                            "threads": 4,
-                        }
+                    "defaults": {"executor": "thread", "max_workers": 4}
+                }
+            }
+        }
+
+        with self.assertRaisesRegex(ValueError, "max_workers"):
+            get_pipeline_executor_config(config, "data_analysis.detector")
+
+    def test_flat_module_scaling_configuration_is_rejected(self):
+        config = {
+            "pipeline": {
+                "scaling": {
+                    "data_analysis.detector": {
+                        "executor": "thread",
+                        "threads_per_process": 4,
                     }
                 }
             }
         }
 
-        result = get_pipeline_executor_config(config, "data_analysis.detector")
-
-        self.assertEqual("hybrid", result.executor)
-        self.assertEqual(2, result.processes)
-        self.assertEqual(4, result.threads_per_process)
+        with self.assertRaisesRegex(ValueError, "data_analysis.detector"):
+            get_pipeline_executor_config(config, "data_analysis.detector")
 
     def test_process_executor_is_created(self):
         config = {
@@ -130,7 +142,7 @@ class TestPipelineExecutorConfig(unittest.TestCase):
                     "modules": {
                         "data_analysis.detector": {
                             "executor": "process",
-                            "max_workers": 2,
+                            "processes": 2,
                         }
                     }
                 }
@@ -155,7 +167,7 @@ class TestPipelineExecutorConfig(unittest.TestCase):
             "pipeline": {
                 "scaling": {
                     "defaults": {
-                        "threads": 0,
+                        "threads_per_process": 0,
                     }
                 }
             }
@@ -171,7 +183,7 @@ class TestPipelineExecutorConfig(unittest.TestCase):
                     "modules": {
                         "log_filtering.prefilter": {
                             "executor": "thread",
-                            "threads": 3,
+                            "threads_per_process": 3,
                         }
                     }
                 }
@@ -195,9 +207,6 @@ class TestPipelineExecutorConfig(unittest.TestCase):
                 target_name="run_once",
             )
 
-        with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("KAFKA_TOPIC_MIN_PARTITIONS", None)
-            asyncio.run(run_workers())
-            self.assertEqual("3", os.environ["KAFKA_TOPIC_MIN_PARTITIONS"])
+        asyncio.run(run_workers())
 
         self.assertEqual(["p0-t0", "p0-t1", "p0-t2"], sorted(worker_ids))

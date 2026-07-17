@@ -79,13 +79,19 @@ class TestEndpointDiscovery(unittest.TestCase):
 
 
 class TestReadinessChecks(unittest.TestCase):
-    @patch("src.base.service_entrypoint.socket.create_connection")
-    def test_can_connect_to_open_socket(self, mock_create_connection):
-        connection = MagicMock()
-        mock_create_connection.return_value.__enter__.return_value = connection
+    def test_can_query_kafka(self):
+        admin_client = MagicMock()
 
-        self.assertTrue(service_entrypoint.can_connect("127.0.0.1", 19092, 1))
-        mock_create_connection.assert_called_once_with(("127.0.0.1", 19092), timeout=1)
+        self.assertTrue(service_entrypoint.can_query_kafka(admin_client, 1))
+        admin_client.list_topics.assert_called_once_with(timeout=1)
+
+    def test_can_query_kafka_returns_false_for_client_error(self):
+        admin_client = MagicMock()
+        admin_client.list_topics.side_effect = service_entrypoint.KafkaException(
+            "not ready"
+        )
+
+        self.assertFalse(service_entrypoint.can_query_kafka(admin_client, 1))
 
     @patch("src.base.service_entrypoint.http.client.HTTPConnection")
     def test_can_ping_clickhouse(self, mock_http_connection):

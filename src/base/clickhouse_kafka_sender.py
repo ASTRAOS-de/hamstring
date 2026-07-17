@@ -3,16 +3,13 @@ The ClickHouseKafkaSender serves as the sender for all inserts into ClickHouse. 
 into a ClickHouse table, the ClickHouseKafkaSender is used to send the respective insert via Kafka.
 """
 
-import os
-import sys
 
 import marshmallow_dataclass
 
-sys.path.append(os.getcwd())
 from src.base.data_classes.clickhouse_connectors import TABLE_NAME_TO_TYPE
-from src.base.kafka_handler import (
+from src.base.kafka import (
     BufferedKafkaProduceHandler,
-    SimpleKafkaProduceHandler,
+    KafkaProduceRecord,
 )
 from src.base.log_config import get_logger
 
@@ -35,9 +32,7 @@ class ClickHouseKafkaSender:
     def __init__(
         self,
         table_name: str,
-        kafka_producer: (
-            BufferedKafkaProduceHandler | SimpleKafkaProduceHandler | None
-        ) = None,
+        kafka_producer: BufferedKafkaProduceHandler | None = None,
     ):
         """
         Args:
@@ -69,7 +64,11 @@ class ClickHouseKafkaSender:
             marshmallow.ValidationError: If the data does not conform to the table schema.
             KafkaException: If the Kafka message cannot be produced.
         """
-        self.kafka_producer.produce(
-            topic=f"clickhouse_{self.table_name}",
-            data=self.data_schema.dumps(data),
+        self.kafka_producer.publish(
+            [
+                KafkaProduceRecord(
+                    topic=f"clickhouse_{self.table_name}",
+                    data=self.data_schema.dumps(data),
+                )
+            ]
         )

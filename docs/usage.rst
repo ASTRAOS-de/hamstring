@@ -73,16 +73,10 @@ For the development profile, scale the ``-dev`` service names:
 
    $ HOST_IP=127.0.0.1 docker compose -f docker/docker-compose.yml --profile dev up --scale logcollector-dev=3 --scale detector-dev=2
 
-When using Compose replicas, set ``NUMBER_OF_INSTANCES`` for the scaled service to the same replica count so
-Kafka topic creation can request enough partitions for the whole consumer group:
-
-.. code-block:: yaml
-
-   services:
-     detector:
-       environment:
-         - GROUP_ID=data_analysis
-         - NUMBER_OF_INSTANCES=2
+Before scaling, configure the consumed topics with enough partitions for the
+whole consumer group. Partition counts for newly created topics live under
+``environment.kafka_topics`` in ``config.yaml``. Existing topics must be
+resized explicitly with Kafka administration tooling.
 
 The compose fragments also contain ``deploy.replicas`` fields. Use them for orchestrators that honor Compose
 ``deploy`` settings; for local ``docker compose up`` runs, the explicit ``--scale`` flag is the clearest option.
@@ -125,7 +119,7 @@ Now, you can start each module, e.g. the `Inspector`:
 
 .. code-block:: console
 
-   (.venv) $ python src/inspector/main.py
+   (.venv) $ python -m src.inspector.inspector
 
 Configuration
 -------------

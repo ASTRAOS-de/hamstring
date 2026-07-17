@@ -4,13 +4,22 @@ import unittest
 from unittest.mock import MagicMock, patch, call
 from pandas.testing import assert_frame_equal
 
-import os
-import sys
 
-sys.path.append(os.getcwd())
 
 from src.detector.plugins.domainator_attributor import DomainatorAttributor
 from src.base.data_classes.batch import Batch
+
+_PRODUCER_PATCHER = patch("src.detector.detector.create_pipeline_producer")
+
+
+def setUpModule():
+    _PRODUCER_PATCHER.start()
+
+
+def tearDownModule():
+    _PRODUCER_PATCHER.stop()
+
+
 from src.detector.plugins.domainator_utils import (
     DOMAINATOR_FEATURE_COLUMNS,
     get_domainator_features,
@@ -53,7 +62,7 @@ class TestDomainatorAttributor(unittest.TestCase):
         }
 
         with patch(
-            "src.detector.detector.ExactlyOnceKafkaConsumeHandler",
+            "src.detector.detector.create_pipeline_consumer",
             return_value=mock_kafka_handler,
         ), patch(
             "src.detector.detector.ClickHouseKafkaSender", return_value=mock_clickhouse

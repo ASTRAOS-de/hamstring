@@ -4,6 +4,7 @@ import uuid
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch, mock_open
 
+import marshmallow_dataclass
 from requests import HTTPError
 
 from src.base.data_classes.batch import Batch
@@ -14,7 +15,23 @@ from src.detector.detector import (
     build_detector_consume_topic,
     build_downstream_detector_topics,
 )
-from src.base.kafka_handler import KafkaMessageFetchException
+from src.base.kafka import ConsumedKafkaMessage, KafkaMessageFetchException
+
+_PRODUCER_PATCHER = patch("src.detector.detector.create_pipeline_producer")
+
+
+def setUpModule():
+    _PRODUCER_PATCHER.start()
+
+
+def tearDownModule():
+    _PRODUCER_PATCHER.stop()
+
+
+def consumed_batch(key: str, batch: Batch) -> ConsumedKafkaMessage:
+    payload = marshmallow_dataclass.class_schema(Batch)().dumps(batch)
+    return ConsumedKafkaMessage(key, payload, "input", 0, 0)
+
 
 MINIMAL_DETECTOR_CONFIG = {
     "name": "test-detector",
@@ -74,7 +91,7 @@ DEFAULT_DATA = {
 
 
 class TestSha256Sum(unittest.TestCase):
-    @patch("src.detector.detector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.detector.detector.create_pipeline_consumer")
     @patch("src.detector.detector.ClickHouseKafkaSender")
     @patch("src.detector.detector.DetectorBase._get_model")
     def test_sha256_empty_file(
@@ -90,7 +107,7 @@ class TestSha256Sum(unittest.TestCase):
         with self.assertRaises(FileNotFoundError):
             sut._sha256sum("")
 
-    @patch("src.detector.detector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.detector.detector.create_pipeline_consumer")
     @patch("src.detector.detector.ClickHouseKafkaSender")
     @patch("src.detector.detector.DetectorBase._get_model")
     def test_sha256_not_existing_file(
@@ -113,7 +130,7 @@ class TestGetModel(unittest.TestCase):
         self.mock_logger = patcher.start()
         self.addCleanup(patcher.stop)
 
-    @patch("src.detector.detector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.detector.detector.create_pipeline_consumer")
     @patch("src.detector.detector.ClickHouseKafkaSender")
     @patch("src.detector.detector.DetectorBase._get_model")
     def test_get_model(
@@ -127,7 +144,7 @@ class TestGetModel(unittest.TestCase):
             consume_topic="test_topic", detector_config=MINIMAL_DETECTOR_CONFIG
         )
 
-    @patch("src.detector.detector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.detector.detector.create_pipeline_consumer")
     @patch("src.detector.detector.ClickHouseKafkaSender")
     @patch("src.detector.detector.DetectorBase._get_model")
     def test_get_model_wrong_checksum(
@@ -147,7 +164,7 @@ class TestGetModel(unittest.TestCase):
 class TestInit(unittest.TestCase):
     # @patch("src.detector.detector.CONSUME_TOPIC", "test_topic")
     @patch("src.detector.detector.logger")
-    @patch("src.detector.detector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.detector.detector.create_pipeline_consumer")
     @patch("src.detector.detector.ClickHouseKafkaSender")
     @patch("src.detector.detector.DetectorBase._get_model")
     def test_init(
@@ -179,19 +196,11 @@ class TestDetectorTopicConfiguration(unittest.TestCase):
 
         self.assertEqual(["pipeline-detector_to_alerter-generic"], topics)
 
-    def test_build_alerter_topics_null_defaults_to_generic_when_enabled(self):
-        topics = build_alerter_topics(
-            {"name": "first", "produce_topics": None, "send_to_alerter": True}
-        )
-
-        self.assertEqual(["pipeline-detector_to_alerter-generic"], topics)
-
-    def test_build_alerter_topics_empty_string_defaults_to_generic_when_enabled(self):
-        topics = build_alerter_topics(
-            {"name": "first", "produce_topics": "", "send_to_alerter": True}
-        )
-
-        self.assertEqual(["pipeline-detector_to_alerter-generic"], topics)
+    def test_build_alerter_topics_rejects_non_list_configuration(self):
+        with self.assertRaisesRegex(TypeError, "produce_topics must be a list"):
+            build_alerter_topics(
+                {"name": "first", "produce_topics": "generic"}
+            )
 
     def test_build_alerter_topics_can_be_disabled(self):
         topics = build_alerter_topics(
@@ -202,7 +211,7 @@ class TestDetectorTopicConfiguration(unittest.TestCase):
 
     def test_build_downstream_detector_topics(self):
         topics = build_downstream_detector_topics(
-            {"name": "first", "next_detectors": "second, third"}
+            {"name": "first", "next_detectors": ["second", "third"]}
         )
 
         self.assertEqual(
@@ -212,6 +221,12 @@ class TestDetectorTopicConfiguration(unittest.TestCase):
             ],
             topics,
         )
+
+    def test_build_downstream_detector_topics_rejects_non_list_configuration(self):
+        with self.assertRaisesRegex(TypeError, "next_detectors must be a list"):
+            build_downstream_detector_topics(
+                {"name": "first", "next_detectors": "second"}
+            )
 
     def test_build_consume_topic_for_inspector_source(self):
         topic = build_detector_consume_topic(
@@ -227,10 +242,16 @@ class TestDetectorTopicConfiguration(unittest.TestCase):
 
         self.assertEqual("pipeline-detector_to_detector-second", topic)
 
+    def test_build_consume_topic_rejects_unknown_source(self):
+        with self.assertRaisesRegex(ValueError, "consume_from"):
+            build_detector_consume_topic(
+                {"name": "second", "consume_from": "legacy-source"}
+            )
+
 
 class TestGetData(unittest.TestCase):
     @patch("src.detector.detector.logger")
-    @patch("src.detector.detector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.detector.detector.create_pipeline_consumer")
     @patch("src.detector.detector.ClickHouseKafkaSender")
     @patch("src.detector.detector.DetectorBase._get_model")
     def test_get_data_without_return_data(
@@ -247,9 +268,8 @@ class TestGetData(unittest.TestCase):
 
         mock_kafka_consume_handler_instance = MagicMock()
         mock_kafka_consume_handler.return_value = mock_kafka_consume_handler_instance
-        mock_kafka_consume_handler_instance.consume_as_object.return_value = (
-            "test",
-            test_batch,
+        mock_kafka_consume_handler_instance.consume_one.return_value = consumed_batch(
+            "test", test_batch
         )
 
         sut = TestDetector(
@@ -261,7 +281,7 @@ class TestGetData(unittest.TestCase):
         self.assertEqual([], sut.messages)
 
     @patch("src.detector.detector.logger")
-    @patch("src.detector.detector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.detector.detector.create_pipeline_consumer")
     @patch("src.detector.detector.ClickHouseKafkaSender")
     @patch("src.detector.detector.DetectorBase._get_model")
     def test_get_data_with_return_data(
@@ -280,9 +300,8 @@ class TestGetData(unittest.TestCase):
 
         mock_kafka_consume_handler_instance = MagicMock()
         mock_kafka_consume_handler.return_value = mock_kafka_consume_handler_instance
-        mock_kafka_consume_handler_instance.consume_as_object.return_value = (
-            "192.168.1.0/24",
-            test_batch,
+        mock_kafka_consume_handler_instance.consume_one.return_value = consumed_batch(
+            "192.168.1.0/24", test_batch
         )
 
         sut = TestDetector(
@@ -296,7 +315,7 @@ class TestGetData(unittest.TestCase):
         self.assertEqual([{"test": "test_message_2"}], sut.messages)
 
     @patch("src.detector.detector.logger")
-    @patch("src.detector.detector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.detector.detector.create_pipeline_consumer")
     @patch("src.detector.detector.ClickHouseKafkaSender")
     @patch("src.detector.detector.DetectorBase._get_model")
     def test_get_data_while_busy(
@@ -335,7 +354,7 @@ class TestSendWarning(unittest.TestCase):
         self.mock_logger = patcher.start()
         self.addCleanup(patcher.stop)
 
-    @patch("src.detector.detector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.detector.detector.create_pipeline_consumer")
     @patch("src.detector.detector.ClickHouseKafkaSender")
     @patch("src.detector.detector.DetectorBase._get_model")
     def test_save_warning(
@@ -367,21 +386,20 @@ class TestSendWarning(unittest.TestCase):
         sut.suspicious_batch_id = uuid.uuid4()
         sut.messages = [{"logline_id": "test_id"}]
         sut.kafka_produce_handler = MagicMock()
-        sut.send_warning()
+        records = sut.send_warning()
 
-        sut.kafka_produce_handler.produce.assert_called_once()
-        produce_call = sut.kafka_produce_handler.produce.call_args.kwargs
-        self.assertEqual("test_produce_topic", produce_call["topic"])
-        self.assertEqual("192.168.1.1", produce_call["key"])
+        self.assertEqual(1, len(records))
+        self.assertEqual("test_produce_topic", records[0].topic)
+        self.assertEqual("192.168.1.1", records[0].key)
 
-        alert = json.loads(produce_call["data"])
+        alert = json.loads(records[0].data)
         self.assertAlmostEqual(0.50019, alert["overall_score"])
         self.assertEqual("test-detector", alert["detector_name"])
         self.assertEqual("192.168.1.1", alert["src_ip"])
         self.assertEqual(2, len(alert["result"]))
         self.assertNotIn("request", alert["result"][0])
 
-    @patch("src.detector.detector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.detector.detector.create_pipeline_consumer")
     @patch("src.detector.detector.ClickHouseKafkaSender")
     @patch("src.detector.detector.DetectorBase._get_model")
     def test_save_warning_with_nested_message_windows(
@@ -411,10 +429,10 @@ class TestSendWarning(unittest.TestCase):
         sut.messages = [request_window]
         sut.kafka_produce_handler = MagicMock()
 
-        sut.send_warning()
+        records = sut.send_warning()
 
-        sut.kafka_produce_handler.produce.assert_called_once()
-        alert = json.loads(sut.kafka_produce_handler.produce.call_args.kwargs["data"])
+        self.assertEqual(1, len(records))
+        alert = json.loads(records[0].data)
         self.assertEqual(2, alert["result"][0]["request_count"])
         self.assertEqual(
             ["one.example", "two.example"],
@@ -422,7 +440,7 @@ class TestSendWarning(unittest.TestCase):
         )
         self.assertNotIn("request", alert["result"][0])
 
-    @patch("src.detector.detector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.detector.detector.create_pipeline_consumer")
     @patch("src.detector.detector.ClickHouseKafkaSender")
     @patch("src.detector.detector.DetectorBase._get_model")
     def test_normalize_warning_for_storage_keeps_detector_output_separate(
@@ -474,7 +492,7 @@ class TestSendWarning(unittest.TestCase):
             normalized["raw_detector_output"]["predicted_class"],
         )
 
-    @patch("src.detector.detector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.detector.detector.create_pipeline_consumer")
     @patch("src.detector.detector.ClickHouseKafkaSender")
     @patch("src.detector.detector.DetectorBase._get_model")
     def test_normalize_warning_for_storage_handles_sparse_detector_output(
@@ -502,7 +520,7 @@ class TestSendWarning(unittest.TestCase):
         self.assertEqual([], normalized["logline_ids"])
         self.assertIn("request_domain", normalized["raw_detector_output"])
 
-    @patch("src.detector.detector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.detector.detector.create_pipeline_consumer")
     @patch("src.detector.detector.ClickHouseKafkaSender")
     @patch("src.detector.detector.DetectorBase._get_model")
     def test_save_empty_warning(
@@ -519,11 +537,9 @@ class TestSendWarning(unittest.TestCase):
         sut.warnings = []
         sut.messages = [{"logline_id": "test_id"}]
         sut.kafka_produce_handler = MagicMock()
-        sut.send_warning()
+        self.assertEqual([], sut.send_warning())
 
-        sut.kafka_produce_handler.produce.assert_not_called()
-
-    @patch("src.detector.detector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.detector.detector.create_pipeline_consumer")
     @patch("src.detector.detector.ClickHouseKafkaSender")
     @patch("src.detector.detector.DetectorBase._get_model")
     def test_save_warning_to_downstream_detector_without_alerter(
@@ -555,18 +571,17 @@ class TestSendWarning(unittest.TestCase):
         sut.end_timestamp = sut.begin_timestamp + timedelta(0, 3)
         sut.messages = [request]
         sut.kafka_produce_handler = MagicMock()
-        sut.send_warning()
+        records = sut.send_warning()
 
-        sut.kafka_produce_handler.produce.assert_called_once()
-        produce_call = sut.kafka_produce_handler.produce.call_args.kwargs
-        self.assertEqual("pipeline-detector_to_detector-next", produce_call["topic"])
-        self.assertEqual("192.168.1.1", produce_call["key"])
+        self.assertEqual(1, len(records))
+        self.assertEqual("pipeline-detector_to_detector-next", records[0].topic)
+        self.assertEqual("192.168.1.1", records[0].key)
 
-        downstream_batch = json.loads(produce_call["data"])
+        downstream_batch = json.loads(records[0].data)
         self.assertEqual(str(sut.suspicious_batch_id), downstream_batch["batch_id"])
         self.assertEqual([request], downstream_batch["data"])
 
-    @patch("src.detector.detector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.detector.detector.create_pipeline_consumer")
     @patch("src.detector.detector.ClickHouseKafkaSender")
     @patch("src.detector.detector.DetectorBase._get_model")
     def test_save_warning_to_alerter_and_downstream_detector(
@@ -599,12 +614,9 @@ class TestSendWarning(unittest.TestCase):
         sut.messages = [request]
         sut.kafka_produce_handler = MagicMock()
 
-        sut.send_warning()
+        records = sut.send_warning()
 
-        produced_topics = [
-            produce_call.kwargs["topic"]
-            for produce_call in sut.kafka_produce_handler.produce.call_args_list
-        ]
+        produced_topics = [record.topic for record in records]
         self.assertEqual(
             [
                 "pipeline-detector_to_alerter-generic",
@@ -613,7 +625,7 @@ class TestSendWarning(unittest.TestCase):
             produced_topics,
         )
 
-    @patch("src.detector.detector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.detector.detector.create_pipeline_consumer")
     @patch("src.detector.detector.ClickHouseKafkaSender")
     @patch("src.detector.detector.DetectorBase._get_model")
     def test_downstream_detector_batch_falls_back_to_source_messages(
@@ -645,10 +657,9 @@ class TestSendWarning(unittest.TestCase):
         sut.end_timestamp = sut.begin_timestamp + timedelta(0, 3)
         sut.messages = [request]
         sut.kafka_produce_handler = MagicMock()
-        sut.send_warning()
+        records = sut.send_warning()
 
-        produce_call = sut.kafka_produce_handler.produce.call_args.kwargs
-        downstream_batch = json.loads(produce_call["data"])
+        downstream_batch = json.loads(records[0].data)
         self.assertEqual([request], downstream_batch["data"])
 
     # @patch(
@@ -660,7 +671,7 @@ class TestSendWarning(unittest.TestCase):
     #     "src.detector.detector.MODEL_BASE_URL",
     #     "https://heibox.uni-heidelberg.de/d/0d5cbcbe16cd46a58021/",
     # )
-    @patch("src.detector.detector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.detector.detector.create_pipeline_consumer")
     @patch("src.detector.detector.ClickHouseKafkaSender")
     @patch("src.detector.detector.DetectorBase._get_model")
     def test_save_warning_error(
@@ -693,7 +704,7 @@ class TestClearData(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     @patch("src.detector.detector.logger")
-    @patch("src.detector.detector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.detector.detector.create_pipeline_consumer")
     @patch("src.detector.detector.ClickHouseKafkaSender")
     @patch("src.detector.detector.DetectorBase._get_model")
     def test_clear_data_without_existing_data(
@@ -727,7 +738,7 @@ class TestClearData(unittest.TestCase):
         self.assertEqual([], sut.messages)
 
     @patch("src.detector.detector.logger")
-    @patch("src.detector.detector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.detector.detector.create_pipeline_consumer")
     @patch("src.detector.detector.ClickHouseKafkaSender")
     @patch("src.detector.detector.DetectorBase._get_model")
     def test_clear_data_with_existing_data(
@@ -771,7 +782,7 @@ class TestGetModelMethod(unittest.TestCase):
         self.addCleanup(patcher.stop)
 
     @patch("src.detector.detector.requests.get")
-    @patch("src.detector.detector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.detector.detector.create_pipeline_consumer")
     @patch("src.detector.detector.ClickHouseKafkaSender")
     def test_get_model_downloads_and_validates(
         self, mock_clickhouse, mock_kafka_consume_handler, mock_requests_get
@@ -817,7 +828,7 @@ class TestGetModelMethod(unittest.TestCase):
                 f"downloading model {sut.model_name} from {sut.get_model_download_url()} with checksum {sut.checksum}"
             )
 
-    @patch("src.detector.detector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.detector.detector.create_pipeline_consumer")
     @patch("src.detector.detector.ClickHouseKafkaSender")
     def test_get_model_uses_existing_file(
         self, mock_clickhouse, mock_kafka_consume_handler
@@ -857,7 +868,7 @@ class TestGetModelMethod(unittest.TestCase):
             )
 
     @patch("src.detector.detector.requests.get")
-    @patch("src.detector.detector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.detector.detector.create_pipeline_consumer")
     @patch("src.detector.detector.ClickHouseKafkaSender")
     def test_get_model_raises_wrong_checksum(
         self, mock_clickhouse, mock_kafka_consume_handler, mock_requests_get
@@ -899,7 +910,7 @@ class TestGetModelMethod(unittest.TestCase):
             self.mock_logger.warning.assert_called_once()
 
     @patch("src.detector.detector.requests.get")
-    @patch("src.detector.detector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.detector.detector.create_pipeline_consumer")
     @patch("src.detector.detector.ClickHouseKafkaSender")
     def test_get_model_handles_http_error(
         self, mock_clickhouse, mock_kafka_consume_handler, mock_requests_get
@@ -940,7 +951,7 @@ class TestBootstrapDetectorInstance(unittest.TestCase):
         self.mock_logger = patcher.start()
         self.addCleanup(patcher.stop)
 
-    @patch("src.detector.detector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.detector.detector.create_pipeline_consumer")
     @patch("src.detector.detector.ClickHouseKafkaSender")
     @patch("src.detector.detector.DetectorBase._get_model")
     def test_bootstrap_normal_execution(
@@ -976,7 +987,7 @@ class TestBootstrapDetectorInstance(unittest.TestCase):
             mock_send_warning.assert_called_once()
             mock_clear_data.assert_called_once()
 
-    @patch("src.detector.detector.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.detector.detector.create_pipeline_consumer")
     @patch("src.detector.detector.ClickHouseKafkaSender")
     @patch("src.detector.detector.DetectorBase._get_model")
     def test_bootstrap_graceful_shutdown(

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from concurrent.futures import (
     FIRST_EXCEPTION,
     Executor,
@@ -12,18 +11,12 @@ from concurrent.futures import (
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from src.base.eos import build_worker_id
-
 
 @dataclass(frozen=True)
 class PipelineExecutorConfig:
     executor: str = "thread"
     processes: int = 1
     threads_per_process: int = 1
-
-    @property
-    def max_workers(self) -> int:
-        return self.total_workers
 
     @property
     def total_workers(self) -> int:
@@ -36,9 +29,14 @@ def get_pipeline_executor_config(
     instance_name: str | None = None,
 ) -> PipelineExecutorConfig:
     scaling = config.get("pipeline", {}).get("scaling", {})
+    unsupported_scaling_keys = set(scaling) - {"defaults", "modules"}
+    if unsupported_scaling_keys:
+        formatted_keys = ", ".join(sorted(unsupported_scaling_keys))
+        raise ValueError(f"Unsupported pipeline scaling section(s): {formatted_keys}")
+
     defaults = scaling.get("defaults", {})
     modules = scaling.get("modules", {})
-    module_config = modules.get(module_name, scaling.get(module_name, {}))
+    module_config = modules.get(module_name, {})
 
     merged = {}
     merged.update(defaults)
@@ -85,8 +83,6 @@ async def start_pipeline_worker_replicas(
         module_name=module_name,
         instance_name=instance_name,
     )
-    _set_topic_min_partitions(executor_config.total_workers)
-
     if executor_config.executor == "thread":
         await _start_thread_workers(
             worker_factory=worker_factory,
@@ -172,20 +168,9 @@ async def _start_thread_workers(
         executor.shutdown(wait=False, cancel_futures=True)
 
 
-def _set_topic_min_partitions(total_workers: int) -> None:
-    try:
-        service_instances = int(os.getenv("NUMBER_OF_INSTANCES", "1"))
-    except ValueError:
-        service_instances = 1
-
-    requested_partitions = max(1, total_workers * max(1, service_instances))
-    try:
-        current_partitions = int(os.getenv("KAFKA_TOPIC_MIN_PARTITIONS", "1"))
-    except ValueError:
-        current_partitions = 1
-    os.environ["KAFKA_TOPIC_MIN_PARTITIONS"] = str(
-        max(current_partitions, requested_partitions)
-    )
+def build_worker_id(process_index: int, thread_index: int) -> str:
+    """Return the explicit identity for one process/thread worker."""
+    return f"p{process_index}-t{thread_index}"
 
 
 def _without_instances(config: dict[str, Any]) -> dict[str, Any]:
@@ -193,85 +178,33 @@ def _without_instances(config: dict[str, Any]) -> dict[str, Any]:
 
 
 def _parse_executor_config(config: dict[str, Any]) -> PipelineExecutorConfig:
-    executor = _normalize_executor_name(
-        config.get("executor", config.get("executor_type", config.get("type")))
-    )
-    if executor is None:
-        executor = _infer_executor(config)
-    elif (
-        executor == "process"
-        and _has_explicit_process_count(config)
-        and _read_threads_per_process(config, default=1) > 1
-    ):
-        executor = "hybrid"
+    supported_keys = {"executor", "processes", "threads_per_process"}
+    unsupported_keys = set(config) - supported_keys
+    if unsupported_keys:
+        formatted_keys = ", ".join(sorted(unsupported_keys))
+        raise ValueError(f"Unsupported pipeline scaling option(s): {formatted_keys}")
 
-    processes = _read_process_count(config, executor)
-    threads_per_process = _read_threads_per_process(
-        config,
-        default=1 if executor == "process" else None,
+    executor = str(config.get("executor", "thread")).strip().lower()
+    if executor not in {"thread", "process", "hybrid"}:
+        raise ValueError(
+            "Pipeline executor must be one of: thread, process, hybrid"
+        )
+
+    processes = (
+        _read_positive_int(config.get("processes", 1))
+        if executor in {"process", "hybrid"}
+        else 1
+    )
+    threads_per_process = (
+        _read_positive_int(config.get("threads_per_process", 1))
+        if executor in {"thread", "hybrid"}
+        else 1
     )
     return PipelineExecutorConfig(
         executor=executor,
         processes=processes,
         threads_per_process=threads_per_process,
     )
-
-
-def _normalize_executor_name(value: Any) -> str | None:
-    if value is None:
-        return None
-
-    normalized = str(value).strip().lower().replace("_", "-")
-    if normalized in {"thread", "threads", "thread-pool", "threadpool"}:
-        return "thread"
-    if normalized in {"process", "processes", "process-pool", "processpool"}:
-        return "process"
-    if normalized in {"hybrid", "mixed", "process-thread", "process-thread-pool"}:
-        return "hybrid"
-
-    raise ValueError(
-        "Pipeline executor must be one of: thread, threads, thread-pool, "
-        "process, processes, process-pool, hybrid"
-    )
-
-
-def _infer_executor(config: dict[str, Any]) -> str:
-    if _has_explicit_process_count(config) and _has_explicit_thread_count(config):
-        return "hybrid"
-    if _has_explicit_process_count(config):
-        return "process"
-    return "thread"
-
-
-def _read_process_count(config: dict[str, Any], executor: str) -> int:
-    if executor == "thread":
-        return 1
-
-    worker_value = config.get("processes")
-    if worker_value is None and executor == "process":
-        worker_value = config.get("max_workers", config.get("workers"))
-    if worker_value is None:
-        worker_value = 1
-
-    return _read_positive_int(worker_value)
-
-
-def _read_threads_per_process(
-    config: dict[str, Any],
-    default: int | None,
-) -> int:
-    worker_value = config.get("threads_per_process")
-    if worker_value is None:
-        worker_value = config.get("threads")
-    if worker_value is None:
-        if default is None:
-            worker_value = config.get("max_workers", config.get("workers"))
-        else:
-            worker_value = default
-    if worker_value is None:
-        worker_value = 1
-
-    return _read_positive_int(worker_value)
 
 
 def _read_positive_int(value: Any) -> int:
@@ -283,14 +216,6 @@ def _read_positive_int(value: Any) -> int:
     if parsed_value < 1:
         raise ValueError("Pipeline executor worker count must be at least 1")
     return parsed_value
-
-
-def _has_explicit_process_count(config: dict[str, Any]) -> bool:
-    return "processes" in config
-
-
-def _has_explicit_thread_count(config: dict[str, Any]) -> bool:
-    return "threads" in config or "threads_per_process" in config
 
 
 def _thread_name_prefix(module_name: str, instance_name: str | None) -> str:

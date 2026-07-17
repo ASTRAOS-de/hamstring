@@ -130,8 +130,9 @@ The `Log Collection` stage comprises three main classes:
    and content. Adds ``subnet_id`` that it retrieves from the client's IP address in the logline.
 2. :class:`BufferedBatch`: Buffers validated loglines with respect to their ``subnet_id``. Maintains the timestamps for
    accurate processing and analysis per key (``subnet_id``). Returns sorted batches.
-3. :class:`BufferedBatchSender`: Adds messages to the data structure :class:`BufferedBatch`, maintains the timer
-   and checks the fill level of the key-specific batches. Sends the key's batches if full, sends all batches at timeout.
+3. :class:`BatchAccumulator`: Adds messages to :class:`BufferedBatch` and
+   completes buffered data on request. The :class:`LogCollector` owns Kafka
+   polling, timeout decisions, publication, and source-offset acknowledgement.
 
 Main Classes
 ------------
@@ -143,7 +144,7 @@ Main Classes
 .. autoclass:: BufferedBatch
 
 .. py:currentmodule:: src.logcollector.batch_handler
-.. autoclass:: BufferedBatchSender
+.. autoclass:: BatchAccumulator
 
 Usage
 -----
@@ -159,7 +160,7 @@ allowing for multiprocessing and threading.
 - **Field Validation**:
 
   - Checks include data type verification and value range checks (e.g., verifying that an IP address is valid).
-  - Only loglines meeting the criteria are forwarded to the :class:`BufferedBatchSender`.
+  - Only loglines meeting the criteria are forwarded to the :class:`BatchAccumulator`.
 
 - **Subnet Identification**:
 
@@ -295,26 +296,29 @@ The :class:`BufferedBatch` manages the buffering of validated loglines as well a
   - Maintains fill level statistics for both batches and buffers.
   - Records batch status changes (waiting, completed) with timestamps.
 
-BufferedBatchSender
-...................
+BatchAccumulator
+................
 
-The :class:`BufferedBatchSender` manages the sending of validated loglines stored in the :class:`BufferedBatch`:
+The :class:`BatchAccumulator` manages validated loglines stored in the
+:class:`BufferedBatch`. It deliberately does not own a Kafka producer or a
+background timer:
 
-- **Timer-based and Size-based Triggers**:
+- **Timeout and Size Triggers**:
 
-  - Starts a timer upon receiving the first log entry.
-  - When a batch reaches the configured size (e.g., 1000 entries), the current and previous
-    batches of this key are concatenated and sent to the Kafka topic ``batch_sender_to_prefilter``.
-  - Upon timer expiration, the currently stored batches of all keys are sent. Serves as backup if batches don't reach
-    the configured size.
-  - If no messages are present when the timer expires, nothing is sent.
+  - The collector checks accumulated size after each input record and checks
+    elapsed batch time after every bounded Kafka poll.
+  - When either limit is reached, the accumulator completes the current and
+    previous buffered data for each key.
+  - The collector serializes broker-safe packets and passes them to its selected
+    simple or exactly-once producer together with the consumed source records.
+  - If no messages are present when the timeout check runs, nothing is sent.
 
 - **Message Processing and Monitoring**:
 
   - Extracts logline IDs from JSON messages for tracking purposes.
   - Logs processing timestamps (in_process, batched) for each message.
   - Provides detailed logging about the number of messages and batches sent.
-  - Uses the Batch schema for serialization before sending to Kafka.
+  - Returns Batch-compatible dictionaries for serialization by the collector.
 
 Configuration
 -------------
@@ -757,12 +761,12 @@ You may use the provided, pre-trained models or supply your own. To use a custom
 - `model`: model name
 - `checksum`: SHA256 digest for integrity validation
 - `threshold`: probability threshold for classifying a request as malicious
-- `inspector_name`: name of the inspector configuration for input. Omit this or set `consume_from: detector` when consuming from another detector.
-- `consume_from`: use `detector` to consume from the detector-to-detector topic for this detector instance
+- `inspector_name`: name of the inspector configuration for input. Omit it when `consume_from: detector`.
+- `consume_from`: accepts only `inspector` (default) or `detector`; the latter consumes from the detector-to-detector topic for this detector instance
 - `detector_module_name`: name of the python module the implementation details reside
 - `detector_class_name`: name of the class in the python module to load the detector implementation details
-- `produce_topics`: (Optional) Comma-separated list of topic suffixes to produce alerts to. If left empty, alerts are sent to the ``generic`` alerter topic. Use `send_to_alerter: false` or `produce_topics: []` for intermediary detectors that should not produce to an alerter.
-- `next_detectors`: (Optional) Comma-separated list of detector instance names that receive this detector's suspicious output.
+- `produce_topics`: optional YAML list of topic suffixes. An omitted or empty list sends alerts to the ``generic`` alerter topic. Use `send_to_alerter: false` for intermediary detectors that should not produce to an alerter.
+- `next_detectors`: optional YAML list of detector instance names that receive this detector's suspicious output.
 
 These parameters are loaded at startup and used to download, verify, and load the model/scaler if not already cached locally (in temp directory).
 
@@ -771,7 +775,7 @@ Detector Chaining
 
 Detector instances can be chained by setting ``next_detectors`` on the upstream detector and ``consume_from: detector`` on the downstream detector. Detector-to-detector topics use the naming pattern ``[detector_to_detector_prefix]-[detector_name]``.
 
-For intermediary detectors that should only forward suspicious output to another detector, set ``send_to_alerter: false`` or ``produce_topics: []``.
+For intermediary detectors that should only forward suspicious output to another detector, set ``send_to_alerter: false``.
 
 Domainator Detector Models
 --------------------------

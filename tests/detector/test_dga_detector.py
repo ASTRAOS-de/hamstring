@@ -6,6 +6,16 @@ from unittest.mock import MagicMock, patch, call
 from src.detector.plugins.dga_detector import DGADetector
 from src.base.data_classes.batch import Batch
 
+_PRODUCER_PATCHER = patch("src.detector.detector.create_pipeline_producer")
+
+
+def setUpModule():
+    _PRODUCER_PATCHER.start()
+
+
+def tearDownModule():
+    _PRODUCER_PATCHER.stop()
+
 
 DEFAULT_DATA = {
     "src_ip": "192.168.0.167",
@@ -43,7 +53,7 @@ class TestDGADetector(unittest.TestCase):
         }
 
         with patch(
-            "src.detector.detector.ExactlyOnceKafkaConsumeHandler",
+            "src.detector.detector.create_pipeline_consumer",
             return_value=mock_kafka_handler,
         ), patch(
             "src.detector.detector.ClickHouseKafkaSender", return_value=mock_clickhouse

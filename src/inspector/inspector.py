@@ -1,6 +1,4 @@
 import importlib
-import os
-import sys
 import uuid
 from datetime import datetime
 from enum import Enum, unique
@@ -10,20 +8,19 @@ import marshmallow_dataclass
 import numpy as np
 from streamad.util import StreamGenerator, CustomDS
 
-sys.path.append(os.getcwd())
 from src.base.clickhouse_kafka_sender import ClickHouseKafkaSender
 from src.base.data_classes.batch import Batch
 from src.base.utils import (
     setup_config,
     get_zeek_sensor_topic_base_names,
-    generate_collisions_resistant_uuid,
 )
 from src.base.acceleration import resolve_acceleration_config
-from src.base.eos import EosWorkerContext
-from src.base.kafka_handler import (
-    ExactlyOnceKafkaConsumeHandler,
-    ExactlyOnceKafkaProduceHandler,
+from src.base.kafka import (
     KafkaMessageFetchException,
+    KafkaProduceRecord,
+    create_pipeline_consumer,
+    create_pipeline_producer,
+    decode_batch_record,
 )
 from src.base.log_config import get_logger
 from src.base.execution import (
@@ -52,7 +49,9 @@ PLUGIN_PATH = "src.inspector.plugins"
 
 class InspectorAbstractBase(ABC):  # pragma: no cover
     @abstractmethod
-    def __init__(self, consume_topic, produce_topics, config, worker_id="default") -> None:
+    def __init__(
+        self, consume_topic, produce_topics, config, worker_id="default"
+    ) -> None:
         pass
 
     @abstractmethod
@@ -71,7 +70,9 @@ class InspectorAbstractBase(ABC):  # pragma: no cover
 class InspectorBase(InspectorAbstractBase):
     """Finds anomalies in a batch of requests and produces it to the ``Detector``."""
 
-    def __init__(self, consume_topic, produce_topics, config) -> None:
+    def __init__(
+        self, consume_topic, produce_topics, config, worker_id="default"
+    ) -> None:
         """
         Initializes the InspectorBase with necessary configurations and connections.
 
@@ -99,13 +100,7 @@ class InspectorBase(InspectorAbstractBase):
             self.time_type = config["time_type"]
             self.time_range = config["time_range"]
         self.name = config["name"]
-        self.eos_context = EosWorkerContext(
-            stage=module_name,
-            consume_topic=consume_topic,
-            instance_name=self.name,
-            worker_id=worker_id,
-        )
-        self.worker_id = self.eos_context.worker_id
+        self.worker_id = worker_id or "default"
         self.acceleration = resolve_acceleration_config(
             globals()["config"].get("pipeline", {}),
             config,
@@ -119,13 +114,17 @@ class InspectorBase(InspectorAbstractBase):
         self.key = None
         self.begin_timestamp = None
         self.end_timestamp = None
+        self.source_message = None
 
         self.messages = []
         self.anomalies = []
 
-        self.kafka_consume_handler = ExactlyOnceKafkaConsumeHandler(self.consume_topic)
-        self.kafka_produce_handler = self.eos_context.create_producer(
-            ExactlyOnceKafkaProduceHandler
+        self.kafka_consume_handler = create_pipeline_consumer(self.consume_topic)
+        self.kafka_produce_handler = create_pipeline_producer(
+            stage=module_name,
+            consume_topic=consume_topic,
+            instance_name=self.name,
+            worker_id=self.worker_id,
         )
         self.monitoring_kafka_producer = ClickHouseKafkaSender.create_shared_producer()
 
@@ -172,7 +171,9 @@ class InspectorBase(InspectorAbstractBase):
             )
             return
 
-        key, data = self.kafka_consume_handler.consume_as_object()
+        self.source_message = self.kafka_consume_handler.consume_one()
+        data = decode_batch_record(self.source_message)
+        key = self.source_message.key
         if data:
             self.parent_row_id = data.batch_tree_row_id
             self.batch_id = data.batch_id
@@ -192,7 +193,7 @@ class InspectorBase(InspectorAbstractBase):
             )
         )
 
-        row_id = generate_collisions_resistant_uuid()
+        row_id = str(uuid.uuid4())
 
         self.batch_tree.insert(
             dict(
@@ -246,7 +247,8 @@ class InspectorBase(InspectorAbstractBase):
         forwards each group as a suspicious batch to the Detector via Kafka. Otherwise,
         logs the batch as filtered out and updates monitoring databases.
         """
-        row_id = generate_collisions_resistant_uuid()
+        row_id = str(uuid.uuid4())
+        records = []
         if self.subnet_is_suspicious():
             buckets = {}
             for message in self.messages:
@@ -303,12 +305,14 @@ class InspectorBase(InspectorAbstractBase):
                         batch_id=suspicious_batch_id,
                     )
                 )
-                for topic in self.produce_topics:
-                    self.kafka_produce_handler.produce(
+                records.extend(
+                    KafkaProduceRecord(
                         topic=topic,
                         data=batch_schema.dumps(data_to_send),
                         key=key,
                     )
+                    for topic in self.produce_topics
+                )
 
         else:  # subnet is not suspicious
 
@@ -358,6 +362,11 @@ class InspectorBase(InspectorAbstractBase):
                 entry_count=0,
             )
         )
+        self.kafka_produce_handler.complete(
+            records,
+            consumer=self.kafka_consume_handler,
+            consumed_messages=[self.source_message],
+        )
 
     def inspect(self):
         """
@@ -396,7 +405,6 @@ class InspectorBase(InspectorAbstractBase):
                 self.get_and_fill_data()
                 self.inspect()
                 self.send_data()
-                self.kafka_consume_handler.commit()
             except KafkaMessageFetchException as e:  # pragma: no cover
                 logger.debug(e)
             except IOError as e:

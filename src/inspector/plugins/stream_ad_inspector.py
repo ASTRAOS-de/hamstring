@@ -1,13 +1,10 @@
 from src.inspector.inspector import InspectorBase
 import importlib
-import os
-import sys
 from datetime import datetime
 import numpy as np
 from streamad.util import StreamGenerator, CustomDS
 
 # TODO: test all of this!
-sys.path.append(os.getcwd())
 from src.base.acceleration import apply_model_acceleration
 from src.base.utils import setup_config
 from src.base.log_config import get_logger

@@ -20,4 +20,4 @@ COPY src/base /app/src/base
 COPY src/prefilter /app/src/prefilter
 WORKDIR /app
 ENTRYPOINT ["/venv/bin/python3", "-m", "src.base.service_entrypoint"]
-CMD ["src/prefilter/prefilter.py"]
+CMD ["-m", "src.prefilter.prefilter"]

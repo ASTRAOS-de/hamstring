@@ -1,157 +1,34 @@
 import unittest
-from unittest.mock import patch, Mock
-from confluent_kafka import KafkaError
-from src.base.kafka_handler import SimpleKafkaConsumeHandler
+from unittest.mock import patch
+
+from src.base.kafka import ConsumedKafkaMessage, SimpleKafkaConsumeHandler
+from tests.kafka.test_kafka_consume_handler import kafka_message
 
 
-class TestInit(unittest.TestCase):
-    @patch("src.base.kafka_handler.CONSUMER_GROUP_ID", "test_group_id")
-    @patch(
-        "src.base.kafka_handler.KAFKA_BROKERS",
-        [
-            {
-                "hostname": "127.0.0.1",
-                "internal_port": 9999,
-            },
-            {
-                "hostname": "127.0.0.2",
-                "internal_port": 9998,
-            },
-            {
-                "hostname": "127.0.0.3",
-                "internal_port": 9997,
-            },
-        ],
-    )
-    @patch(
-        "src.base.kafka_handler.KafkaConsumeHandler._all_topics_created",
-        return_value=True,
-    )
-    @patch("src.base.kafka_handler.AdminClient")
-    @patch("src.base.kafka_handler.Consumer")
-    def test_init_successful(
-        self, mock_consumer, mock_admin_client, mock_all_topics_created
+class TestSimpleKafkaConsumeHandler(unittest.TestCase):
+    @patch("src.base.kafka.consumer.KafkaTopicManager")
+    @patch("src.base.kafka.consumer.AdminClient")
+    @patch("src.base.kafka.consumer.Consumer")
+    def test_consume_one_uses_common_record_contract(
+        self, consumer_type, admin_type, ensure_topics
     ):
-        # Arrange
-        mock_consumer_instance = Mock()
-        mock_consumer.return_value = mock_consumer_instance
+        consumer_type.return_value.consume.return_value = [kafka_message()]
+        handler = SimpleKafkaConsumeHandler("input")
 
-        expected_conf = {
-            "bootstrap.servers": "127.0.0.1:9999,127.0.0.2:9998,127.0.0.3:9997",
-            "group.id": "test_group_id.test_topic",
-            "enable.auto.commit": False,
-            "auto.offset.reset": "earliest",
-            "enable.partition.eof": True,
-            "max.poll.interval.ms": 1800000,
-        }
+        self.assertEqual(
+            ConsumedKafkaMessage("key", "value", "input", 2, 7),
+            handler.consume_one(),
+        )
 
-        # Act
-        sut = SimpleKafkaConsumeHandler(topics="test_topic")
+    @patch("src.base.kafka.consumer.KafkaTopicManager")
+    @patch("src.base.kafka.consumer.AdminClient")
+    @patch("src.base.kafka.consumer.Consumer")
+    def test_simple_mode_does_not_request_read_committed(
+        self, consumer_type, admin_type, ensure_topics
+    ):
+        handler = SimpleKafkaConsumeHandler("input")
 
-        # Assert
-        self.assertEqual(mock_consumer_instance, sut.consumer)
-
-        mock_consumer.assert_called_once_with(expected_conf)
-        mock_consumer_instance.subscribe.assert_called_once()
-
-
-class TestConsume(unittest.TestCase):
-    @patch("src.base.kafka_handler.CONSUMER_GROUP_ID", "test_group_id")
-    @patch(
-        "src.base.kafka_handler.KAFKA_BROKERS",
-        [
-            {
-                "hostname": "127.0.0.1",
-                "internal_port": 9999,
-            },
-            {
-                "hostname": "127.0.0.2",
-                "internal_port": 9998,
-            },
-            {
-                "hostname": "127.0.0.3",
-                "internal_port": 9997,
-            },
-        ],
-    )
-    @patch(
-        "src.base.kafka_handler.KafkaConsumeHandler._all_topics_created",
-        return_value=True,
-    )
-    @patch("src.base.kafka_handler.AdminClient")
-    @patch("src.base.kafka_handler.Consumer")
-    def setUp(self, mock_consumer, mock_admin_client, mock_all_topics_created):
-        self.mock_consumer = mock_consumer
-        self.topics = ["test_topic_1", "test_topic_2"]
-        self.sut = SimpleKafkaConsumeHandler(self.topics)
-
-    def test_no_messages_polling(self):
-        self.sut.consumer.poll.side_effect = [None, None, None, StopIteration]
-
-        result = None
-        try:
-            result = self.sut.consume()
-        except StopIteration:
-            pass
-
-        self.assertIsNone(result)
-
-    def test_consumer_error_partition_eof(self):
-        eof_error = Mock()
-        eof_error.code.return_value = KafkaError._PARTITION_EOF
-
-        msg = Mock()
-        msg.error.return_value = eof_error
-        self.sut.consumer.poll.side_effect = [msg, StopIteration]
-
-        result = None
-        try:
-            result = self.sut.consume()
-        except StopIteration:
-            pass
-
-        self.assertIsNone(result)
-
-    def test_consumer_raises_other_error(self):
-        other_error = Mock()
-        other_error.retriable.return_value = False
-        other_error.code.return_value = 123456
-
-        msg = Mock()
-        msg.error.return_value = other_error
-
-        self.sut.consumer.poll.side_effect = [msg]
-
-        with self.assertRaises(Exception):
-            self.sut.consume()
-
-    def test_message_processing(self):
-        key = "test_key"
-        value = "test_value"
-        topic = "test_topic"
-
-        msg = Mock()
-        msg.key.return_value = key.encode("utf-8")
-        msg.value.return_value = value.encode("utf-8")
-        msg.topic.return_value = topic
-        msg.error.return_value = None
-
-        self.sut.consumer.poll.side_effect = [msg, StopIteration]
-
-        result = None
-        try:
-            result = self.sut.consume()
-        except StopIteration:
-            pass
-
-        self.assertEqual((key, value, topic), result)
-
-    def test_consumer_raises_keyboard_interrupt(self):
-        self.sut.consumer.poll.side_effect = [KeyboardInterrupt]
-
-        self.sut.consume()
-
-        self.assertTrue(True)
+        self.assertNotIn("isolation.level", handler.conf)
 
 
 if __name__ == "__main__":

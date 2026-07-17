@@ -3,16 +3,27 @@ import unittest
 import uuid
 from unittest.mock import MagicMock, patch, AsyncMock, call
 
+import marshmallow_dataclass
+
 from src.base.data_classes.batch import Batch
-from src.base.kafka_handler import KafkaMessageFetchException
+from src.base.kafka import (
+    ConsumedKafkaMessage,
+    KafkaMessageFetchException,
+    KafkaProduceRecord,
+)
 from src.prefilter.prefilter import Prefilter, main
+
+
+def consumed_batch(key: str | None, batch: Batch) -> ConsumedKafkaMessage:
+    payload = marshmallow_dataclass.class_schema(Batch)().dumps(batch)
+    return ConsumedKafkaMessage(key, payload, "input", 0, 0)
 
 
 class TestBootstrapPrefilteringProcess(unittest.TestCase):
     @patch("src.prefilter.prefilter.logger")
     @patch("src.prefilter.prefilter.LoglineHandler")
-    @patch("src.prefilter.prefilter.ExactlyOnceKafkaConsumeHandler")
-    @patch("src.prefilter.prefilter.ExactlyOnceKafkaProduceHandler")
+    @patch("src.prefilter.prefilter.create_pipeline_consumer")
+    @patch("src.prefilter.prefilter.create_pipeline_producer")
     @patch("src.prefilter.prefilter.ClickHouseKafkaSender")
     def test_bootstrap_prefiltering_process_one_iteration(
         self,
@@ -31,14 +42,14 @@ class TestBootstrapPrefilteringProcess(unittest.TestCase):
         mock_produce_handler.return_value = mock_produce_handler_instance
         mock_consume_handler_instance = MagicMock()
         mock_consume_handler.return_value = mock_consume_handler_instance
-        mock_consume_handler_instance.consume_as_object.return_value = (
+        mock_consume_handler_instance.consume_one.return_value = consumed_batch(
             "127.0.0.0_24",
             Batch(
                 batch_tree_row_id=f"{uuid.uuid4()}-{uuid.uuid4()}",
                 batch_id=uuid.uuid4(),
                 begin_timestamp=datetime.datetime.now(),
                 end_timestamp=datetime.datetime.now(),
-                data=["test_data_1", "test_data_2"],
+                data=[{"test": "test_data_1"}, {"test": "test_data_2"}],
             ),
         )
 
@@ -87,8 +98,8 @@ class TestBootstrapPrefilteringProcess(unittest.TestCase):
 
     @patch("src.prefilter.prefilter.logger")
     @patch("src.prefilter.prefilter.LoglineHandler")
-    @patch("src.prefilter.prefilter.ExactlyOnceKafkaConsumeHandler")
-    @patch("src.prefilter.prefilter.ExactlyOnceKafkaProduceHandler")
+    @patch("src.prefilter.prefilter.create_pipeline_consumer")
+    @patch("src.prefilter.prefilter.create_pipeline_producer")
     @patch("src.prefilter.prefilter.ClickHouseKafkaSender")
     def test_bootstrap_prefiltering_process_with_filtering(
         self,
@@ -120,7 +131,7 @@ class TestBootstrapPrefilteringProcess(unittest.TestCase):
         mock_produce_handler.return_value = mock_produce_handler_instance
         mock_consume_handler_instance = MagicMock()
         mock_consume_handler.return_value = mock_consume_handler_instance
-        mock_consume_handler_instance.consume_as_object.return_value = (
+        mock_consume_handler_instance.consume_one.return_value = consumed_batch(
             "127.0.0.0_24",
             Batch(
                 batch_tree_row_id=f"{uuid.uuid4()}-{uuid.uuid4()}",
@@ -169,8 +180,8 @@ class TestBootstrapPrefilteringProcess(unittest.TestCase):
 
     @patch("src.prefilter.prefilter.logger")
     @patch("src.prefilter.prefilter.LoglineHandler")
-    @patch("src.prefilter.prefilter.ExactlyOnceKafkaConsumeHandler")
-    @patch("src.prefilter.prefilter.ExactlyOnceKafkaProduceHandler")
+    @patch("src.prefilter.prefilter.create_pipeline_consumer")
+    @patch("src.prefilter.prefilter.create_pipeline_producer")
     @patch("src.prefilter.prefilter.ClickHouseKafkaSender")
     def test_bootstrap_prefiltering_process_with_empty_data(
         self,
@@ -189,7 +200,7 @@ class TestBootstrapPrefilteringProcess(unittest.TestCase):
         mock_produce_handler.return_value = mock_produce_handler_instance
         mock_consume_handler_instance = MagicMock()
         mock_consume_handler.return_value = mock_consume_handler_instance
-        mock_consume_handler_instance.consume_as_object.return_value = (
+        mock_consume_handler_instance.consume_one.return_value = consumed_batch(
             "127.0.0.0_24",
             Batch(
                 batch_tree_row_id=f"{uuid.uuid4()}-{uuid.uuid4()}",
@@ -225,8 +236,8 @@ class TestBootstrapPrefilteringProcess(unittest.TestCase):
 
 class TestInit(unittest.TestCase):
     @patch("src.prefilter.prefilter.LoglineHandler")
-    @patch("src.prefilter.prefilter.ExactlyOnceKafkaConsumeHandler")
-    @patch("src.prefilter.prefilter.ExactlyOnceKafkaProduceHandler")
+    @patch("src.prefilter.prefilter.create_pipeline_consumer")
+    @patch("src.prefilter.prefilter.create_pipeline_producer")
     @patch("src.prefilter.prefilter.ClickHouseKafkaSender")
     def test_valid_init(
         self,
@@ -259,8 +270,8 @@ class TestInit(unittest.TestCase):
 class TestGetAndFillData(unittest.TestCase):
     @patch("src.prefilter.prefilter.logger")
     @patch("src.prefilter.prefilter.LoglineHandler")
-    @patch("src.prefilter.prefilter.ExactlyOnceKafkaConsumeHandler")
-    @patch("src.prefilter.prefilter.ExactlyOnceKafkaProduceHandler")
+    @patch("src.prefilter.prefilter.create_pipeline_consumer")
+    @patch("src.prefilter.prefilter.create_pipeline_producer")
     @patch("src.prefilter.prefilter.ClickHouseKafkaSender")
     def test_get_data_without_new_data(
         self,
@@ -274,7 +285,7 @@ class TestGetAndFillData(unittest.TestCase):
         mock_produce_handler.return_value = mock_produce_handler_instance
         mock_consume_handler_instance = MagicMock()
         mock_consume_handler.return_value = mock_consume_handler_instance
-        mock_consume_handler_instance.consume_as_object.return_value = (
+        mock_consume_handler_instance.consume_one.return_value = consumed_batch(
             None,
             Batch(
                 batch_tree_row_id=f"{uuid.uuid4()}-{uuid.uuid4()}",
@@ -298,12 +309,12 @@ class TestGetAndFillData(unittest.TestCase):
         self.assertEqual([], sut.filtered_data)
         self.assertEqual(None, sut.subnet_id)
 
-        mock_consume_handler_instance.consume_as_object.assert_called_once()
+        mock_consume_handler_instance.consume_one.assert_called_once()
 
     @patch("src.prefilter.prefilter.logger")
     @patch("src.prefilter.prefilter.LoglineHandler")
-    @patch("src.prefilter.prefilter.ExactlyOnceKafkaConsumeHandler")
-    @patch("src.prefilter.prefilter.ExactlyOnceKafkaProduceHandler")
+    @patch("src.prefilter.prefilter.create_pipeline_consumer")
+    @patch("src.prefilter.prefilter.create_pipeline_producer")
     @patch("src.prefilter.prefilter.ClickHouseKafkaSender")
     def test_get_data_with_new_data(
         self,
@@ -317,14 +328,14 @@ class TestGetAndFillData(unittest.TestCase):
         mock_produce_handler.return_value = mock_produce_handler_instance
         mock_consume_handler_instance = MagicMock()
         mock_consume_handler.return_value = mock_consume_handler_instance
-        mock_consume_handler_instance.consume_as_object.return_value = (
+        mock_consume_handler_instance.consume_one.return_value = consumed_batch(
             "127.0.0.0_24",
             Batch(
                 batch_tree_row_id=f"{uuid.uuid4()}-{uuid.uuid4()}",
                 batch_id=uuid.uuid4(),
                 begin_timestamp=datetime.datetime.now(),
                 end_timestamp=datetime.datetime.now(),
-                data=["test_data_1", "test_data_2"],
+                data=[{"test": "test_data_1"}, {"test": "test_data_2"}],
             ),
         )
 
@@ -336,16 +347,19 @@ class TestGetAndFillData(unittest.TestCase):
         )
         sut.get_and_fill_data()
 
-        self.assertEqual(["test_data_1", "test_data_2"], sut.unfiltered_data)
+        self.assertEqual(
+            [{"test": "test_data_1"}, {"test": "test_data_2"}],
+            sut.unfiltered_data,
+        )
         self.assertEqual([], sut.filtered_data)
         self.assertEqual("127.0.0.0_24", sut.subnet_id)
 
-        mock_consume_handler_instance.consume_as_object.assert_called_once()
+        mock_consume_handler_instance.consume_one.assert_called_once()
 
     @patch("src.prefilter.prefilter.logger")
     @patch("src.prefilter.prefilter.LoglineHandler")
-    @patch("src.prefilter.prefilter.ExactlyOnceKafkaConsumeHandler")
-    @patch("src.prefilter.prefilter.ExactlyOnceKafkaProduceHandler")
+    @patch("src.prefilter.prefilter.create_pipeline_consumer")
+    @patch("src.prefilter.prefilter.create_pipeline_producer")
     @patch("src.prefilter.prefilter.ClickHouseKafkaSender")
     def test_get_data_with_existing_data(
         self,
@@ -359,14 +373,14 @@ class TestGetAndFillData(unittest.TestCase):
         mock_batch_handler.return_value = mock_batch_handler_instance
         mock_consume_handler_instance = MagicMock()
         mock_consume_handler.return_value = mock_consume_handler_instance
-        mock_consume_handler_instance.consume_as_object.return_value = (
+        mock_consume_handler_instance.consume_one.return_value = consumed_batch(
             "127.0.0.0_24",
             Batch(
                 batch_tree_row_id=f"{uuid.uuid4()}-{uuid.uuid4()}",
                 batch_id=uuid.uuid4(),
                 begin_timestamp=datetime.datetime.now(),
                 end_timestamp=datetime.datetime.now(),
-                data=["test_data_1", "test_data_2"],
+                data=[{"test": "test_data_1"}, {"test": "test_data_2"}],
             ),
         )
 
@@ -379,18 +393,21 @@ class TestGetAndFillData(unittest.TestCase):
         sut.unfiltered_data = ["old_test_data_1", "old_test_data_2"]
         sut.get_and_fill_data()
 
-        self.assertEqual(["test_data_1", "test_data_2"], sut.unfiltered_data)
+        self.assertEqual(
+            [{"test": "test_data_1"}, {"test": "test_data_2"}],
+            sut.unfiltered_data,
+        )
         self.assertEqual([], sut.filtered_data)
         self.assertEqual("127.0.0.0_24", sut.subnet_id)
 
-        mock_consume_handler_instance.consume_as_object.assert_called_once()
+        mock_consume_handler_instance.consume_one.assert_called_once()
 
 
 class TestFilterByError(unittest.TestCase):
     @patch("src.prefilter.prefilter.logger")
     @patch("src.prefilter.prefilter.LoglineHandler")
-    @patch("src.prefilter.prefilter.ExactlyOnceKafkaConsumeHandler")
-    @patch("src.prefilter.prefilter.ExactlyOnceKafkaProduceHandler")
+    @patch("src.prefilter.prefilter.create_pipeline_consumer")
+    @patch("src.prefilter.prefilter.create_pipeline_producer")
     @patch("src.prefilter.prefilter.ClickHouseKafkaSender")
     def test_check_data_relevance_using_rules_empty_data(
         self,
@@ -414,8 +431,8 @@ class TestFilterByError(unittest.TestCase):
 
     @patch("src.prefilter.prefilter.logger")
     @patch("src.prefilter.prefilter.LoglineHandler")
-    @patch("src.prefilter.prefilter.ExactlyOnceKafkaConsumeHandler")
-    @patch("src.prefilter.prefilter.ExactlyOnceKafkaProduceHandler")
+    @patch("src.prefilter.prefilter.create_pipeline_consumer")
+    @patch("src.prefilter.prefilter.create_pipeline_producer")
     @patch("src.prefilter.prefilter.ClickHouseKafkaSender")
     def test_check_data_relevance_using_rules_with_data_no_error_types(
         self,
@@ -477,8 +494,8 @@ class TestFilterByError(unittest.TestCase):
 
     @patch("src.prefilter.prefilter.logger")
     @patch("src.prefilter.prefilter.LoglineHandler")
-    @patch("src.prefilter.prefilter.ExactlyOnceKafkaConsumeHandler")
-    @patch("src.prefilter.prefilter.ExactlyOnceKafkaProduceHandler")
+    @patch("src.prefilter.prefilter.create_pipeline_consumer")
+    @patch("src.prefilter.prefilter.create_pipeline_producer")
     @patch("src.prefilter.prefilter.ClickHouseKafkaSender")
     def test_check_data_relevance_using_rules_with_data_one_error_type(
         self,
@@ -539,8 +556,8 @@ class TestFilterByError(unittest.TestCase):
 
     @patch("src.prefilter.prefilter.logger")
     @patch("src.prefilter.prefilter.LoglineHandler")
-    @patch("src.prefilter.prefilter.ExactlyOnceKafkaConsumeHandler")
-    @patch("src.prefilter.prefilter.ExactlyOnceKafkaProduceHandler")
+    @patch("src.prefilter.prefilter.create_pipeline_consumer")
+    @patch("src.prefilter.prefilter.create_pipeline_producer")
     @patch("src.prefilter.prefilter.ClickHouseKafkaSender")
     def test_check_data_relevance_using_rules_with_data_two_error_types(
         self,
@@ -601,11 +618,11 @@ class TestFilterByError(unittest.TestCase):
 
 
 class TestSendFilteredData(unittest.TestCase):
-    @patch("src.prefilter.prefilter.generate_collisions_resistant_uuid")
+    @patch("src.prefilter.prefilter.uuid.uuid4")
     @patch("src.prefilter.prefilter.logger")
     @patch("src.prefilter.prefilter.LoglineHandler")
-    @patch("src.prefilter.prefilter.ExactlyOnceKafkaConsumeHandler")
-    @patch("src.prefilter.prefilter.ExactlyOnceKafkaProduceHandler")
+    @patch("src.prefilter.prefilter.create_pipeline_consumer")
+    @patch("src.prefilter.prefilter.create_pipeline_producer")
     @patch("src.prefilter.prefilter.ClickHouseKafkaSender")
     def test_send_with_data(
         self,
@@ -614,7 +631,7 @@ class TestSendFilteredData(unittest.TestCase):
         mock_consume_handler,
         mock_logline_handler,
         mock_logger,
-        mock_generate_uuid,
+        mock_uuid4,
     ):
         mock_produce_handler_instance = MagicMock()
         mock_produce_handler.return_value = mock_produce_handler_instance
@@ -646,7 +663,7 @@ class TestSendFilteredData(unittest.TestCase):
             relevance_function_name="no_relevance",
             validation_config={},
         )
-        mock_generate_uuid.return_value = uuid.UUID(
+        mock_uuid4.return_value = uuid.UUID(
             "35a21ad1-0bdb-481f-83b0-8c8d4c924f10"
         )
         sut.unfiltered_data = [first_entry, second_entry]
@@ -668,16 +685,22 @@ class TestSendFilteredData(unittest.TestCase):
         )
         sut.send_filtered_data()
 
-        mock_produce_handler_instance.produce.assert_called_once_with(
-            topic="produce_topic",
-            data=expected_message,
-            key="192.168.1.0_24",
+        completed_records = mock_produce_handler_instance.complete.call_args.args[0]
+        self.assertEqual(
+            [
+                KafkaProduceRecord(
+                    topic="produce_topic",
+                    data=expected_message,
+                    key="192.168.1.0_24",
+                )
+            ],
+            completed_records,
         )
 
     @patch("src.prefilter.prefilter.logger")
     @patch("src.prefilter.prefilter.LoglineHandler")
-    @patch("src.prefilter.prefilter.ExactlyOnceKafkaConsumeHandler")
-    @patch("src.prefilter.prefilter.ExactlyOnceKafkaProduceHandler")
+    @patch("src.prefilter.prefilter.create_pipeline_consumer")
+    @patch("src.prefilter.prefilter.create_pipeline_producer")
     @patch("src.prefilter.prefilter.ClickHouseKafkaSender")
     def test_send_without_filtered_data_with_unfiltered_data(
         self,
@@ -701,11 +724,11 @@ class TestSendFilteredData(unittest.TestCase):
 
         sut.send_filtered_data()
 
-        mock_produce_handler_instance.produce.assert_not_called()
+        self.assertEqual([], mock_produce_handler_instance.complete.call_args.args[0])
 
     @patch("src.prefilter.prefilter.LoglineHandler")
-    @patch("src.prefilter.prefilter.ExactlyOnceKafkaConsumeHandler")
-    @patch("src.prefilter.prefilter.ExactlyOnceKafkaProduceHandler")
+    @patch("src.prefilter.prefilter.create_pipeline_consumer")
+    @patch("src.prefilter.prefilter.create_pipeline_producer")
     @patch("src.prefilter.prefilter.ClickHouseKafkaSender")
     def test_send_without_data(
         self,
@@ -728,13 +751,13 @@ class TestSendFilteredData(unittest.TestCase):
 
         sut.send_filtered_data()
 
-        mock_produce_handler_instance.produce.assert_not_called()
+        self.assertEqual([], mock_produce_handler_instance.complete.call_args.args[0])
 
 
 class TestClearData(unittest.TestCase):
     @patch("src.prefilter.prefilter.LoglineHandler")
-    @patch("src.prefilter.prefilter.ExactlyOnceKafkaConsumeHandler")
-    @patch("src.prefilter.prefilter.ExactlyOnceKafkaProduceHandler")
+    @patch("src.prefilter.prefilter.create_pipeline_consumer")
+    @patch("src.prefilter.prefilter.create_pipeline_producer")
     @patch("src.prefilter.prefilter.ClickHouseKafkaSender")
     def test_clear_data_with_data(
         self,
@@ -778,8 +801,8 @@ class TestClearData(unittest.TestCase):
         self.assertEqual([], sut.filtered_data)
 
     @patch("src.prefilter.prefilter.LoglineHandler")
-    @patch("src.prefilter.prefilter.ExactlyOnceKafkaConsumeHandler")
-    @patch("src.prefilter.prefilter.ExactlyOnceKafkaProduceHandler")
+    @patch("src.prefilter.prefilter.create_pipeline_consumer")
+    @patch("src.prefilter.prefilter.create_pipeline_producer")
     @patch("src.prefilter.prefilter.ClickHouseKafkaSender")
     def test_clear_data_without_data(
         self,
