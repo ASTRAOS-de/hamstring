@@ -156,6 +156,21 @@ class TestAdd(unittest.TestCase):
         # Assert
         mock_start_timer.assert_not_called()
 
+    def test_timer_can_be_disabled_for_explicit_batch_management(self):
+        with patch("src.monitoring.clickhouse_batch_sender.clickhouse_connect"):
+            sut = ClickHouseBatchSender(use_timer=False)
+        test_table_name = "test_table"
+        sut.tables = {test_table_name: Table(test_table_name, {})}
+        sut.batch = {test_table_name: []}
+
+        with (
+            patch("src.monitoring.clickhouse_batch_sender.Table.verify"),
+            patch.object(sut, "_start_timer") as mock_start_timer,
+        ):
+            sut.add(test_table_name, {"value": 1})
+
+        mock_start_timer.assert_not_called()
+
     def test_max_batch_size_reached(self):
         # Arrange
         test_table_name = "test_table"

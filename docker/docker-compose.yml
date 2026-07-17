@@ -149,7 +149,7 @@ services:
     network_mode: host
     environment:
       - CONTAINER_NAME=zeek
-      - HAMSTRING_ZEEK_KAFKA_WAIT_INTERVAL_SECONDS=${HAMSTRING_ZEEK_KAFKA_WAIT_INTERVAL_SECONDS:-5}
+      - HAMSTRING_ZEEK_KAFKA_WAIT_INTERVAL_SECONDS=${HAMSTRING_ZEEK_KAFKA_WAIT_INTERVAL_SECONDS:-15}
     volumes:
       - ../config.yaml:/opt/config.yaml
       - ../data/test_pcaps/:/opt/static_files

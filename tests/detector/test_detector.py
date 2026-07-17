@@ -14,7 +14,7 @@ from src.detector.detector import (
     build_detector_consume_topic,
     build_downstream_detector_topics,
 )
-from src.base.kafka_handler import KafkaMessageFetchException
+from src.base.kafka import KafkaMessageFetchException
 
 MINIMAL_DETECTOR_CONFIG = {
     "name": "test-detector",
@@ -955,6 +955,8 @@ class TestBootstrapDetectorInstance(unittest.TestCase):
             consume_topic="test_topic", detector_config=MINIMAL_DETECTOR_CONFIG
         )
         sut.kafka_consume_handler = mock_kafka_consume_handler_instance
+        sut.kafka_consume_handler.consume_batch.return_value = [MagicMock()]
+        sut.kafka_produce_handler = MagicMock()
 
         # Mock the methods called in the loop
         with patch.object(sut, "get_and_fill_data") as mock_get_data, patch.object(
@@ -990,6 +992,8 @@ class TestBootstrapDetectorInstance(unittest.TestCase):
         sut = TestDetector(
             consume_topic="test_topic", detector_config=MINIMAL_DETECTOR_CONFIG
         )
+        sut.kafka_consume_handler.consume_batch.return_value = [MagicMock()]
+        sut.kafka_produce_handler = MagicMock()
 
         # Mock methods and raise KeyboardInterrupt
         with patch.object(sut, "get_and_fill_data"), patch.object(

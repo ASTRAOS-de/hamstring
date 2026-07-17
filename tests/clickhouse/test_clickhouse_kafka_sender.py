@@ -6,7 +6,7 @@ from src.base.clickhouse_kafka_sender import ClickHouseKafkaSender
 
 class TestInit(unittest.TestCase):
     @patch("src.base.clickhouse_kafka_sender.marshmallow_dataclass")
-    @patch("src.base.clickhouse_kafka_sender.SimpleKafkaProduceHandler")
+    @patch("src.base.clickhouse_kafka_sender.BufferedKafkaProduceHandler")
     def test_init(self, mock_produce_handler, mock_marshmallow):
         # Arrange
         table_name = "test_table"
@@ -22,7 +22,7 @@ class TestInit(unittest.TestCase):
         mock_produce_handler.assert_called_once()
 
     @patch("src.base.clickhouse_kafka_sender.marshmallow_dataclass")
-    @patch("src.base.clickhouse_kafka_sender.SimpleKafkaProduceHandler")
+    @patch("src.base.clickhouse_kafka_sender.BufferedKafkaProduceHandler")
     def test_init_uses_provided_producer(self, mock_produce_handler, mock_marshmallow):
         # Arrange
         table_name = "test_table"
@@ -39,7 +39,7 @@ class TestInit(unittest.TestCase):
 
 class TestInsert(unittest.TestCase):
     @patch("src.base.clickhouse_kafka_sender.marshmallow_dataclass")
-    @patch("src.base.clickhouse_kafka_sender.SimpleKafkaProduceHandler")
+    @patch("src.base.clickhouse_kafka_sender.BufferedKafkaProduceHandler")
     def test_insert(self, mock_produce_handler, mock_marshmallow):
         # Arrange
         mock_produce_handler_instance = mock_produce_handler

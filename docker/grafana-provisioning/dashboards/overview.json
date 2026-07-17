@@ -82,7 +82,7 @@
           "color": "rgba(255,0,255,0.7)"
         },
         "filterValues": {
-          "le": 1e-09
+          "le": 1E-9
         },
         "legend": {
           "show": false
@@ -123,7 +123,7 @@
           },
           "pluginVersion": "4.7.0",
           "queryType": "table",
-          "rawSql": "SELECT\n    alert_hour AS time,\n    sumIf(alert_count, quarter = 0) AS `0`,\n    sumIf(alert_count, quarter = 1) AS `15`,\n    sumIf(alert_count, quarter = 2) AS `30`,\n    sumIf(alert_count, quarter = 3) AS `45`\nFROM (\n    SELECT\n        toStartOfHour(time_bucket) AS alert_hour,\n        intDiv(toMinute(time_bucket), 15) AS quarter,\n        sum(alert_count) AS alert_count\n    FROM alerts_1m\n    WHERE time_bucket >= toStartOfHour(now() - INTERVAL 1 DAY)\n      AND time_bucket <= now()\n    GROUP BY alert_hour, quarter\n) AS subquery\nGROUP BY alert_hour\nORDER BY alert_hour\nWITH FILL\nFROM toStartOfHour(now() - INTERVAL 1 DAY)\nTO toStartOfHour(now())\nSTEP toIntervalHour(1);",
+          "rawSql": "SELECT\n    alert_hour AS time,\n    sumIf(alert_count, quarter = 0) AS `0`,\n    sumIf(alert_count, quarter = 1) AS `15`,\n    sumIf(alert_count, quarter = 2) AS `30`,\n    sumIf(alert_count, quarter = 3) AS `45`\nFROM (\n    SELECT\n        toStartOfHour(time_bucket) AS alert_hour,\n        intDiv(toMinute(time_bucket), 15) AS quarter,\n        sum(alert_count) AS alert_count\n    FROM alerts_history\n    WHERE time_bucket >= toStartOfHour(now() - INTERVAL 1 DAY)\n      AND time_bucket <= now()\n    GROUP BY alert_hour, quarter\n) AS subquery\nGROUP BY alert_hour\nORDER BY alert_hour\nWITH FILL\nFROM toStartOfHour(now() - INTERVAL 1 DAY)\nTO toStartOfHour(now())\nSTEP toIntervalHour(1);",
           "refId": "A"
         }
       ],
@@ -366,7 +366,7 @@
           },
           "pluginVersion": "4.5.1",
           "queryType": "table",
-          "rawSql": "SELECT\n    time_bucket AS timestamp,\n    avgMerge(avg_count) AS \" \"\nFROM fill_levels_1m\nWHERE stage = 'log_filtering.prefilter'\n  AND entry_type = 'total_loglines'\n  AND 'Prefilter' IN (${include_modules:csv})\n  AND time_bucket >= $__fromTime AND time_bucket <= $__toTime\nGROUP BY time_bucket\nORDER BY time_bucket ASC;",
+          "rawSql": "SELECT\n    time_bucket AS timestamp,\n    avgMerge(avg_count) AS \" \"\nFROM fill_levels_history\nWHERE stage = 'log_filtering.prefilter'\n  AND entry_type = 'total_loglines'\n  AND 'Prefilter' IN (${include_modules:csv})\n  AND time_bucket >= $__fromTime AND time_bucket <= $__toTime\nGROUP BY time_bucket\nORDER BY time_bucket ASC;",
           "refId": "Prefilter"
         },
         {
@@ -389,7 +389,7 @@
           },
           "pluginVersion": "4.5.1",
           "queryType": "table",
-          "rawSql": "SELECT\n    time_bucket AS timestamp,\n    avgMerge(avg_count) AS \" \"\nFROM fill_levels_1m\nWHERE stage = 'data_inspection.inspector'\n  AND entry_type = 'total_loglines'\n  AND 'Inspector' IN (${include_modules:csv})\n  AND time_bucket >= $__fromTime AND time_bucket <= $__toTime\nGROUP BY time_bucket\nORDER BY time_bucket ASC;",
+          "rawSql": "SELECT\n    time_bucket AS timestamp,\n    avgMerge(avg_count) AS \" \"\nFROM fill_levels_history\nWHERE stage = 'data_inspection.inspector'\n  AND entry_type = 'total_loglines'\n  AND 'Inspector' IN (${include_modules:csv})\n  AND time_bucket >= $__fromTime AND time_bucket <= $__toTime\nGROUP BY time_bucket\nORDER BY time_bucket ASC;",
           "refId": "Inspector"
         },
         {
@@ -412,7 +412,7 @@
           },
           "pluginVersion": "4.5.1",
           "queryType": "table",
-          "rawSql": "SELECT\n    time_bucket AS timestamp,\n    avgMerge(avg_count) AS \" \"\nFROM fill_levels_1m\nWHERE stage = 'data_analysis.detector'\n  AND entry_type = 'total_loglines'\n  AND 'Detector' IN (${include_modules:csv})\n  AND time_bucket >= $__fromTime AND time_bucket <= $__toTime\nGROUP BY time_bucket\nORDER BY time_bucket ASC;",
+          "rawSql": "SELECT\n    time_bucket AS timestamp,\n    avgMerge(avg_count) AS \" \"\nFROM fill_levels_history\nWHERE stage = 'data_analysis.detector'\n  AND entry_type = 'total_loglines'\n  AND 'Detector' IN (${include_modules:csv})\n  AND time_bucket >= $__fromTime AND time_bucket <= $__toTime\nGROUP BY time_bucket\nORDER BY time_bucket ASC;",
           "refId": "Detector"
         },
         {
@@ -435,7 +435,7 @@
           },
           "pluginVersion": "4.5.1",
           "queryType": "table",
-          "rawSql": "SELECT\n    time_bucket AS timestamp,\n    avgMerge(avg_count) AS \" \"\nFROM fill_levels_1m\nWHERE stage = 'log_collection.batch_handler'\n  AND entry_type = 'total_loglines_in_batches'\n  AND 'BatchHandler' IN (${include_modules:csv})\n  AND time_bucket >= $__fromTime AND time_bucket <= $__toTime\nGROUP BY time_bucket\nORDER BY time_bucket ASC;",
+          "rawSql": "SELECT\n    time_bucket AS timestamp,\n    avgMerge(avg_count) AS \" \"\nFROM fill_levels_history\nWHERE stage = 'log_collection.batch_handler'\n  AND entry_type = 'total_loglines_in_batches'\n  AND 'BatchHandler' IN (${include_modules:csv})\n  AND time_bucket >= $__fromTime AND time_bucket <= $__toTime\nGROUP BY time_bucket\nORDER BY time_bucket ASC;",
           "refId": "BatchHandler"
         }
       ],
@@ -538,7 +538,7 @@
           },
           "pluginVersion": "4.10.2",
           "queryType": "table",
-          "rawSql": "SELECT *\nFROM (\n  SELECT 'BatchHandler' AS name, quantileTDigestMerge(0.5)(median_count) AS \"Median\", 3 AS sort_order\n  FROM fill_levels_1m\n  WHERE stage = 'log_collection.batch_handler' AND entry_type = 'total_loglines_in_batches'\n    AND time_bucket >= $__fromTime AND time_bucket <= $__toTime\n\n  UNION ALL\n\n  SELECT 'Prefilter' AS name, quantileTDigestMerge(0.5)(median_count) AS \"Median\", 4 AS sort_order\n  FROM fill_levels_1m\n  WHERE stage = 'log_filtering.prefilter' AND entry_type = 'total_loglines'\n    AND time_bucket >= $__fromTime AND time_bucket <= $__toTime\n\n  UNION ALL\n\n  SELECT 'Inspector' AS name, quantileTDigestMerge(0.5)(median_count) AS \"Median\", 5 AS sort_order\n  FROM fill_levels_1m\n  WHERE stage = 'data_inspection.inspector' AND entry_type = 'total_loglines'\n    AND time_bucket >= $__fromTime AND time_bucket <= $__toTime\n\n  UNION ALL\n\n  SELECT 'Detector' AS name, quantileTDigestMerge(0.5)(median_count) AS \"Median\", 6 AS sort_order\n  FROM fill_levels_1m\n  WHERE stage = 'data_analysis.detector' AND entry_type = 'total_loglines'\n    AND time_bucket >= $__fromTime AND time_bucket <= $__toTime\n)\nWHERE name IN (${include_modules:csv})\nORDER BY sort_order ASC;",
+          "rawSql": "SELECT *\nFROM (\n  SELECT 'BatchHandler' AS name, quantileTDigestMerge(0.5)(median_count) AS \"Median\", 3 AS sort_order\n  FROM fill_levels_history\n  WHERE stage = 'log_collection.batch_handler' AND entry_type = 'total_loglines_in_batches'\n    AND time_bucket >= $__fromTime AND time_bucket <= $__toTime\n\n  UNION ALL\n\n  SELECT 'Prefilter' AS name, quantileTDigestMerge(0.5)(median_count) AS \"Median\", 4 AS sort_order\n  FROM fill_levels_history\n  WHERE stage = 'log_filtering.prefilter' AND entry_type = 'total_loglines'\n    AND time_bucket >= $__fromTime AND time_bucket <= $__toTime\n\n  UNION ALL\n\n  SELECT 'Inspector' AS name, quantileTDigestMerge(0.5)(median_count) AS \"Median\", 5 AS sort_order\n  FROM fill_levels_history\n  WHERE stage = 'data_inspection.inspector' AND entry_type = 'total_loglines'\n    AND time_bucket >= $__fromTime AND time_bucket <= $__toTime\n\n  UNION ALL\n\n  SELECT 'Detector' AS name, quantileTDigestMerge(0.5)(median_count) AS \"Median\", 6 AS sort_order\n  FROM fill_levels_history\n  WHERE stage = 'data_analysis.detector' AND entry_type = 'total_loglines'\n    AND time_bucket >= $__fromTime AND time_bucket <= $__toTime\n)\nWHERE name IN (${include_modules:csv})\nORDER BY sort_order ASC;",
           "refId": "Fill States"
         }
       ],
@@ -590,7 +590,7 @@
               }
             ]
           },
-          "unit": "\u00b5s"
+          "unit": "µs"
         },
         "overrides": [
           {
@@ -718,7 +718,7 @@
               }
             ]
           },
-          "unit": "\u00b5s"
+          "unit": "µs"
         },
         "overrides": [
           {
@@ -839,7 +839,7 @@
               }
             ]
           },
-          "unit": "\u00b5s"
+          "unit": "µs"
         },
         "overrides": [
           {
@@ -909,7 +909,7 @@
           },
           "pluginVersion": "4.6.0",
           "queryType": "table",
-          "rawSql": "SELECT 'Including transport and wait time' AS name, sum(median) AS median\nFROM (\nSELECT 'LogServer' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS median\nFROM (\n    SELECT\n        sl.message_id AS message_id,\n        toDate(slt.event_timestamp) AS event_date,\n        sl.timestamp_in AS start_timestamp,\n        slt.event_timestamp AS end_timestamp,\n        dateDiff('microsecond', sl.timestamp_in, slt.event_timestamp) AS latency_us\n    FROM server_logs sl\n    INNER JOIN server_logs_timestamps slt ON sl.message_id = slt.message_id\n    WHERE slt.event = 'timestamp_out'\n      AND slt.event_timestamp > sl.timestamp_in\n) AS server_log_latency_values\nWHERE event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n\nUNION ALL\n\nSELECT 'LogCollection' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS median\nFROM logline_stage_latency_values\nWHERE stage = 'log_collection.collector'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n\nUNION ALL\n\nSELECT 'BatchHandler' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS median\nFROM logline_stage_latency_values\nWHERE stage = 'log_collection.batch_handler'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n\nUNION ALL\n\nSELECT 'Prefilter' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS median\nFROM batch_stage_latency_values\nWHERE stage = 'log_filtering.prefilter'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n\nUNION ALL\n\nSELECT 'Inspector' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS median\nFROM batch_stage_latency_values\nWHERE stage = 'data_inspection.inspector'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n\nUNION ALL\n\nSELECT 'Detector' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS median\nFROM suspicious_batch_stage_latency_values\nWHERE stage = 'data_analysis.detector'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n\nUNION ALL\n\nSELECT 'Between BatchHandler and Prefilter' AS name, if(isFinite(median(value)), median(value), 0) AS median\nFROM (\n      SELECT dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\n      FROM batch_tree bt1\n      INNER JOIN batch_tree bt2\n              ON bt1.batch_row_id = bt2.parent_batch_row_id\n      WHERE bt1.stage = 'log_collection.batch_handler'\n        AND bt1.status = 'completed'\n        AND bt2.stage = 'log_filtering.prefilter'\n        AND bt2.status = 'in_process'\n        AND bt1.timestamp >= $__fromTime\n        AND bt2.timestamp <= $__toTime\n)\n\nUNION ALL\n\nSELECT 'Between Prefilter and Inspector' AS name, if(isFinite(median(value)), median(value), 0) AS median\nFROM (\n      SELECT dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\n      FROM batch_tree bt1\n      INNER JOIN batch_tree bt2\n              ON bt1.batch_row_id = bt2.parent_batch_row_id\n      WHERE bt1.stage = 'log_filtering.prefilter'\n        AND bt1.status = 'finished'\n        AND bt2.stage = 'data_inspection.inspector'\n        AND bt2.status = 'in_process'\n        AND bt1.timestamp >= $__fromTime\n        AND bt2.timestamp <= $__toTime\n)\n\nUNION ALL\n\nSELECT 'Between Inspector and Detector' AS name, if(isFinite(median(value)), median(value), 0) AS median\nFROM (\n      SELECT dateDiff('microsecond', bt1.timestamp, bt2.timestamp) AS value\n      FROM batch_tree bt1\n      INNER JOIN batch_tree bt2\n              ON bt1.batch_row_id = bt2.parent_batch_row_id\n      WHERE bt1.stage = 'data_inspection.inspector'\n        AND bt1.status = 'finished'\n        AND bt2.stage = 'data_analysis.detector'\n        AND bt2.status = 'in_process'\n        AND bt1.timestamp >= $__fromTime\n        AND bt2.timestamp <= $__toTime\n      AND dateDiff('microsecond', bt1.timestamp, bt2.timestamp) > 0\n)\n)\n\nUNION ALL\n\nSELECT 'Excluding transport and wait time' AS name, sum(median) AS median\nFROM (\nSELECT 'LogServer' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS median\nFROM (\n    SELECT\n        sl.message_id AS message_id,\n        toDate(slt.event_timestamp) AS event_date,\n        sl.timestamp_in AS start_timestamp,\n        slt.event_timestamp AS end_timestamp,\n        dateDiff('microsecond', sl.timestamp_in, slt.event_timestamp) AS latency_us\n    FROM server_logs sl\n    INNER JOIN server_logs_timestamps slt ON sl.message_id = slt.message_id\n    WHERE slt.event = 'timestamp_out'\n      AND slt.event_timestamp > sl.timestamp_in\n) AS server_log_latency_values\nWHERE event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n\nUNION ALL\n\nSELECT 'LogCollection' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS median\nFROM logline_stage_latency_values\nWHERE stage = 'log_collection.collector'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n\nUNION ALL\n\nSELECT 'BatchHandler' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS median\nFROM logline_stage_latency_values\nWHERE stage = 'log_collection.batch_handler'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n\nUNION ALL\n\nSELECT 'Prefilter' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS median\nFROM batch_stage_latency_values\nWHERE stage = 'log_filtering.prefilter'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n\nUNION ALL\n\nSELECT 'Inspector' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS median\nFROM batch_stage_latency_values\nWHERE stage = 'data_inspection.inspector'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n\nUNION ALL\n\nSELECT 'Detector' AS name, if(isFinite(median(latency_us)), median(latency_us), 0) AS median\nFROM suspicious_batch_stage_latency_values\nWHERE stage = 'data_analysis.detector'\n  AND event_date >= toDate($__fromTime) AND event_date <= toDate($__toTime)\n  AND end_timestamp >= $__fromTime AND end_timestamp <= $__toTime\n);",
+          "rawSql": "SELECT\n    'Including transport and wait time' AS name,\n    sum(stage_median) AS median\nFROM (\n    SELECT stage, median(latency_us) AS stage_median\n    FROM pipeline_latency_values\n    WHERE family IN ('server_log', 'logline', 'batch', 'suspicious_batch', 'transport')\n      AND end_timestamp >= $__fromTime\n      AND end_timestamp <= $__toTime\n    GROUP BY stage\n)\nUNION ALL\nSELECT\n    'Excluding transport and wait time' AS name,\n    sum(stage_median) AS median\nFROM (\n    SELECT stage, median(latency_us) AS stage_median\n    FROM pipeline_latency_values\n    WHERE family IN ('server_log', 'logline', 'batch', 'suspicious_batch')\n      AND end_timestamp >= $__fromTime\n      AND end_timestamp <= $__toTime\n    GROUP BY stage\n);",
           "refId": "A"
         }
       ],

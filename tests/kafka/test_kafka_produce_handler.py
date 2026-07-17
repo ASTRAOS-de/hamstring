@@ -1,7 +1,7 @@
 import unittest
 from unittest.mock import patch, Mock
 
-from src.base.kafka_handler import KafkaProduceHandler
+from src.base.kafka import KafkaProduceHandler
 
 
 class TestInit(unittest.TestCase):
@@ -10,7 +10,7 @@ class TestInit(unittest.TestCase):
         conf = "test_conf"
 
         # Act
-        with patch("src.base.kafka_handler.Producer") as mock_producer:
+        with patch("src.base.kafka.producer.Producer") as mock_producer:
             mock_producer_instance = Mock()
             mock_producer.return_value = mock_producer_instance
 
@@ -23,7 +23,7 @@ class TestInit(unittest.TestCase):
 
 
 class TestProduce(unittest.TestCase):
-    @patch("src.base.kafka_handler.Producer")
+    @patch("src.base.kafka.producer.Producer")
     def test_not_implemented(self, mock_producer):
         # Arrange
         sut = KafkaProduceHandler("test_conf")
@@ -34,7 +34,7 @@ class TestProduce(unittest.TestCase):
 
 
 class TestDel(unittest.TestCase):
-    @patch("src.base.kafka_handler.Producer")
+    @patch("src.base.kafka.producer.Producer")
     def test_not_implemented(self, mock_producer):
         # Arrange
         mock_producer_instance = Mock()

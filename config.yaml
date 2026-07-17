@@ -13,7 +13,7 @@ logging:
     data_inspection.inspector:
       debug: false
     data_analysis.detector:
-      debug: true
+      debug: false
 
 pipeline:
   acceleration:
@@ -40,7 +40,7 @@ pipeline:
     modules:
       log_storage.logserver:
         executor: thread
-        max_workers: 4
+        max_workers: 1
       log_collection.collector:
         executor: thread
         max_workers: 1
@@ -59,7 +59,7 @@ pipeline:
             max_workers: 1
       data_inspection.inspector:
         executor: thread
-        max_workers: 2
+        max_workers: 1
         instances:
           dga_inspector:
             max_workers: 1
@@ -72,7 +72,7 @@ pipeline:
           RF-dga_detector:
             max_workers: 1
           domainator:
-            max_workers: 2
+            max_workers: 1
           domainator_attributor:
             max_workers: 1
           domainator_attributor_behaviour:
@@ -89,7 +89,7 @@ pipeline:
             max_workers: 1
       monitoring.agent:
         executor: thread
-        max_workers: 2
+        max_workers: 1
   log_storage:
     logserver:
       input_file: "/opt/file.txt"
@@ -274,6 +274,14 @@ pipeline:
     external_kafka_topic: "hamstring_alerts"
     plugins: []
   monitoring:
+    kafka_consumer:
+      # Monitoring produces several records per pipeline message. Consume them
+      # in larger blocks so schema decoding, ClickHouse writes, and offset
+      # commits are amortized across the batch.
+      batch_size: 5000
+      # Match the ClickHouse partial-batch window. A shorter timeout forces
+      # sparse tables into many small synchronous inserts.
+      timeout_ms: 2000
     clickhouse_connector:
       batch_size: 50  # do not set higher
       batch_timeout: 2.0
@@ -282,7 +290,7 @@ pipeline:
   zeek:
     sensors:
       zeek:
-        static_analysis: false
+        static_analysis: true
         protocols:
           - dns
         interfaces:
@@ -304,9 +312,13 @@ environment:
       node_ip: 127.0.0.1
   kafka_consumer:
     # Allow long-running detector batches without Kafka forcing a group rebalance.
-    # Default librdkafka value is 300000 ms (5 minutes), which can be too short
-    # for model inference plus downstream alert/monitoring writes.
-    max_poll_interval_ms: 1800000
+    # Default librdkafka value is 300000 ms (5 minutes)
+    max_poll_interval_ms: 300000
+  kafka_transaction_batch:
+    # Each stage processes this many Kafka records before atomically publishing
+    # all outputs and committing the corresponding source offsets.
+    size: 250
+    timeout_ms: 50
   kafka_topics:
     replication_factor: 3
     auto_expand_partitions: true

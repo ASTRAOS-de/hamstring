@@ -10,7 +10,10 @@ import marshmallow_dataclass
 
 sys.path.append(os.getcwd())
 from src.base.data_classes.clickhouse_connectors import TABLE_NAME_TO_TYPE
-from src.base.kafka_handler import SimpleKafkaProduceHandler
+from src.base.kafka import (
+    BufferedKafkaProduceHandler,
+    SimpleKafkaProduceHandler,
+)
 from src.base.log_config import get_logger
 
 logger = get_logger()
@@ -25,13 +28,16 @@ class ClickHouseKafkaSender:
     """
 
     @staticmethod
-    def create_shared_producer() -> SimpleKafkaProduceHandler:
-        return SimpleKafkaProduceHandler()
+    def create_shared_producer() -> BufferedKafkaProduceHandler:
+        """Create the non-blocking producer shared by one pipeline worker."""
+        return BufferedKafkaProduceHandler()
 
     def __init__(
         self,
         table_name: str,
-        kafka_producer: SimpleKafkaProduceHandler | None = None,
+        kafka_producer: (
+            BufferedKafkaProduceHandler | SimpleKafkaProduceHandler | None
+        ) = None,
     ):
         """
         Args:
@@ -41,7 +47,10 @@ class ClickHouseKafkaSender:
             KeyError: If the specified table name is not found in TABLE_NAME_TO_TYPE mapping.
         """
         self.table_name = table_name
-        self.kafka_producer = kafka_producer or SimpleKafkaProduceHandler()
+        # Monitoring has much higher fan-out than the pipeline's durable data
+        # path.  Use the buffered producer so an acknowledgement for one
+        # monitoring row does not stall consumption of the next logline.
+        self.kafka_producer = kafka_producer or BufferedKafkaProduceHandler()
         self.data_schema = marshmallow_dataclass.class_schema(
             TABLE_NAME_TO_TYPE.get(table_name)
         )()
