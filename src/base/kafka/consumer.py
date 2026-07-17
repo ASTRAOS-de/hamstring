@@ -124,15 +124,19 @@ class KafkaConsumeHandler(KafkaSerializationMixin, KafkaHandler):
         """Fetch a bounded group of records without committing offsets."""
         batch_size = max(
             1,
-            kafka_config.KAFKA_TRANSACTION_BATCH_SIZE
-            if max_messages is None
-            else int(max_messages),
+            (
+                kafka_config.KAFKA_TRANSACTION_BATCH_SIZE
+                if max_messages is None
+                else int(max_messages)
+            ),
         )
         batch_timeout_ms = max(
             0,
-            kafka_config.KAFKA_TRANSACTION_BATCH_TIMEOUT_MS
-            if timeout_ms is None
-            else int(timeout_ms),
+            (
+                kafka_config.KAFKA_TRANSACTION_BATCH_TIMEOUT_MS
+                if timeout_ms is None
+                else int(timeout_ms)
+            ),
         )
         deadline = time.monotonic() + batch_timeout_ms / 1000
         records = []

@@ -27,12 +27,8 @@ CLICKHOUSE_HOSTNAME = CONFIG["environment"]["monitoring"]["clickhouse_server"][
     "hostname"
 ]
 MONITORING_CONSUMER_CONFIG = CONFIG["pipeline"]["monitoring"]["kafka_consumer"]
-MONITORING_CONSUMER_BATCH_SIZE = max(
-    1, int(MONITORING_CONSUMER_CONFIG["batch_size"])
-)
-MONITORING_CONSUMER_TIMEOUT_MS = max(
-    0, int(MONITORING_CONSUMER_CONFIG["timeout_ms"])
-)
+MONITORING_CONSUMER_BATCH_SIZE = max(1, int(MONITORING_CONSUMER_CONFIG["batch_size"]))
+MONITORING_CONSUMER_TIMEOUT_MS = max(0, int(MONITORING_CONSUMER_CONFIG["timeout_ms"]))
 
 
 def prepare_all_tables():
@@ -144,9 +140,7 @@ class MonitoringAgent:
                     )
                     for source_record in source_records:
                         try:
-                            table_name = source_record.topic.removeprefix(
-                                "clickhouse_"
-                            )
+                            table_name = source_record.topic.removeprefix("clickhouse_")
                             data = self.data_schemas[table_name].loads(
                                 source_record.value
                             )
@@ -177,9 +171,7 @@ def build_monitoring_worker(worker_id: str) -> MonitoringAgent:
     return MonitoringAgent(worker_id=worker_id)
 
 
-def run_monitoring_worker_process(
-    process_index: int, threads_per_process: int
-) -> None:
+def run_monitoring_worker_process(process_index: int, threads_per_process: int) -> None:
     """Run all monitoring threads assigned to one process."""
     run_thread_worker_pool(
         worker_factory=build_monitoring_worker,
