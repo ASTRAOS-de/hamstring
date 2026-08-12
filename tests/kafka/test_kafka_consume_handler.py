@@ -12,6 +12,7 @@ from src.base.kafka import (
 from src.base.kafka.topics import (
     _desired_topic_partitions,
     _topic_config,
+    _topic_creation_config,
     _topic_replication_factor,
 )
 
@@ -45,6 +46,7 @@ class TestConsumerGroupId(unittest.TestCase):
 
 
 class TestTopicReconciliation(unittest.TestCase):
+    @patch("src.base.kafka.config.KAFKA_TOPIC_DEFAULT_CONFIG", {})
     @patch("src.base.kafka.topics.NewTopic")
     def test_missing_topic_is_created_with_target_partitions(self, mock_new_topic):
         admin_client = MagicMock()
@@ -53,10 +55,13 @@ class TestTopicReconciliation(unittest.TestCase):
             _metadata({"test_topic": 4}),
         ]
         admin_client.create_topics.return_value = {"test_topic": MagicMock()}
-        mock_new_topic.side_effect = lambda topic, partitions, replication_factor: (
-            topic,
-            partitions,
-            replication_factor,
+        mock_new_topic.side_effect = (
+            lambda topic, partitions, replication_factor, config: (
+                topic,
+                partitions,
+                replication_factor,
+                config,
+            )
         )
 
         target_partitions_by_topic = ensure_topics(
@@ -67,7 +72,9 @@ class TestTopicReconciliation(unittest.TestCase):
         )
 
         self.assertEqual({"test_topic": 4}, target_partitions_by_topic)
-        admin_client.create_topics.assert_called_once_with([("test_topic", 4, 2)])
+        admin_client.create_topics.assert_called_once_with(
+            [("test_topic", 4, 2, {})]
+        )
         admin_client.create_partitions.assert_not_called()
 
     @patch("src.base.kafka.topics.NewPartitions")
@@ -187,6 +194,32 @@ class TestTopicReconciliation(unittest.TestCase):
         )
         self.assertEqual(5, _desired_topic_partitions("hamstring_alerts"))
         self.assertEqual(2, _topic_replication_factor("hamstring_alerts"))
+
+    @patch(
+        "src.base.kafka.config.KAFKA_TOPIC_DEFAULT_CONFIG",
+        {"cleanup.policy": "delete", "retention.ms": 900000},
+    )
+    @patch(
+        "src.base.kafka.config.KAFKA_PIPELINE_TOPIC_PREFIXES",
+        {"logserver_in": "hamstring_input"},
+    )
+    @patch(
+        "src.base.kafka.config.KAFKA_TOPIC_STAGE_CONFIG",
+        {
+            "logserver_in": {
+                "config": {"retention.ms": 7200000, "retention.bytes": 536870912}
+            }
+        },
+    )
+    def test_topic_creation_config_merges_defaults_and_stringifies_values(self):
+        self.assertEqual(
+            {
+                "cleanup.policy": "delete",
+                "retention.ms": "7200000",
+                "retention.bytes": "536870912",
+            },
+            _topic_creation_config("hamstring_input-dns"),
+        )
 
 
 class TestInit(unittest.TestCase):

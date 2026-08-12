@@ -95,6 +95,7 @@ class SimpleKafkaProduceHandler(KafkaProduceHandler):
                 "bootstrap.servers": self.brokers,
                 "enable.idempotence": False,
                 "acks": "1",
+                "compression.type": kafka_config.KAFKA_PRODUCER_COMPRESSION_TYPE,
                 "message.max.bytes": 1_000_000_000,
             }
         )
@@ -141,6 +142,7 @@ class BufferedKafkaProduceHandler(SimpleKafkaProduceHandler):
                 "bootstrap.servers": self.brokers,
                 "enable.idempotence": False,
                 "acks": "1",
+                "compression.type": kafka_config.KAFKA_PRODUCER_COMPRESSION_TYPE,
                 "message.max.bytes": 1_000_000_000,
                 "linger.ms": 10,
                 "batch.num.messages": 1000,
@@ -190,6 +192,7 @@ class ExactlyOnceKafkaProduceHandler(KafkaProduceHandler):
                 "bootstrap.servers": self.brokers,
                 "transactional.id": f"{kafka_config.HOSTNAME}-{uuid.uuid4()}",
                 "enable.idempotence": True,
+                "compression.type": kafka_config.KAFKA_PRODUCER_COMPRESSION_TYPE,
                 "message.max.bytes": 1_000_000_000,
             }
         )

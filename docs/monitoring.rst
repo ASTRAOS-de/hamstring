@@ -36,21 +36,22 @@ them with the data in `ClickHouse`. The dashboard views can then be observed on 
 Storage retention
 -----------------
 
-HAMSTRING treats Kafka as transient transport. By default each Kafka partition replica has a four-hour / 16 MiB
-retention target, whichever limit is reached first. Kafka can delete only *closed* log segments, so the Compose files
-also roll a segment every 15 minutes (or after 4 MiB); this makes time-based retention work for low-volume topics.
-All Kafka values can be overridden at startup, for example:
+HAMSTRING treats Kafka as transient transport. New monitoring topics default to one partition with a 15-minute / 64 MiB
+retention target, whichever limit is reached first. Pipeline topics use three partitions and larger class-specific
+limits from ``config.yaml``. Kafka can delete only *closed* log segments, so the Compose files also roll a segment
+every five minutes (or after 16 MiB); this makes time-based retention work for low-volume topics. Broker fallback
+values can be overridden at startup, for example:
 
 .. code-block:: console
 
-   KAFKA_LOG_RETENTION_HOURS=12 KAFKA_LOG_RETENTION_BYTES=67108864 \\
+   KAFKA_LOG_RETENTION_HOURS=2 KAFKA_LOG_RETENTION_BYTES=134217728 \\
      HOST_IP=127.0.0.1 docker compose -f docker/docker-compose.yml --profile prod up
 
 ``KAFKA_LOG_RETENTION_BYTES`` is a limit **per partition replica**, rather than a per-broker or per-volume limit.
 Increasing the partition count, replication factor, or this value increases the possible disk usage accordingly.
 
-ClickHouse keeps detailed monitoring events and per-message latency state for one day (raw alerts are retained for
-60 days). It then preserves compact monitoring history at progressively lower resolution:
+ClickHouse keeps detailed monitoring events for six hours and per-message latency state for one day (raw alerts are
+retained for 30 days). It then preserves compact monitoring history at progressively lower resolution:
 
 * one-minute aggregates for seven days;
 * fifteen-minute aggregates for 30 days;
@@ -62,9 +63,11 @@ p95, p99, and maximum latency without retaining message, logline, or batch ident
 views, so selecting an older time range automatically uses the appropriate resolution. Recent latency data remains
 exact, while latency older than one day is represented by its bucketed p50 value in existing dashboard panels.
 
-TTL deletion happens in background merges; the supplied ClickHouse configuration checks for TTL work every 15
-minutes. ClickHouse server logs are rotated at 100 MiB with three retained files. Increasing a raw-table TTL has a
-much larger storage impact than increasing an aggregate-table TTL.
+TTL deletion happens in background merges; the supplied ClickHouse configuration checks for TTL work every five
+minutes and stops ClickHouse allocations while 5 GiB remains free on its data filesystem. ClickHouse server logs are
+rotated at 100 MiB with three retained files. Increasing a raw-table TTL has a much larger storage impact than
+increasing an aggregate-table TTL. See :doc:`storage_operations` for the complete disk budget, hard-isolation options,
+and the limits of this free-space reserve.
 
 The retention schema is reconciled when the monitoring agent starts. New aggregate tables are backfilled once from
 whatever source data is still available; data already removed by an older TTL cannot be recovered. Retention changes

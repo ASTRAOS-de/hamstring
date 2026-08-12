@@ -9,18 +9,20 @@ x-kafka-broker-env: &kafka-broker-env
   KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 3
   KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 2
   KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 3
+  KAFKA_MIN_INSYNC_REPLICAS: "${KAFKA_MIN_INSYNC_REPLICAS:-2}"
+  KAFKA_UNCLEAN_LEADER_ELECTION_ENABLE: "${KAFKA_UNCLEAN_LEADER_ELECTION_ENABLE:-false}"
   # Retention is evaluated only for closed log segments.  Keep the segment
-  # smaller and roll it frequently so that the four-hour retention period is
-  # effective even for low-volume partitions.
+  # small and roll it frequently so that short topic-level retention periods
+  # are effective even for low-volume partitions.
   #
   # log.retention.bytes applies to *each partition replica*, not to the broker.
-  # With 12 partitions and replication factor 3, a 10 GiB value can consume
+  # With many partitions and replication factor 3, a large value can consume
   # tens of GiB across the three broker volumes.
-  KAFKA_LOG_RETENTION_HOURS: "${KAFKA_LOG_RETENTION_HOURS:-4}"
-  KAFKA_LOG_RETENTION_BYTES: "${KAFKA_LOG_RETENTION_BYTES:-16777216}"
-  KAFKA_LOG_SEGMENT_BYTES: "${KAFKA_LOG_SEGMENT_BYTES:-4194304}"
-  KAFKA_LOG_SEGMENT_MS: "${KAFKA_LOG_SEGMENT_MS:-900000}"
-  KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: "${KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS:-300000}"
+  KAFKA_LOG_RETENTION_HOURS: "${KAFKA_LOG_RETENTION_HOURS:-1}"
+  KAFKA_LOG_RETENTION_BYTES: "${KAFKA_LOG_RETENTION_BYTES:-67108864}"
+  KAFKA_LOG_SEGMENT_BYTES: "${KAFKA_LOG_SEGMENT_BYTES:-16777216}"
+  KAFKA_LOG_SEGMENT_MS: "${KAFKA_LOG_SEGMENT_MS:-300000}"
+  KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: "${KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS:-60000}"
   KAFKA_LOG_CLEANUP_POLICY: "${KAFKA_LOG_CLEANUP_POLICY:-delete}"
 
 services:

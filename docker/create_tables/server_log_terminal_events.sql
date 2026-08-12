@@ -5,6 +5,6 @@ CREATE TABLE IF NOT EXISTS server_log_terminal_events (
     timestamp DateTime64(6) NOT NULL
 )
 ENGINE = MergeTree
-PARTITION BY toYYYYMM(timestamp)
+PARTITION BY toDate(timestamp)
 ORDER BY (stage, status, timestamp, message_id)
-TTL toDateTime(timestamp) + INTERVAL 1 DAY;
+TTL toDateTime(timestamp) + INTERVAL 6 HOUR;

@@ -142,7 +142,7 @@ services:
     profiles: ["prod", "prod-gpu"]
 
   zeek:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-zeek:${HAMSTRING_ZEEK_IMAGE_TAG:-2.0.4}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-zeek:${HAMSTRING_ZEEK_IMAGE_TAG:-2.0.5}"
     cap_add:
       - NET_ADMIN
       - NET_RAW

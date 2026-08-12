@@ -646,18 +646,27 @@ The following parameters control the infrastructure of the software.
    * - kafka_consumer.max_poll_interval_ms
      - ``1800000``
      - Maximum time in milliseconds between Kafka consumer polls before Kafka removes the consumer from its group. Increase this for long-running detector batches.
+   * - kafka_producer.compression_type
+     - ``zstd``
+     - Compression codec used by HAMSTRING's Python Kafka producers. Zeek is an external producer and must be configured separately if its image supports compression settings.
    * - kafka_topics.replication_factor
      - ``3``
      - Replication factor used when creating new Kafka topics. At runtime this is capped to the number of configured Kafka brokers.
+   * - kafka_topics.partitions
+     - ``1``
+     - Default partition count for topics without a stage or exact-topic override. The supplied storage-constrained profile uses one partition for monitoring topics.
+   * - kafka_topics.config
+     - See ``config.yaml``
+     - Kafka-native creation settings inherited by every new topic, such as ``cleanup.policy``, ``retention.ms``, ``retention.bytes``, and ``segment.bytes``. Values are passed to Kafka when the topic is first created; existing topic settings are not altered.
    * - kafka_topics.auto_expand_partitions
      - ``true``
      - If enabled, existing HAMSTRING topics with fewer than the desired partition count are automatically expanded on consumer startup. Kafka does not support shrinking partition counts, so topics that are already larger are left unchanged.
    * - kafka_topics.stages
      - See ``config.yaml``
-     - Per-pipeline-stage topic settings. Keys match ``environment.kafka_topics_prefix.pipeline`` keys. Each stage can set ``partitions`` and ``replication_factor`` for topics whose names use that stage prefix.
+     - Per-pipeline-stage topic settings. Keys match ``environment.kafka_topics_prefix.pipeline`` keys. Each stage can set ``partitions``, ``replication_factor``, and a Kafka-native ``config`` mapping for topics whose names use that stage prefix.
    * - kafka_topics.topics
      - See ``config.yaml``
-     - Exact per-topic settings for topics that are not represented by a pipeline prefix, for example external alert topics. Topics without a stage or exact entry use 12 partitions and the default replication factor.
+     - Exact per-topic settings for topics that are not represented by a pipeline prefix, for example external alert topics. The entry can set ``partitions``, ``replication_factor``, and a Kafka-native ``config`` mapping. Topics without a stage or exact entry use ``kafka_topics.partitions`` and the default replication factor/configuration.
    * - monitoring.clickhouse_server.hostname
      - ``clickhouse-server``
      - Hostname of the ClickHouse server. Used by Grafana.
@@ -751,8 +760,8 @@ Application service variables
      - ``1``
      - Swarm override for inspector ``NUMBER_OF_INSTANCES``.
    * - ``KAFKA_TOPIC_PARTITIONS``
-     - ``12``
-     - Default partition count requested for new HAMSTRING Kafka topics.
+     - from ``environment.kafka_topics.partitions`` (``1`` in the supplied configuration)
+     - Default partition count requested for new HAMSTRING Kafka topics without a stage or exact override.
    * - ``KAFKA_TOPIC_REPLICATION_FACTOR``
      - from ``environment.kafka_topics.replication_factor``
      - Replication factor requested for new HAMSTRING Kafka topics. At runtime this is capped to the
@@ -760,6 +769,9 @@ Application service variables
    * - ``KAFKA_TOPIC_MIN_PARTITIONS``
      - ``1``
      - Runtime lower bound for topic partition creation and expansion.
+   * - ``KAFKA_PRODUCER_COMPRESSION_TYPE``
+     - from ``environment.kafka_producer.compression_type`` (``zstd`` in the supplied configuration)
+     - Compression codec for HAMSTRING's Python Kafka producers.
    * - ``HAMSTRING_CONFIG_CHECKSUM``
      - current compose value
      - Optional deployment marker used to force Swarm service updates when ``config.yaml`` changes.
@@ -885,14 +897,20 @@ Infrastructure variables
      - ``3``
      - Kafka offsets topic replication factor.
    * - ``KAFKA_LOG_RETENTION_HOURS``
-     - ``4``
+     - ``1``
      - Kafka log retention in hours.
    * - ``KAFKA_LOG_RETENTION_BYTES``
-     - ``10737418240``
-     - Kafka log retention size.
+     - ``67108864``
+     - Kafka fallback retention size per partition replica.
    * - ``KAFKA_LOG_SEGMENT_BYTES``
-     - ``1073741824``
+     - ``16777216``
      - Kafka log segment size.
+   * - ``KAFKA_LOG_SEGMENT_MS``
+     - ``300000``
+     - Maximum time before a Kafka segment is rolled.
+   * - ``KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS``
+     - ``60000``
+     - Interval between Kafka retention eligibility scans.
    * - ``KAFKA_LOG_CLEANUP_POLICY``
      - ``delete``
      - Kafka log cleanup policy.
@@ -951,6 +969,15 @@ Path and mount variables
      - Host file mounted to ``/opt/file.txt`` for the logserver. The exact relative default differs
        between Compose fragments and the Swarm file but resolves to ``docker/default_input`` from the
        repository.
+   * - ``KAFKA1_DATA_SOURCE``, ``KAFKA2_DATA_SOURCE``, ``KAFKA3_DATA_SOURCE``
+     - corresponding Kafka named volume
+     - Swarm volume or host bind-mount source for each broker's ``/var/lib/kafka/data``. Use a dedicated filesystem path for hard disk isolation.
+   * - ``CLICKHOUSE_DATA_SOURCE``
+     - ``ch_data``
+     - Swarm volume or host bind-mount source for ``/var/lib/clickhouse``.
+   * - ``CLICKHOUSE_LOG_SOURCE``
+     - ``ch_logs``
+     - Swarm volume or host bind-mount source for ClickHouse file logs.
    * - ``ALERTER_LOGS_PATH``
      - ``/opt/logs`` in prod, ``../../../logs`` in dev
      - Host directory mounted to ``/opt/logs`` by Docker Compose. The Swarm stack uses a named volume
@@ -959,9 +986,9 @@ Path and mount variables
 Swarm scheduling variables
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-Docker Swarm placement constraints default to ``node.platform.os == linux``. Set the corresponding
-variable to pin a service to a labeled node, for example
-``KAFKA1_PLACEMENT_CONSTRAINT='node.labels.kafka1 == true'``.
+All services default to ``node.platform.os == linux``. Stateful services can optionally be pinned by overriding their
+constraints with ``node.hostname == <swarm-node-hostname>``. Verify broker distribution and local-volume ownership
+after every deployment. The complete procedure is in :doc:`storage_operations`.
 
 .. list-table:: Swarm placement and replica variables
    :header-rows: 1

@@ -11,15 +11,23 @@ x-kafka-broker-env: &kafka-broker-env
   KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "${KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR:-3}"
   KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "${KAFKA_TRANSACTION_STATE_LOG_MIN_ISR:-2}"
   KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "${KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR:-3}"
+  KAFKA_MIN_INSYNC_REPLICAS: "${KAFKA_MIN_INSYNC_REPLICAS:-2}"
+  KAFKA_UNCLEAN_LEADER_ELECTION_ENABLE: "${KAFKA_UNCLEAN_LEADER_ELECTION_ENABLE:-false}"
   # Retention applies only to closed segments and retention.bytes is per
   # partition replica.  Frequent, small segments make the retention window
   # effective and keep the replicated pipeline topics bounded on disk.
-  KAFKA_LOG_RETENTION_HOURS: "${KAFKA_LOG_RETENTION_HOURS:-4}"
-  KAFKA_LOG_RETENTION_BYTES: "${KAFKA_LOG_RETENTION_BYTES:-16777216}"
-  KAFKA_LOG_SEGMENT_BYTES: "${KAFKA_LOG_SEGMENT_BYTES:-4194304}"
-  KAFKA_LOG_SEGMENT_MS: "${KAFKA_LOG_SEGMENT_MS:-900000}"
-  KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: "${KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS:-300000}"
+  KAFKA_LOG_RETENTION_HOURS: "${KAFKA_LOG_RETENTION_HOURS:-1}"
+  KAFKA_LOG_RETENTION_BYTES: "${KAFKA_LOG_RETENTION_BYTES:-67108864}"
+  KAFKA_LOG_SEGMENT_BYTES: "${KAFKA_LOG_SEGMENT_BYTES:-16777216}"
+  KAFKA_LOG_SEGMENT_MS: "${KAFKA_LOG_SEGMENT_MS:-300000}"
+  KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS: "${KAFKA_LOG_RETENTION_CHECK_INTERVAL_MS:-60000}"
   KAFKA_LOG_CLEANUP_POLICY: "${KAFKA_LOG_CLEANUP_POLICY:-delete}"
+
+x-default-logging: &default-logging
+  driver: "${DOCKER_LOG_DRIVER:-local}"
+  options:
+    max-size: "${DOCKER_LOG_MAX_SIZE:-10m}"
+    max-file: "${DOCKER_LOG_MAX_FILE:-3}"
 
 x-hamstring-kafka-wait-env: &hamstring-kafka-wait-env
   HAMSTRING_WAIT_FOR: kafka
@@ -46,7 +54,8 @@ services:
       KAFKA_ADVERTISED_LISTENERS: "INTERNAL://kafka1:19092,EXTERNAL://${KAFKA_EXTERNAL_HOST:-localhost}:${KAFKA1_EXTERNAL_PORT:-8097}"
       KAFKA_LISTENERS: INTERNAL://0.0.0.0:19092,EXTERNAL://0.0.0.0:8097,CONTROLLER://0.0.0.0:29093
     volumes:
-      - kafka-broker-data1:/var/lib/kafka/data
+      - "${KAFKA1_DATA_SOURCE:-kafka-broker-data1}:/var/lib/kafka/data"
+    logging: *default-logging
     deploy:
       placement:
         constraints:
@@ -69,7 +78,8 @@ services:
       KAFKA_LISTENERS: INTERNAL://0.0.0.0:19093,EXTERNAL://0.0.0.0:8098,CONTROLLER://0.0.0.0:29093
       KAFKA_LOG4J_LOGGERS: "${KAFKA_LOG4J_LOGGERS:-kafka.controller=INFO,kafka.producer.async.DefaultEventHandler=INFO,state.change.logger=INFO}"
     volumes:
-      - kafka-broker-data2:/var/lib/kafka/data
+      - "${KAFKA2_DATA_SOURCE:-kafka-broker-data2}:/var/lib/kafka/data"
+    logging: *default-logging
     deploy:
       placement:
         constraints:
@@ -92,7 +102,8 @@ services:
       KAFKA_LISTENERS: INTERNAL://0.0.0.0:19094,EXTERNAL://0.0.0.0:8099,CONTROLLER://0.0.0.0:29093
       KAFKA_LOG4J_LOGGERS: "${KAFKA_LOG4J_LOGGERS:-kafka.controller=INFO,kafka.producer.async.DefaultEventHandler=INFO,state.change.logger=INFO}"
     volumes:
-      - kafka-broker-data3:/var/lib/kafka/data
+      - "${KAFKA3_DATA_SOURCE:-kafka-broker-data3}:/var/lib/kafka/data"
+    logging: *default-logging
     deploy:
       placement:
         constraints:
@@ -119,13 +130,14 @@ services:
     volumes:
       - "${HAMSTRING_ROOT:-../..}/docker/create_tables:/docker-entrypoint-initdb.d"
       - "${HAMSTRING_ROOT:-../..}/docker/clickhouse/config.d/retention.xml:/etc/clickhouse-server/config.d/retention.xml:ro"
-      - ch_data:/var/lib/clickhouse/
-      - ch_logs:/var/log/clickhouse-server/
+      - "${CLICKHOUSE_DATA_SOURCE:-ch_data}:/var/lib/clickhouse/"
+      - "${CLICKHOUSE_LOG_SOURCE:-ch_logs}:/var/log/clickhouse-server/"
     healthcheck:
       test: ["CMD-SHELL", "nc -z 127.0.0.1 8123"]
       interval: 10s
       timeout: 5s
       retries: 3
+    logging: *default-logging
     deploy:
       placement:
         constraints:
@@ -158,6 +170,7 @@ services:
       timeout: 30s
       start_period: 120s
       retries: 3
+    logging: *default-logging
     deploy:
       placement:
         constraints:
@@ -178,6 +191,7 @@ services:
       - source: prometheus_config
         target: /etc/prometheus/prometheus.yml
         mode: 0444
+    logging: *default-logging
     deploy:
       placement:
         constraints:
@@ -198,6 +212,7 @@ services:
         published: "${KAFKA_EXPORTER_PORT:-9308}"
         protocol: tcp
         mode: ingress
+    logging: *default-logging
     deploy:
       placement:
         constraints:
@@ -206,7 +221,7 @@ services:
         condition: any
 
   monitoring_agent:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-monitoring:${HAMSTRING_MONITORING_IMAGE_TAG:-v2.3.0}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-monitoring:${HAMSTRING_MONITORING_IMAGE_TAG:-v2.3.1}"
     command: ["src/monitoring/monitoring_agent.py"]
     networks:
       - hamstring
@@ -218,6 +233,7 @@ services:
       HAMSTRING_CONFIG_CHECKSUM: "${HAMSTRING_CONFIG_CHECKSUM:-d9bc812b76c2b58c633b412a6c07f981f3c4d787}"
       CLICKHOUSE_USER: "${CLICKHOUSE_USER:-default}"
       CLICKHOUSE_PASSWORD: "${CLICKHOUSE_PASSWORD:-hamstring}"
+    logging: *default-logging
     deploy:
       placement:
         constraints:
@@ -226,7 +242,7 @@ services:
         condition: any
 
   logserver:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-logserver:${HAMSTRING_LOGSERVER_IMAGE_TAG:-v2.3.0}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-logserver:${HAMSTRING_LOGSERVER_IMAGE_TAG:-v2.3.1}"
     command: ["src/logserver/server.py"]
     networks:
       - hamstring
@@ -237,6 +253,7 @@ services:
       <<: *hamstring-kafka-wait-env
       GROUP_ID: "${LOGSERVER_GROUP_ID:-log_storage}"
       HAMSTRING_CONFIG_CHECKSUM: "${HAMSTRING_CONFIG_CHECKSUM:-d9bc812b76c2b58c633b412a6c07f981f3c4d787}"
+    logging: *default-logging
     deploy:
       mode: replicated
       replicas: ${LOGSERVER_REPLICAS:-1}
@@ -247,7 +264,7 @@ services:
         condition: any
 
   logcollector:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-logcollector:${HAMSTRING_LOGCOLLECTOR_IMAGE_TAG:-v2.3.0}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-logcollector:${HAMSTRING_LOGCOLLECTOR_IMAGE_TAG:-v2.3.1}"
     command: ["src/logcollector/collector.py"]
     networks:
       - hamstring
@@ -257,6 +274,7 @@ services:
       <<: *hamstring-kafka-wait-env
       GROUP_ID: "${LOGCOLLECTOR_GROUP_ID:-log_collection}"
       HAMSTRING_CONFIG_CHECKSUM: "${HAMSTRING_CONFIG_CHECKSUM:-d9bc812b76c2b58c633b412a6c07f981f3c4d787}"
+    logging: *default-logging
     deploy:
       mode: replicated
       replicas: ${LOGCOLLECTOR_REPLICAS:-1}
@@ -267,7 +285,7 @@ services:
         condition: any
 
   prefilter:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-prefilter:${HAMSTRING_PREFILTER_IMAGE_TAG:-v2.3.0}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-prefilter:${HAMSTRING_PREFILTER_IMAGE_TAG:-v2.3.1}"
     command: ["src/prefilter/prefilter.py"]
     networks:
       - hamstring
@@ -277,6 +295,7 @@ services:
       <<: *hamstring-kafka-wait-env
       GROUP_ID: "${PREFILTER_GROUP_ID:-log_filtering}"
       HAMSTRING_CONFIG_CHECKSUM: "${HAMSTRING_CONFIG_CHECKSUM:-d9bc812b76c2b58c633b412a6c07f981f3c4d787}"
+    logging: *default-logging
     deploy:
       mode: replicated
       replicas: ${PREFILTER_REPLICAS:-1}
@@ -287,7 +306,7 @@ services:
         condition: any
 
   inspector:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-inspector:${HAMSTRING_INSPECTOR_IMAGE_TAG:-v2.3.0}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-inspector:${HAMSTRING_INSPECTOR_IMAGE_TAG:-v2.3.1}"
     command: ["src/inspector/inspector.py"]
     networks:
       - hamstring
@@ -298,6 +317,7 @@ services:
       GROUP_ID: "${INSPECTOR_GROUP_ID:-data_inspection}"
       NUMBER_OF_INSTANCES: "${INSPECTOR_NUMBER_OF_INSTANCES:-1}"
       HAMSTRING_CONFIG_CHECKSUM: "${HAMSTRING_CONFIG_CHECKSUM:-d9bc812b76c2b58c633b412a6c07f981f3c4d787}"
+    logging: *default-logging
     deploy:
       mode: replicated
       replicas: ${INSPECTOR_REPLICAS:-1}
@@ -315,7 +335,7 @@ services:
         condition: any
 
   detector:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-detector:${HAMSTRING_DETECTOR_IMAGE_TAG:-v2.3.0}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-detector:${HAMSTRING_DETECTOR_IMAGE_TAG:-v2.3.1}"
     command: ["src/detector/detector.py"]
     networks:
       - hamstring
@@ -327,6 +347,7 @@ services:
       NVIDIA_DRIVER_CAPABILITIES: "${NVIDIA_DRIVER_CAPABILITIES:-compute,utility}"
       NVIDIA_VISIBLE_DEVICES: "${NVIDIA_VISIBLE_DEVICES:-all}"
       HAMSTRING_CONFIG_CHECKSUM: "${HAMSTRING_CONFIG_CHECKSUM:-d9bc812b76c2b58c633b412a6c07f981f3c4d787}"
+    logging: *default-logging
     deploy:
       mode: replicated
       replicas: ${DETECTOR_REPLICAS:-1}
@@ -344,7 +365,7 @@ services:
         condition: any
 
   alerter:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-alerter:${HAMSTRING_ALERTER_IMAGE_TAG:-v2.3.0}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-alerter:${HAMSTRING_ALERTER_IMAGE_TAG:-v2.3.1}"
     command: ["src/alerter/alerter.py"]
     networks:
       - hamstring
@@ -355,6 +376,7 @@ services:
       <<: *hamstring-kafka-wait-env
       GROUP_ID: "${ALERTER_GROUP_ID:-data_alerting}"
       HAMSTRING_CONFIG_CHECKSUM: "${HAMSTRING_CONFIG_CHECKSUM:-d9bc812b76c2b58c633b412a6c07f981f3c4d787}"
+    logging: *default-logging
     deploy:
       mode: replicated
       replicas: ${ALERTER_REPLICAS:-1}
@@ -364,7 +386,7 @@ services:
       restart_policy:
         condition: any
   zeek:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-zeek:${HAMSTRING_ZEEK_IMAGE_TAG:-2.0.4}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-zeek:${HAMSTRING_ZEEK_IMAGE_TAG:-2.0.5}"
     cap_add:
       - NET_ADMIN
       - NET_RAW
@@ -378,6 +400,7 @@ services:
       # environment.kafka_brokers[*].node_ip/external_port.
       CONTAINER_NAME: "${ZEEK_CONTAINER_NAME:-zeek}"
       HAMSTRING_ZEEK_KAFKA_WAIT_INTERVAL_SECONDS: "${HAMSTRING_ZEEK_KAFKA_WAIT_INTERVAL_SECONDS:-5}"
+    logging: *default-logging
     deploy:
       mode: replicated
       replicas: ${ZEEK_REPLICAS:-1}
