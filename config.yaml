@@ -290,11 +290,11 @@ pipeline:
   zeek:
     sensors:
       zeek:
-        static_analysis: true
+        static_analysis: false
         protocols:
           - dns
         interfaces:
-          - wlp3s0
+          - eth1
 
 environment:
   kafka_brokers:
@@ -314,40 +314,76 @@ environment:
     # Allow long-running detector batches without Kafka forcing a group rebalance.
     # Default librdkafka value is 300000 ms (5 minutes)
     max_poll_interval_ms: 300000
+  kafka_producer:
+    # Compress JSON pipeline and monitoring batches before replication.
+    compression_type: zstd
   kafka_transaction_batch:
     # Each stage processes this many Kafka records before atomically publishing
     # all outputs and committing the corresponding source offsets.
     size: 250
     timeout_ms: 50
   kafka_topics:
+    # Topics without a stage/exact override are low-volume monitoring topics.
+    # Kafka retention limits apply per partition; keep these topics at one
+    # partition so their aggregate disk footprint remains predictable.
+    partitions: 1
     replication_factor: 3
     auto_expand_partitions: true
+    config:
+      cleanup.policy: delete
+      retention.ms: 900000
+      retention.bytes: 67108864
+      segment.bytes: 16777216
     stages:
       logserver_in:
-        partitions: 12
+        partitions: 3
         replication_factor: 3
+        config:
+          retention.ms: 7200000
+          retention.bytes: 536870912
       logserver_to_collector:
-        partitions: 12
+        partitions: 3
         replication_factor: 3
+        config:
+          retention.ms: 1800000
+          retention.bytes: 134217728
       batch_sender_to_prefilter:
-        partitions: 12
+        partitions: 3
         replication_factor: 3
+        config:
+          retention.ms: 1800000
+          retention.bytes: 134217728
       prefilter_to_inspector:
-        partitions: 12
+        partitions: 3
         replication_factor: 3
+        config:
+          retention.ms: 1800000
+          retention.bytes: 134217728
       inspector_to_detector:
-        partitions: 12
+        partitions: 3
         replication_factor: 3
+        config:
+          retention.ms: 1800000
+          retention.bytes: 134217728
       detector_to_alerter:
-        partitions: 12
+        partitions: 3
         replication_factor: 3
+        config:
+          retention.ms: 3600000
+          retention.bytes: 268435456
       detector_to_detector:
-        partitions: 12
+        partitions: 3
         replication_factor: 3
+        config:
+          retention.ms: 3600000
+          retention.bytes: 268435456
     topics:
       hamstring_alerts:
-        partitions: 12
+        partitions: 3
         replication_factor: 3
+        config:
+          retention.ms: 86400000
+          retention.bytes: 536870912
   kafka_topics_prefix:
     pipeline:
       logserver_in: "hamstring_input"

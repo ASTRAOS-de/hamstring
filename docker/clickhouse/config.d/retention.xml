@@ -2,11 +2,25 @@
     <!--
       MergeTree TTL deletion is performed during background merges.  The
       upstream default can defer a TTL merge for four hours; run eligible TTL
-      merges every 15 minutes so monitoring data is reclaimed promptly.
+      merges every five minutes so monitoring data is reclaimed promptly on
+      storage-constrained nodes.
     -->
     <merge_tree>
-        <merge_with_ttl_timeout>900</merge_with_ttl_timeout>
+        <merge_with_ttl_timeout>300</merge_with_ttl_timeout>
     </merge_tree>
+
+    <!--
+      Refuse new ClickHouse allocations before the shared host filesystem is
+      completely exhausted.  This is a safety reserve, not a ClickHouse size
+      quota: use a dedicated filesystem/LVM volume for hard isolation.
+    -->
+    <storage_configuration>
+        <disks>
+            <default>
+                <keep_free_space_bytes>5368709120</keep_free_space_bytes>
+            </default>
+        </disks>
+    </storage_configuration>
 
     <!-- Keep ClickHouse's own diagnostic logs from growing without bound. -->
     <logger>

@@ -5,6 +5,6 @@ CREATE TABLE IF NOT EXISTS failed_loglines (
     reason_for_failure Nullable(String)
 )
 ENGINE = MergeTree
-PARTITION BY toYYYYMM(timestamp_failed)
+PARTITION BY toDate(timestamp_failed)
 ORDER BY (timestamp_failed, timestamp_in)
-TTL toDateTime(timestamp_failed) + INTERVAL 1 DAY;
+TTL toDateTime(timestamp_failed) + INTERVAL 6 HOUR;

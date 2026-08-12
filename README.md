@@ -82,6 +82,12 @@ environment variables such as `HAMSTRING_IMAGE_REGISTRY`,
 `DETECTOR_PLACEMENT_CONSTRAINT`. Remove the stack with
 `docker stack rm hamstring`.
 
+Before deploying on small nodes, plan Kafka/ClickHouse placement and configure
+bounded host storage. See the
+[storage-constrained Swarm deployment guide](./docs/storage_operations.rst) for
+Docker log rotation, Kafka retention semantics,
+ClickHouse TTL policy, filesystem isolation, and 50 GB-per-node budget.
+
 <p align="center">
   <img src="./assets/hamstring_terminal.gif" alt="Terminal example"/>
 </p>

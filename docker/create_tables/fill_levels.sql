@@ -5,6 +5,6 @@ CREATE TABLE IF NOT EXISTS fill_levels (
     entry_count UInt32 DEFAULT 0
 )
 ENGINE = MergeTree
-PARTITION BY toYYYYMM(timestamp)
+PARTITION BY toDate(timestamp)
 ORDER BY (stage, entry_type, timestamp)
-TTL toDateTime(timestamp) + INTERVAL 1 DAY;
+TTL toDateTime(timestamp) + INTERVAL 6 HOUR;

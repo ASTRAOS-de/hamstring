@@ -87,6 +87,16 @@ def _topic_replication_factor(
     return min(configured_replication_factor, broker_count)
 
 
+def _topic_creation_config(topic: str | None = None) -> dict[str, str]:
+    """Return Kafka-native creation settings with per-topic overrides applied."""
+    creation_config = dict(kafka_config.KAFKA_TOPIC_DEFAULT_CONFIG)
+    creation_config.update(_topic_config(topic).get("config", {}))
+    return {
+        str(key): str(value).lower() if isinstance(value, bool) else str(value)
+        for key, value in creation_config.items()
+    }
+
+
 def topic_partition_count(cluster_metadata, topic: str) -> int | None:
     topics_metadata = getattr(cluster_metadata, "topics", {})
     if isinstance(topics_metadata, dict):
@@ -120,6 +130,9 @@ class KafkaTopicManager:
             topic: _topic_replication_factor(topic, replication_factor)
             for topic in normalized_topics
         }
+        config_by_topic = {
+            topic: _topic_creation_config(topic) for topic in normalized_topics
+        }
         should_expand = (
             _as_bool(kafka_config.KAFKA_TOPIC_AUTO_EXPAND_PARTITIONS)
             if auto_expand_partitions is None
@@ -151,6 +164,7 @@ class KafkaTopicManager:
                                 topic,
                                 target_by_topic[topic],
                                 replication_by_topic[topic],
+                                config=config_by_topic[topic],
                             )
                             for topic in missing_topics
                         ]

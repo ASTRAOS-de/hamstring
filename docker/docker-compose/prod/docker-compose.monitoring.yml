@@ -1,6 +1,6 @@
 services:
   monitoring_agent:
-    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-monitoring:${HAMSTRING_MONITORING_IMAGE_TAG:-v2.2.0}"
+    image: "${HAMSTRING_IMAGE_REGISTRY:-ghcr.io/astraos-de}/hamstring-monitoring:${HAMSTRING_MONITORING_IMAGE_TAG:-v2.3.1}"
     restart: "unless-stopped"
     volumes:
       - ../../../config.yaml:/app/config.yaml

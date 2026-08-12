@@ -60,7 +60,7 @@ CREATE TABLE IF NOT EXISTS server_log_latencies (
     end_timestamp AggregateFunction(max, DateTime64(6))
 )
 ENGINE = AggregatingMergeTree
-PARTITION BY toYYYYMM(event_date)
+PARTITION BY event_date
 ORDER BY (event_date, message_id)
 TTL toDateTime(event_date) + INTERVAL 1 DAY;
 
@@ -94,7 +94,7 @@ CREATE TABLE IF NOT EXISTS logline_stage_latencies (
     end_timestamp AggregateFunction(max, DateTime64(6))
 )
 ENGINE = AggregatingMergeTree
-PARTITION BY toYYYYMM(event_date)
+PARTITION BY event_date
 ORDER BY (stage, event_date, logline_id)
 TTL toDateTime(event_date) + INTERVAL 1 DAY;
 
@@ -119,7 +119,7 @@ CREATE TABLE IF NOT EXISTS batch_stage_latencies (
     end_timestamp AggregateFunction(max, DateTime64(6))
 )
 ENGINE = AggregatingMergeTree
-PARTITION BY toYYYYMM(event_date)
+PARTITION BY event_date
 ORDER BY (stage, event_date, instance_name, batch_id)
 TTL toDateTime(event_date) + INTERVAL 1 DAY;
 
@@ -145,7 +145,7 @@ CREATE TABLE IF NOT EXISTS suspicious_batch_stage_latencies (
     end_timestamp AggregateFunction(max, DateTime64(6))
 )
 ENGINE = AggregatingMergeTree
-PARTITION BY toYYYYMM(event_date)
+PARTITION BY event_date
 ORDER BY (stage, event_date, instance_name, suspicious_batch_id)
 TTL toDateTime(event_date) + INTERVAL 1 DAY;
 

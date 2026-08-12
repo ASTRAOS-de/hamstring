@@ -6,6 +6,6 @@ CREATE TABLE IF NOT EXISTS logline_timestamps (
     is_active Bool NOT NULL
 )
 ENGINE = MergeTree
-PARTITION BY toYYYYMM(timestamp)
+PARTITION BY toDate(timestamp)
 ORDER BY (stage, status, timestamp, logline_id)
-TTL toDateTime(timestamp) + INTERVAL 1 DAY;
+TTL toDateTime(timestamp) + INTERVAL 6 HOUR;
