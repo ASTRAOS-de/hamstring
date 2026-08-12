@@ -35,6 +35,7 @@ class TestInit(unittest.TestCase):
             "bootstrap.servers": "127.0.0.1:9999,127.0.0.2:9998,127.0.0.3:9997",
             "transactional.id": f"test_transactional_id-{mock_uuid.uuid4.return_value}",
             "enable.idempotence": True,
+            "compression.type": "zstd",
             "message.max.bytes": 1000000000,
         }
 
@@ -79,6 +80,7 @@ class TestInit(unittest.TestCase):
             "bootstrap.servers": "127.0.0.1:9999,127.0.0.2:9998,127.0.0.3:9997",
             "transactional.id": f"default_tid-{mock_uuid.uuid4.return_value}",
             "enable.idempotence": True,
+            "compression.type": "zstd",
             "message.max.bytes": 1000000000,
         }
 

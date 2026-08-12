@@ -5,5 +5,5 @@ CREATE TABLE IF NOT EXISTS server_log_to_logline (
 )
 ENGINE = MergeTree
 ORDER BY (timestamp, message_id, logline_id)
-PARTITION BY toYYYYMM(timestamp)
-TTL toDateTime(timestamp) + INTERVAL 1 DAY;
+PARTITION BY toDate(timestamp)
+TTL toDateTime(timestamp) + INTERVAL 6 HOUR;

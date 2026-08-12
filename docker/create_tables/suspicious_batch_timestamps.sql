@@ -9,6 +9,6 @@ CREATE TABLE IF NOT EXISTS suspicious_batch_timestamps (
     is_active Bool NOT NULL
 )
 ENGINE = MergeTree
-PARTITION BY toYYYYMM(timestamp)
+PARTITION BY toDate(timestamp)
 ORDER BY (stage, status, timestamp, instance_name, suspicious_batch_id, src_ip)
-TTL toDateTime(timestamp) + INTERVAL 1 DAY;
+TTL toDateTime(timestamp) + INTERVAL 6 HOUR;

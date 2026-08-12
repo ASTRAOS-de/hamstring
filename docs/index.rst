@@ -24,6 +24,7 @@ Contents
    usage
    pipeline
    monitoring
+   storage_operations
    training
    developer_guide
    api/index

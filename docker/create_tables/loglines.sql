@@ -6,6 +6,6 @@ CREATE TABLE IF NOT EXISTS loglines (
     additional_fields String
 )
 ENGINE = MergeTree
-PARTITION BY toYYYYMM(timestamp)
+PARTITION BY toDate(timestamp)
 ORDER BY (timestamp, src_ip, subnet_id, logline_id)
-TTL toDateTime(timestamp) + INTERVAL 1 DAY;
+TTL toDateTime(timestamp) + INTERVAL 6 HOUR;

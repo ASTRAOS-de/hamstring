@@ -42,6 +42,11 @@ policies, resource limits, and placement constraints:
 Set ``--advertise-addr`` to the manager IP address that worker nodes and
 published services should use.
 
+The default deployment uses generic Linux-node constraints. Follow
+:doc:`storage_operations` to verify stateful-service placement, bound container
+logs, and choose dedicated data mounts before starting traffic on
+storage-constrained hosts.
+
 Configure the stack with environment variables before deployment. Common options
 include ``HAMSTRING_IMAGE_REGISTRY`` and per-service image tags, replica counts
 such as ``LOGCOLLECTOR_REPLICAS`` and ``DETECTOR_REPLICAS``, published ports such

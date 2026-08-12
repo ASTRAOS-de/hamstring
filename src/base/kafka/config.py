@@ -18,6 +18,11 @@ KAFKA_CONSUMER_CONFIG = CONFIG["environment"].get("kafka_consumer", {})
 KAFKA_CONSUMER_MAX_POLL_INTERVAL_MS = int(
     KAFKA_CONSUMER_CONFIG.get("max_poll_interval_ms", 1_800_000)
 )
+KAFKA_PRODUCER_CONFIG = CONFIG["environment"].get("kafka_producer", {})
+KAFKA_PRODUCER_COMPRESSION_TYPE = os.getenv(
+    "KAFKA_PRODUCER_COMPRESSION_TYPE",
+    KAFKA_PRODUCER_CONFIG.get("compression_type", "zstd"),
+)
 
 KAFKA_TRANSACTION_BATCH_CONFIG = CONFIG["environment"].get(
     "kafka_transaction_batch", {}
@@ -36,7 +41,9 @@ KAFKA_TRANSACTION_BATCH_TIMEOUT_MS = int(
 )
 
 KAFKA_TOPIC_CONFIG = CONFIG["environment"].get("kafka_topics", {})
-KAFKA_TOPIC_DEFAULT_PARTITIONS = int(os.getenv("KAFKA_TOPIC_PARTITIONS", 12))
+KAFKA_TOPIC_DEFAULT_PARTITIONS = int(
+    os.getenv("KAFKA_TOPIC_PARTITIONS", KAFKA_TOPIC_CONFIG.get("partitions", 12))
+)
 KAFKA_TOPIC_REPLICATION_FACTOR = int(
     os.getenv(
         "KAFKA_TOPIC_REPLICATION_FACTOR",
@@ -46,6 +53,7 @@ KAFKA_TOPIC_REPLICATION_FACTOR = int(
 KAFKA_TOPIC_AUTO_EXPAND_PARTITIONS = KAFKA_TOPIC_CONFIG.get(
     "auto_expand_partitions", True
 )
+KAFKA_TOPIC_DEFAULT_CONFIG = KAFKA_TOPIC_CONFIG.get("config", {})
 KAFKA_TOPIC_STAGE_CONFIG = KAFKA_TOPIC_CONFIG.get("stages", {})
 KAFKA_TOPIC_EXACT_CONFIG = KAFKA_TOPIC_CONFIG.get("topics", {})
 KAFKA_PIPELINE_TOPIC_PREFIXES = (

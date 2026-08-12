@@ -10,6 +10,6 @@ CREATE TABLE IF NOT EXISTS batch_tree (
     timestamp DateTime64(6) NOT NULL
 )
 ENGINE = MergeTree
-PARTITION BY toYYYYMM(timestamp)
+PARTITION BY toDate(timestamp)
 ORDER BY (stage, status, timestamp, instance_name, batch_row_id, parent_batch_row_id)
-TTL toDateTime(timestamp) + INTERVAL 1 DAY;
+TTL toDateTime(timestamp) + INTERVAL 6 HOUR;
