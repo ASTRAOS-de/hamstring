@@ -72,9 +72,7 @@ class TestTopicReconciliation(unittest.TestCase):
         )
 
         self.assertEqual({"test_topic": 4}, target_partitions_by_topic)
-        admin_client.create_topics.assert_called_once_with(
-            [("test_topic", 4, 2, {})]
-        )
+        admin_client.create_topics.assert_called_once_with([("test_topic", 4, 2, {})])
         admin_client.create_partitions.assert_not_called()
 
     @patch("src.base.kafka.topics.NewPartitions")
