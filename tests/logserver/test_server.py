@@ -30,7 +30,9 @@ class TestInit(unittest.TestCase):
         sut = LogServer(consume_topic="test_topic", produce_topics=[])
         self.assertEqual(mock_kafka_consume_handler_instance, sut.kafka_consume_handler)
         self.assertEqual(mock_kafka_produce_handler_instance, sut.kafka_produce_handler)
-        mock_kafka_consume_handler.assert_called_once_with("test_topic")
+        mock_kafka_consume_handler.assert_called_once_with(
+            "test_topic", stage="log_storage.logserver"
+        )
 
 
 class TestStart(unittest.IsolatedAsyncioTestCase):

@@ -500,6 +500,11 @@ We currently support the following relevance methods:
     |                           | and responses are forwarded that include a  **NXDOMAIN**    |
     |                           | status code.                                                |
     +---------------------------+-------------------------------------------------------------+
+    | ``check_domainator_``     | Public-suffix-aware Domainator filter. Only DNS names with  |
+    | ``relevance``             | at least one label above the registrable domain are         |
+    |                           | forwarded. ``api.amazon.co.uk`` passes; ``amazon.co.uk``    |
+    |                           | and ``google.com`` are filtered out.                        |
+    +---------------------------+-------------------------------------------------------------+
 
 - **Example Configuration**:
 

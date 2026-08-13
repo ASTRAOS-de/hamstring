@@ -80,6 +80,13 @@ class DomainatorDetector(DetectorBase):
             message_domain = strip_domain(message["domain_name"])
             self.message_queues[message_domain].append(message)
 
+            # currently receives 1 message batch at a time iterates over it and adds to the queue
+            # right now let's say we fetch 100 messages in a batch, we iterate over the messages to add to the dict, worst case: 97 predictions necessary (len of 3, sliding window over all 100 messsages)
+            # adds up over time as no reset of the dict happens --> at worst 100 diffrerent domains in a batch --> 100 predicitons + 100 predictions in downstream detectors!
+            # ---> too much
+            # improvement suggestion: try to predict only at the end for each domain seen in the batch IF len > 3. If prediction happened maybe clear the queue ? --> suboptimal for no sliding window approach
+            # further improvement: kafka partitoin key shold not be src_ip but rather domain name --> make adjustable for other detectors as well !!
+
             if len(self.message_queues[message_domain]) >= 3:
                 y_pred = self.predict(self.message_queues[message_domain])
                 logger.info(f"Prediction: {y_pred}")

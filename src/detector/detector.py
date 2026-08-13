@@ -237,7 +237,9 @@ class DetectorBase(DetectorAbstractBase):
             tempfile.gettempdir(), f"{self.model_name}_{self.checksum}_scaler.pickle"
         )
 
-        self.kafka_consume_handler = ExactlyOnceKafkaConsumeHandler(self.consume_topic)
+        self.kafka_consume_handler = ExactlyOnceKafkaConsumeHandler(
+            self.consume_topic, stage=module_name
+        )
         self.kafka_produce_handler = None
 
         self.model, self.scaler = self._get_model()

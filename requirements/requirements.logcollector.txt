@@ -3,3 +3,4 @@ colorlog
 confluent-kafka
 marshmallow_dataclass
 clickhouse_connect
+tldextract

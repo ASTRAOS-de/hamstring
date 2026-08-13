@@ -7,6 +7,7 @@ from src.base.kafka.consumer import (
     SimpleKafkaConsumeHandler,
 )
 from src.base.kafka.errors import (
+    KafkaConsumerMembershipLost,
     KafkaMessageFetchException,
     TooManyFailedAttemptsError,
 )
@@ -29,6 +30,7 @@ __all__ = [
     "ExactlyOnceKafkaConsumeHandler",
     "ExactlyOnceKafkaProduceHandler",
     "KafkaConsumeHandler",
+    "KafkaConsumerMembershipLost",
     "KafkaHandler",
     "KafkaMessageFetchException",
     "KafkaProduceHandler",

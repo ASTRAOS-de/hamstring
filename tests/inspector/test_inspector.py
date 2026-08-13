@@ -68,7 +68,9 @@ class TestInit(unittest.TestCase):
 
         self.assertEqual([], sut.messages)
         self.assertEqual(mock_kafka_consume_handler_instance, sut.kafka_consume_handler)
-        mock_kafka_consume_handler.assert_called_once_with("test_topic")
+        mock_kafka_consume_handler.assert_called_once_with(
+            "test_topic", stage="data_inspection.inspector"
+        )
 
 
 class TestGetData(unittest.TestCase):
