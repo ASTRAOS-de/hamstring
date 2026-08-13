@@ -87,6 +87,9 @@ bounded host storage. See the
 [storage-constrained Swarm deployment guide](./docs/storage_operations.rst) for
 Docker log rotation, Kafka retention semantics,
 ClickHouse TTL policy, filesystem isolation, and 50 GB-per-node budget.
+For transactional consumer behavior, automatic recovery after max-poll or
+group-membership loss, and rebalance handling, see the
+[Kafka consumer recovery guide](./docs/kafka_recovery.rst).
 
 <p align="center">
   <img src="./assets/hamstring_terminal.gif" alt="Terminal example"/>

@@ -13,6 +13,7 @@ class ConsumedKafkaMessage:
     partition: int
     offset: int
     raw_message: object | None = field(default=None, repr=False, compare=False)
+    assignment_epoch: int | None = field(default=None, repr=False, compare=False)
 
 
 @dataclass(frozen=True)

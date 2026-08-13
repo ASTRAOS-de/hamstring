@@ -11,6 +11,7 @@ from confluent_kafka.admin import AdminClient
 from src.base.kafka import config as kafka_config
 from src.base.kafka.client import KafkaHandler
 from src.base.kafka.errors import (
+    KafkaConsumerMembershipLost,
     KafkaMessageFetchException,
     TooManyFailedAttemptsError,
 )
@@ -38,6 +39,9 @@ class KafkaConsumeHandler(KafkaSerializationMixin, KafkaHandler):
     def __init__(self, topics: str | list[str]) -> None:
         super().__init__()
         self._last_consumed_message = None
+        self._assignment_epoch = 0
+        self._assignment_valid = False
+        self._assigned_partitions: set[tuple[str, int]] = set()
         self.topics = normalize_topics(topics)
         self.brokers = kafka_config.bootstrap_servers()
         self.conf = self._build_consumer_conf()
@@ -55,6 +59,11 @@ class KafkaConsumeHandler(KafkaSerializationMixin, KafkaHandler):
 
     def _connect_consumer(self) -> None:
         def connect():
+            # Any batch tagged by an older consumer instance is now stale, even
+            # before the replacement consumer receives its first assignment.
+            self._assignment_epoch += 1
+            self._assignment_valid = False
+            self._assigned_partitions.clear()
             consumer = Consumer(self.conf)
             admin_client = AdminClient({"bootstrap.servers": self.brokers})
             target_partitions_by_topic = ensure_topics(admin_client, self.topics)
@@ -66,7 +75,12 @@ class KafkaConsumeHandler(KafkaSerializationMixin, KafkaHandler):
                 except Exception:
                     pass
                 raise TooManyFailedAttemptsError("Not all topics were created.")
-            consumer.subscribe(self.topics)
+            consumer.subscribe(
+                self.topics,
+                on_assign=self._on_assign,
+                on_revoke=self._on_revoke,
+                on_lost=self._on_lost,
+            )
             return consumer
 
         self.consumer = retry_forever(
@@ -95,6 +109,66 @@ class KafkaConsumeHandler(KafkaSerializationMixin, KafkaHandler):
             f": {reason}" if reason else "",
         )
         self._reset_consumer()
+
+    @staticmethod
+    def _partition_keys(partitions) -> set[tuple[str, int]]:
+        return {(partition.topic, partition.partition) for partition in partitions}
+
+    @staticmethod
+    def _partition_description(partitions) -> str:
+        keys = KafkaConsumeHandler._partition_keys(partitions)
+        return ", ".join(f"{topic}[{partition}]" for topic, partition in sorted(keys))
+
+    def _on_assign(self, consumer, partitions) -> None:
+        self._assignment_epoch += 1
+        self._assignment_valid = True
+        try:
+            current_partitions = consumer.assignment() or []
+        except (KafkaException, RuntimeError):
+            current_partitions = []
+        # With cooperative rebalancing the callback may contain only newly added
+        # partitions, so retain partitions already present in the assignment.
+        self._assigned_partitions = self._partition_keys(
+            [*current_partitions, *partitions]
+        )
+        logger.info(
+            "Kafka consumer assignment %s received: %s",
+            self._assignment_epoch,
+            self._partition_description(partitions) or "no partitions",
+        )
+
+    def _invalidate_assignment(self, event: str, partitions) -> None:
+        self._assignment_epoch += 1
+        self._assignment_valid = False
+        self._assigned_partitions.clear()
+        logger.warning(
+            "Kafka consumer assignment invalidated by %s: %s",
+            event,
+            self._partition_description(partitions) or "no partitions",
+        )
+
+    def _on_revoke(self, _consumer, partitions) -> None:
+        self._invalidate_assignment("partition revocation", partitions)
+
+    def _on_lost(self, _consumer, partitions) -> None:
+        self._invalidate_assignment("partition loss", partitions)
+
+    def ensure_batch_assignment_current(
+        self, consumed_messages: Sequence[ConsumedKafkaMessage]
+    ) -> None:
+        """Reject records fetched under an assignment that is no longer current."""
+        batch_epochs = {message.assignment_epoch for message in consumed_messages}
+        batch_partitions = {
+            (message.topic, message.partition) for message in consumed_messages
+        }
+        if (
+            not self._assignment_valid
+            or batch_epochs != {self._assignment_epoch}
+            or not batch_partitions.issubset(self._assigned_partitions)
+        ):
+            raise KafkaConsumerMembershipLost(
+                "Consumed batch belongs to a revoked or lost Kafka assignment."
+            )
 
     def commit(
         self,
@@ -183,6 +257,11 @@ class KafkaConsumeHandler(KafkaSerializationMixin, KafkaHandler):
                 break
 
         if records:
+            try:
+                self.ensure_batch_assignment_current(records)
+            except KafkaConsumerMembershipLost as exception:
+                self.recover_group_membership(exception)
+                return []
             self._last_consumed_message = records[-1].raw_message
         return records
 
@@ -268,8 +347,7 @@ class KafkaConsumeHandler(KafkaSerializationMixin, KafkaHandler):
                     return None
             return message
 
-    @staticmethod
-    def _record_from_message(message) -> ConsumedKafkaMessage | None:
+    def _record_from_message(self, message) -> ConsumedKafkaMessage | None:
         if message is None:
             return None
         error = message.error()
@@ -288,6 +366,7 @@ class KafkaConsumeHandler(KafkaSerializationMixin, KafkaHandler):
             partition=message.partition(),
             offset=message.offset(),
             raw_message=message,
+            assignment_epoch=self._assignment_epoch,
         )
 
     def _consume_single(self, shutdown_message: str):

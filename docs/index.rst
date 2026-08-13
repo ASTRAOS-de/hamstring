@@ -24,6 +24,7 @@ Contents
    usage
    pipeline
    monitoring
+   kafka_recovery
    storage_operations
    training
    developer_guide

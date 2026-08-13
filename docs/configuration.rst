@@ -644,8 +644,8 @@ The following parameters control the infrastructure of the software.
      - Kafka topic name prefixes given as strings. These prefix name are used to construct the actual topic names based on the instance name (e.g. a collector instance name) that produces for the given stage.
        (e.g. a prefilter instance name is added as suffix to the prefilter_to_inspector prefix for the inspector to know where to consume.)
    * - kafka_consumer.max_poll_interval_ms
-     - ``1800000``
-     - Maximum time in milliseconds between Kafka consumer polls before Kafka removes the consumer from its group. Increase this for long-running detector batches.
+     - ``1800000`` fallback; ``300000`` in the supplied ``config.yaml``
+     - Maximum time in milliseconds between Kafka consumer polls before Kafka removes the consumer from its group. Increase this for long-running detector batches and keep batch processing comfortably below the interval. See :doc:`kafka_recovery` for automatic membership recovery, rebalance handling, and delivery guarantees.
    * - kafka_producer.compression_type
      - ``zstd``
      - Compression codec used by HAMSTRING's Python Kafka producers. Zeek is an external producer and must be configured separately if its image supports compression settings.

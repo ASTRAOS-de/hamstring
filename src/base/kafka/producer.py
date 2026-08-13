@@ -243,6 +243,7 @@ class ExactlyOnceKafkaProduceHandler(KafkaProduceHandler):
         else:
             self._transaction_records = None
             try:
+                consumer.ensure_batch_assignment_current(consumed_messages)
                 self._run_transaction(
                     records,
                     consumer=consumer,
