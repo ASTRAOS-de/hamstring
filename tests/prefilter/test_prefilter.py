@@ -256,7 +256,9 @@ class TestInit(unittest.TestCase):
         self.assertIsNotNone(sut.logline_handler)
 
         mock_produce_handler.assert_called_once()
-        mock_consume_handler.assert_called_once_with("test_topic")
+        mock_consume_handler.assert_called_once_with(
+            "test_topic", stage="log_filtering.prefilter"
+        )
         mock_logline_handler.assert_called_once()
 
 

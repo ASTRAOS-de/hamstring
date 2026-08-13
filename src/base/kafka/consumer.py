@@ -36,13 +36,18 @@ logger = get_logger()
 class KafkaConsumeHandler(KafkaSerializationMixin, KafkaHandler):
     """Common connection, batching, decoding, and offset behavior."""
 
-    def __init__(self, topics: str | list[str]) -> None:
+    def __init__(self, topics: str | list[str], stage: str | None = None) -> None:
         super().__init__()
         self._last_consumed_message = None
         self._assignment_epoch = 0
         self._assignment_valid = False
         self._assigned_partitions: set[tuple[str, int]] = set()
         self.topics = normalize_topics(topics)
+        self.stage = stage
+        (
+            self.transaction_batch_size,
+            self.transaction_batch_timeout_ms,
+        ) = kafka_config.transaction_batch_settings(self.topics, self.stage)
         self.brokers = kafka_config.bootstrap_servers()
         self.conf = self._build_consumer_conf()
         self._connect_consumer()
@@ -208,21 +213,23 @@ class KafkaConsumeHandler(KafkaSerializationMixin, KafkaHandler):
         timeout_ms: int | None = None,
     ) -> list[ConsumedKafkaMessage]:
         """Fetch a bounded group of records without committing offsets."""
+        configured_size = getattr(
+            self,
+            "transaction_batch_size",
+            kafka_config.KAFKA_TRANSACTION_BATCH_SIZE,
+        )
         batch_size = max(
             1,
-            (
-                kafka_config.KAFKA_TRANSACTION_BATCH_SIZE
-                if max_messages is None
-                else int(max_messages)
-            ),
+            configured_size if max_messages is None else int(max_messages),
+        )
+        configured_timeout_ms = getattr(
+            self,
+            "transaction_batch_timeout_ms",
+            kafka_config.KAFKA_TRANSACTION_BATCH_TIMEOUT_MS,
         )
         batch_timeout_ms = max(
             0,
-            (
-                kafka_config.KAFKA_TRANSACTION_BATCH_TIMEOUT_MS
-                if timeout_ms is None
-                else int(timeout_ms)
-            ),
+            configured_timeout_ms if timeout_ms is None else int(timeout_ms),
         )
         deadline = time.monotonic() + batch_timeout_ms / 1000
         records = []

@@ -646,6 +646,15 @@ The following parameters control the infrastructure of the software.
    * - kafka_consumer.max_poll_interval_ms
      - ``1800000`` fallback; ``300000`` in the supplied ``config.yaml``
      - Maximum time in milliseconds between Kafka consumer polls before Kafka removes the consumer from its group. Increase this for long-running detector batches and keep batch processing comfortably below the interval. See :doc:`kafka_recovery` for automatic membership recovery, rebalance handling, and delivery guarantees.
+   * - kafka_transaction_batch.size / timeout_ms
+     - ``250`` / ``50`` in the supplied ``config.yaml``
+     - Global Kafka consume/transaction batch defaults. ``size`` counts Kafka records and ``timeout_ms`` controls how long a consumer waits while collecting a batch.
+   * - kafka_transaction_batch.stages
+     - Detector ``size: 10``; alerter ``size: 25``
+     - Per-consuming-stage overrides. Short names such as ``detector`` and fully-qualified names such as ``data_analysis.detector`` are supported.
+   * - kafka_transaction_batch.topics
+     - Domainator input topic ``size: 5``
+     - Per-topic overrides keyed by the complete consumed topic name. Exact-topic settings override stage settings, which override the global defaults. See :doc:`kafka_recovery` for examples and environment-variable precedence.
    * - kafka_producer.compression_type
      - ``zstd``
      - Compression codec used by HAMSTRING's Python Kafka producers. Zeek is an external producer and must be configured separately if its image supports compression settings.

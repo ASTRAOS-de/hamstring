@@ -70,7 +70,9 @@ class AlerterBase(AlerterAbstractBase):
         self.alert_data = None
         self.key = None
 
-        self.kafka_consume_handler = ExactlyOnceKafkaConsumeHandler(self.consume_topic)
+        self.kafka_consume_handler = ExactlyOnceKafkaConsumeHandler(
+            self.consume_topic, stage=module_name
+        )
         self.kafka_produce_handler = None
         self.server_log_terminal_events = ClickHouseKafkaSender(
             "server_log_terminal_events"

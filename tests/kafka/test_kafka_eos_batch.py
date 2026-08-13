@@ -231,6 +231,21 @@ class TestBatchConsumption(unittest.TestCase):
         )
         self.assertEqual({7}, {record.assignment_epoch for record in records})
 
+    def test_consume_batch_uses_resolved_handler_defaults(self):
+        first = self._message("source", 0, 3, "key-1", "value-1")
+        second = self._message("source", 1, 8, "key-2", "value-2")
+        self.handler.consumer.consume.return_value = [first, second]
+        self.handler.transaction_batch_size = 2
+        self.handler.transaction_batch_timeout_ms = 15
+
+        records = self.handler.consume_batch()
+
+        self.assertEqual(2, len(records))
+        self.handler.consumer.consume.assert_called_once_with(
+            num_messages=2,
+            timeout=unittest.mock.ANY,
+        )
+
     def test_offsets_use_next_offset_and_highest_record_per_partition(self):
         records = [
             ConsumedKafkaMessage(None, "one", "source", 0, 3),

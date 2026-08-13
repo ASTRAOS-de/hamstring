@@ -68,7 +68,9 @@ class LogCollector:
         self.collector_name = collector_name
         self.protocol = protocol
         self.consume_topic = consume_topic
-        self.kafka_consume_handler = ExactlyOnceKafkaConsumeHandler(consume_topic)
+        self.kafka_consume_handler = ExactlyOnceKafkaConsumeHandler(
+            consume_topic, stage=module_name
+        )
         self.batch_configuration = utils.get_batch_configuration(collector_name)
         self.loglines = asyncio.Queue()
         self.monitoring_kafka_producer = ClickHouseKafkaSender.create_shared_producer()

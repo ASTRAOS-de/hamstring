@@ -318,10 +318,20 @@ environment:
     # Compress JSON pipeline and monitoring batches before replication.
     compression_type: zstd
   kafka_transaction_batch:
-    # Each stage processes this many Kafka records before atomically publishing
-    # all outputs and committing the corresponding source offsets.
+    # Global fallback. Exact topic settings override stage settings, which
+    # override these defaults. Environment variables remain final overrides.
     size: 250
     timeout_ms: 50
+    stages:
+      # CPU-heavy inference must return to Kafka much more frequently.
+      detector:
+        size: 10
+      alerter:
+        size: 25
+    # Keys are complete consumed topic names. A topic can override either value.
+    # topics:
+    #   pipeline-inspector_to_detector-domainator:
+    #     size: 5
   kafka_topics:
     # Topics without a stage/exact override are low-volume monitoring topics.
     # Kafka retention limits apply per partition; keep these topics at one

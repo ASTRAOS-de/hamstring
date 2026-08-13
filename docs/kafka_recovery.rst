@@ -84,6 +84,48 @@ Remember that ``kafka_transaction_batch.size`` counts Kafka records, not the
 number of application events nested inside each record. Upstream application
 batches may need their own bound when detector work is expensive.
 
+Per-stage and per-topic batch settings
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Transaction batch size and collection timeout can be configured globally, by
+the consuming pipeline stage, or by the complete consumed topic name:
+
+.. code-block:: yaml
+
+   environment:
+     kafka_transaction_batch:
+       size: 250
+       timeout_ms: 50
+       stages:
+         detector:
+           size: 10
+         alerter:
+           size: 25
+       topics:
+         pipeline-inspector_to_detector-domainator:
+           size: 3
+           timeout_ms: 25
+
+The resolution order, from highest to lowest priority, is:
+
+#. ``KAFKA_TRANSACTION_BATCH_SIZE`` and
+   ``KAFKA_TRANSACTION_BATCH_TIMEOUT_MS`` environment variables;
+#. an exact entry under ``topics``;
+#. an entry under ``stages``;
+#. the global ``size`` and ``timeout_ms`` values.
+
+Stage keys can use the short component name, such as ``detector``, or the full
+internal name, such as ``data_analysis.detector``. A full name overrides the
+corresponding short name. Exact topic keys must contain the full topic name
+consumed by the worker. If one consumer subscribes to multiple topics, it uses
+the smallest effective size and timeout across those topics.
+
+The supplied configuration sets the detector stage to 10 records, the alerter
+stage to 25 records, and the initial Domainator topic to 5 records. Other stages
+inherit the global value. A caller that explicitly supplies ``max_messages`` or
+``timeout_ms`` to ``consume_batch`` still overrides the resolved defaults; the
+collector uses this for its application-level batching configuration.
+
 Operationally, alert on:
 
 * ``_MAX_POLL_EXCEEDED`` and ``UNKNOWN_MEMBER_ID``;
@@ -100,4 +142,3 @@ other external actions are not part of that transaction. A recovered batch is
 processed again and can repeat those external effects. Integrations requiring
 deduplication should use a stable identifier such as ``server_message_id`` or
 ``logline_id``.
-
