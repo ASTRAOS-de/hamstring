@@ -67,9 +67,7 @@ class TestTransactionBatchSettings(unittest.TestCase):
                 "pipeline-inspector_to_detector-domainator",
                 stage="data_analysis.detector",
                 stage_config={"detector": {"size": 10, "timeout_ms": 25}},
-                topic_config={
-                    "pipeline-inspector_to_detector-domainator": {"size": 3}
-                },
+                topic_config={"pipeline-inspector_to_detector-domainator": {"size": 3}},
             ),
         )
 

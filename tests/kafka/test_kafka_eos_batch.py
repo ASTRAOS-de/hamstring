@@ -164,9 +164,7 @@ class TestTransactionalBatch(unittest.TestCase):
         self.assertEqual(2, producer.begin_transaction.call_count)
 
     @patch("src.base.kafka.producer.Producer")
-    def test_revoked_batch_is_rejected_before_a_transaction_begins(
-        self, mock_producer
-    ):
+    def test_revoked_batch_is_rejected_before_a_transaction_begins(self, mock_producer):
         producer = mock_producer.return_value
         consumer = MagicMock()
         consumer.ensure_batch_assignment_current.side_effect = (

@@ -27,12 +27,8 @@ KAFKA_PRODUCER_COMPRESSION_TYPE = os.getenv(
 KAFKA_TRANSACTION_BATCH_CONFIG = CONFIG["environment"].get(
     "kafka_transaction_batch", {}
 )
-KAFKA_TRANSACTION_BATCH_STAGE_CONFIG = KAFKA_TRANSACTION_BATCH_CONFIG.get(
-    "stages", {}
-)
-KAFKA_TRANSACTION_BATCH_TOPIC_CONFIG = KAFKA_TRANSACTION_BATCH_CONFIG.get(
-    "topics", {}
-)
+KAFKA_TRANSACTION_BATCH_STAGE_CONFIG = KAFKA_TRANSACTION_BATCH_CONFIG.get("stages", {})
+KAFKA_TRANSACTION_BATCH_TOPIC_CONFIG = KAFKA_TRANSACTION_BATCH_CONFIG.get("topics", {})
 KAFKA_TRANSACTION_BATCH_SIZE = int(
     os.getenv(
         "KAFKA_TRANSACTION_BATCH_SIZE",
@@ -85,6 +81,7 @@ def transaction_batch_settings(
     if "KAFKA_TRANSACTION_BATCH_TIMEOUT_MS" in os.environ:
         timeout_ms = max(0, int(os.environ["KAFKA_TRANSACTION_BATCH_TIMEOUT_MS"]))
     return size, timeout_ms
+
 
 KAFKA_TOPIC_CONFIG = CONFIG["environment"].get("kafka_topics", {})
 KAFKA_TOPIC_DEFAULT_PARTITIONS = int(

@@ -187,15 +187,12 @@ class TestBootstrapPrefilteringProcess(unittest.TestCase):
             [
                 "domain_name",
                 "RegEx",
-                r"^(?=.{1,253}$)((?!-)[A-Za-z0-9-]{1,63}(?<!-)\.)+"
-                r"[A-Za-z]{2,63}$",
+                r"^(?=.{1,253}$)((?!-)[A-Za-z0-9-]{1,63}(?<!-)\.)+" r"[A-Za-z]{2,63}$",
             ],
         ]
         sut = Prefilter(
             consume_topic="pipeline-batch_sender_to_prefilter-domainator_filter",
-            produce_topics=[
-                "pipeline-prefilter_to_inspector-domainator_inspector"
-            ],
+            produce_topics=["pipeline-prefilter_to_inspector-domainator_inspector"],
             relevance_function_name="check_domainator_relevance",
             validation_config=validation_config,
         )
