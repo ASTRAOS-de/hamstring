@@ -102,7 +102,7 @@ class TestTransactionBatchSettings(unittest.TestCase):
     def test_supplied_config_uses_safe_detector_and_alerter_overrides(self):
         with patch.dict(os.environ, {}, clear=True):
             self.assertEqual(
-                (5, 50),
+                (10, 50),
                 kafka_config.transaction_batch_settings(
                     "pipeline-inspector_to_detector-domainator",
                     "data_analysis.detector",
