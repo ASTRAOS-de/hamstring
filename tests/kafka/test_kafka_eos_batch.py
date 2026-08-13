@@ -1,6 +1,8 @@
 import unittest
 from unittest.mock import MagicMock, call, patch
 
+from confluent_kafka import KafkaError, KafkaException
+
 from src.base.kafka import (
     ConsumedKafkaMessage,
     ExactlyOnceKafkaConsumeHandler,
@@ -72,6 +74,93 @@ class TestTransactionalBatch(unittest.TestCase):
             consumer.group_metadata.return_value,
         )
         producer.commit_transaction.assert_called_once_with()
+
+    @patch(
+        "src.base.kafka.producer.retry_forever",
+        side_effect=lambda operation, *_args, **_kwargs: operation(),
+    )
+    @patch("src.base.kafka.producer.Producer")
+    def test_stale_consumer_membership_aborts_and_recovers_without_producer_retry(
+        self, mock_producer, _mock_retry_forever
+    ):
+        producer = mock_producer.return_value
+        consumer = MagicMock()
+        source_messages = [
+            ConsumedKafkaMessage("source-key", "source-value", "source", 0, 4)
+        ]
+        producer.send_offsets_to_transaction.side_effect = KafkaException(
+            KafkaError(KafkaError.UNKNOWN_MEMBER_ID)
+        )
+        handler = ExactlyOnceKafkaProduceHandler()
+
+        with handler.transaction_batch(consumer, source_messages):
+            handler.produce("output", "result", key="source-key")
+
+        producer.abort_transaction.assert_called_once_with()
+        producer.commit_transaction.assert_not_called()
+        consumer.recover_group_membership.assert_called_once()
+        self.assertEqual(1, mock_producer.call_count)
+
+    @patch(
+        "src.base.kafka.producer.retry_forever",
+        side_effect=lambda operation, *_args, **_kwargs: operation(),
+    )
+    @patch("src.base.kafka.producer.Producer")
+    def test_all_stale_group_errors_take_the_consumer_recovery_path(
+        self, mock_producer, _mock_retry_forever
+    ):
+        membership_error_names = (
+            "UNKNOWN_MEMBER_ID",
+            "ILLEGAL_GENERATION",
+            "REBALANCE_IN_PROGRESS",
+        )
+
+        for error_name in membership_error_names:
+            with self.subTest(error_name=error_name):
+                producer = MagicMock()
+                mock_producer.return_value = producer
+                producer.send_offsets_to_transaction.side_effect = KafkaException(
+                    KafkaError(getattr(KafkaError, error_name))
+                )
+                consumer = MagicMock()
+                handler = ExactlyOnceKafkaProduceHandler()
+
+                with handler.transaction_batch(
+                    consumer,
+                    [ConsumedKafkaMessage(None, "value", "source", 0, 1)],
+                ):
+                    handler.produce("output", "result")
+
+                producer.abort_transaction.assert_called_once_with()
+                consumer.recover_group_membership.assert_called_once()
+
+    @patch(
+        "src.base.kafka.producer.retry_forever",
+        side_effect=lambda operation, *_args, **_kwargs: operation(),
+    )
+    @patch("src.base.kafka.producer.Producer")
+    def test_transaction_can_succeed_after_membership_recovery(
+        self, mock_producer, _mock_retry_forever
+    ):
+        producer = mock_producer.return_value
+        producer.send_offsets_to_transaction.side_effect = [
+            KafkaException(KafkaError(KafkaError.UNKNOWN_MEMBER_ID)),
+            None,
+        ]
+        consumer = MagicMock()
+        handler = ExactlyOnceKafkaProduceHandler()
+        source_message = ConsumedKafkaMessage(None, "value", "source", 0, 1)
+
+        with handler.transaction_batch(consumer, [source_message]):
+            handler.produce("output", "first-attempt")
+
+        with handler.transaction_batch(consumer, [source_message]):
+            handler.produce("output", "replayed-attempt")
+
+        consumer.recover_group_membership.assert_called_once()
+        producer.abort_transaction.assert_called_once_with()
+        producer.commit_transaction.assert_called_once_with()
+        self.assertEqual(2, producer.begin_transaction.call_count)
 
 
 class TestBatchConsumption(unittest.TestCase):
@@ -149,6 +238,17 @@ class TestBatchConsumption(unittest.TestCase):
                 for item in commit_kwargs["offsets"]
             },
         )
+
+    def test_max_poll_error_resets_membership_and_returns_no_records(self):
+        message = MagicMock()
+        message.error.return_value = KafkaError(KafkaError._MAX_POLL_EXCEEDED)
+        self.handler.consumer.consume.return_value = [message]
+        self.handler.recover_group_membership = MagicMock()
+
+        records = self.handler.consume_batch(max_messages=1, timeout_ms=10)
+
+        self.assertEqual([], records)
+        self.handler.recover_group_membership.assert_called_once()
 
 
 if __name__ == "__main__":

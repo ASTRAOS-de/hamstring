@@ -15,7 +15,10 @@ from src.base.kafka.errors import (
     TooManyFailedAttemptsError,
 )
 from src.base.kafka.records import ConsumedKafkaMessage
-from src.base.kafka.resilience import is_retriable_kafka_error
+from src.base.kafka.resilience import (
+    is_consumer_membership_error,
+    is_retriable_kafka_error,
+)
 from src.base.kafka.serialization import KafkaSerializationMixin
 from src.base.kafka.topics import (
     build_consumer_group_id,
@@ -83,6 +86,15 @@ class KafkaConsumeHandler(KafkaSerializationMixin, KafkaHandler):
             )
         self._last_consumed_message = None
         self._connect_consumer()
+
+    def recover_group_membership(self, reason: Exception | None = None) -> None:
+        """Discard stale membership and subscribe a fresh consumer instance."""
+        logger.warning(
+            "Kafka consumer group membership was lost%s; resetting and "
+            "resubscribing so uncommitted records can be consumed again.",
+            f": {reason}" if reason else "",
+        )
+        self._reset_consumer()
 
     def commit(
         self,
@@ -157,6 +169,13 @@ class KafkaConsumeHandler(KafkaSerializationMixin, KafkaHandler):
                 return []
 
             for message in messages or []:
+                if is_consumer_membership_error(message.error()):
+                    self.recover_group_membership(
+                        KafkaMessageFetchException(
+                            f"Kafka consumer membership error: {message.error()}"
+                        )
+                    )
+                    return []
                 record = self._record_from_message(message)
                 if record is not None:
                     records.append(record)

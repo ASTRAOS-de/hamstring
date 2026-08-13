@@ -11,8 +11,10 @@ from confluent_kafka import KafkaException, Producer
 
 from src.base.kafka import config as kafka_config
 from src.base.kafka.client import KafkaHandler
+from src.base.kafka.errors import KafkaConsumerMembershipLost
 from src.base.kafka.records import ConsumedKafkaMessage, KafkaProduceRecord
 from src.base.kafka.resilience import (
+    is_consumer_membership_exception,
     is_retriable_kafka_error,
     is_retriable_kafka_exception,
 )
@@ -240,11 +242,16 @@ class ExactlyOnceKafkaProduceHandler(KafkaProduceHandler):
             raise
         else:
             self._transaction_records = None
-            self._run_transaction(
-                records,
-                consumer=consumer,
-                consumed_messages=consumed_messages,
-            )
+            try:
+                self._run_transaction(
+                    records,
+                    consumer=consumer,
+                    consumed_messages=consumed_messages,
+                )
+            except KafkaConsumerMembershipLost as exception:
+                # Offsets were not committed. A fresh subscription lets Kafka
+                # redeliver this batch from the last committed offsets.
+                consumer.recover_group_membership(exception)
 
     def _run_transaction(
         self,
@@ -280,6 +287,8 @@ class ExactlyOnceKafkaProduceHandler(KafkaProduceHandler):
                     )
                 logger.error("Transaction aborted.")
                 logger.error(exception)
+                if is_consumer_membership_exception(exception):
+                    raise KafkaConsumerMembershipLost(str(exception)) from exception
                 raise
 
         self._with_producer_retry("Kafka transaction", operation)

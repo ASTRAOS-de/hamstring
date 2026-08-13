@@ -7,3 +7,7 @@ class TooManyFailedAttemptsError(Exception):
 
 class KafkaMessageFetchException(Exception):
     """Raised when Kafka returns a permanent consumer error."""
+
+
+class KafkaConsumerMembershipLost(Exception):
+    """Raised when a transaction uses stale consumer-group membership."""
