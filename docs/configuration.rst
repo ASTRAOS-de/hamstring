@@ -471,7 +471,10 @@ The following list shows the available configuration options.
    * - relevance_method
      - The name of the method used to to check if a given logline is relevant for further inspection.
        This check can be skipped by choosing ``"no_relevance_check"``.
-       Avalable configurations are: ``"no_relevance_check"``, ``"check_dga_relevance"``
+       Available configurations are: ``"no_relevance_check"``, ``"check_dga_relevance"``, and
+       ``"check_domainator_relevance"``. The Domainator method uses an offline Public Suffix List and forwards only
+       names with a subdomain above the registrable domain; for example, ``api.amazon.co.uk`` passes while
+       ``amazon.co.uk`` does not.
    * - collector_name
      - The name of the collector configuration the prefilter consumes data from. The same collector name can be referenced in multiple prefilter configurations.
 

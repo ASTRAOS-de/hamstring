@@ -134,7 +134,10 @@ pipeline:
       relevance_method: check_dga_relevance
       collector_name: dga_collector
     - name: "domainator_filter"
-      relevance_method: no_relevance_check
+      # Forward only DNS names with at least one label above the registrable
+      # domain. For example: api.example.com passes; example.com and
+      # amazon.co.uk do not.
+      relevance_method: check_domainator_relevance
       collector_name: domainator_collector
 
   data_inspection:
