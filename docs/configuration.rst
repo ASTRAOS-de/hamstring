@@ -471,7 +471,10 @@ The following list shows the available configuration options.
    * - relevance_method
      - The name of the method used to to check if a given logline is relevant for further inspection.
        This check can be skipped by choosing ``"no_relevance_check"``.
-       Avalable configurations are: ``"no_relevance_check"``, ``"check_dga_relevance"``
+       Available configurations are: ``"no_relevance_check"``, ``"check_dga_relevance"``, and
+       ``"check_domainator_relevance"``. The Domainator method uses an offline Public Suffix List and forwards only
+       names with a subdomain above the registrable domain; for example, ``api.amazon.co.uk`` passes while
+       ``amazon.co.uk`` does not.
    * - collector_name
      - The name of the collector configuration the prefilter consumes data from. The same collector name can be referenced in multiple prefilter configurations.
 
@@ -644,8 +647,17 @@ The following parameters control the infrastructure of the software.
      - Kafka topic name prefixes given as strings. These prefix name are used to construct the actual topic names based on the instance name (e.g. a collector instance name) that produces for the given stage.
        (e.g. a prefilter instance name is added as suffix to the prefilter_to_inspector prefix for the inspector to know where to consume.)
    * - kafka_consumer.max_poll_interval_ms
-     - ``1800000``
-     - Maximum time in milliseconds between Kafka consumer polls before Kafka removes the consumer from its group. Increase this for long-running detector batches.
+     - ``1800000`` fallback; ``300000`` in the supplied ``config.yaml``
+     - Maximum time in milliseconds between Kafka consumer polls before Kafka removes the consumer from its group. Increase this for long-running detector batches and keep batch processing comfortably below the interval. See :doc:`kafka_recovery` for automatic membership recovery, rebalance handling, and delivery guarantees.
+   * - kafka_transaction_batch.size / timeout_ms
+     - ``250`` / ``50`` in the supplied ``config.yaml``
+     - Global Kafka consume/transaction batch defaults. ``size`` counts Kafka records and ``timeout_ms`` controls how long a consumer waits while collecting a batch.
+   * - kafka_transaction_batch.stages
+     - Detector ``size: 10``; alerter ``size: 25``
+     - Per-consuming-stage overrides. Short names such as ``detector`` and fully-qualified names such as ``data_analysis.detector`` are supported.
+   * - kafka_transaction_batch.topics
+     - Domainator input topic ``size: 5``
+     - Per-topic overrides keyed by the complete consumed topic name. Exact-topic settings override stage settings, which override the global defaults. See :doc:`kafka_recovery` for examples and environment-variable precedence.
    * - kafka_producer.compression_type
      - ``zstd``
      - Compression codec used by HAMSTRING's Python Kafka producers. Zeek is an external producer and must be configured separately if its image supports compression settings.

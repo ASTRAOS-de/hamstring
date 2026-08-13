@@ -70,6 +70,39 @@ class TestRelevanceHandler(unittest.TestCase):
         # Should return True because relevant_list is empty (no filtering)
         self.assertTrue(self.handler.check_dga_relevance(logline))
 
+    def test_domainator_relevance_rejects_registrable_domains(self):
+        for domain_name in (
+            "google.com",
+            "amazon.co.uk",
+            "example.com.",
+            "foo.blogspot.com",
+        ):
+            with self.subTest(domain_name=domain_name):
+                self.assertFalse(
+                    self.handler.check_domainator_relevance(
+                        {"domain_name": domain_name}
+                    )
+                )
+
+    def test_domainator_relevance_accepts_names_with_subdomains(self):
+        for domain_name in (
+            "www.google.com",
+            "api.amazon.co.uk",
+            "a.b.example.com.",
+            "bar.foo.blogspot.com",
+        ):
+            with self.subTest(domain_name=domain_name):
+                self.assertTrue(
+                    self.handler.check_domainator_relevance(
+                        {"domain_name": domain_name}
+                    )
+                )
+
+    def test_domainator_relevance_rejects_missing_or_invalid_domain_values(self):
+        for logline in ({}, {"domain_name": None}, {"domain_name": ""}):
+            with self.subTest(logline=logline):
+                self.assertFalse(self.handler.check_domainator_relevance(logline))
+
 
 if __name__ == "__main__":
     unittest.main()

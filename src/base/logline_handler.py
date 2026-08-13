@@ -1,10 +1,18 @@
 import datetime
 import re
 import json
+import tldextract
 from src.base.log_config import get_logger
 from src.base.utils import setup_config, validate_host
 
 logger = get_logger()
+
+# Use tldextract's bundled Public Suffix List snapshot. Disabling remote list
+# updates keeps filtering deterministic and avoids a startup network dependency.
+_DOMAIN_EXTRACTOR = tldextract.TLDExtract(
+    suffix_list_urls=(),
+    include_psl_private_domains=True,
+)
 
 CONFIG = setup_config()
 
@@ -211,6 +219,25 @@ class RelevanceHandler:
                     if not relevant:
                         return relevant
         return relevant
+
+    def check_domainator_relevance(self, logline_dict: dict) -> bool:
+        """Return whether a DNS name contains labels above its registrable domain.
+
+        Public-suffix-aware parsing is required here: ``amazon.co.uk`` is a
+        registrable domain without a subdomain, while ``api.amazon.co.uk`` has
+        the subdomain ``api``. Private suffixes from the bundled PSL are also
+        respected.
+        """
+        domain_name = logline_dict.get("domain_name")
+        if not isinstance(domain_name, str):
+            return False
+
+        normalized_domain = domain_name.strip().rstrip(".")
+        if not normalized_domain:
+            return False
+
+        extracted = _DOMAIN_EXTRACTOR(normalized_domain)
+        return bool(extracted.domain and extracted.suffix and extracted.subdomain)
 
     def no_relevance_check(self, logline_dict: dict) -> bool:
         """

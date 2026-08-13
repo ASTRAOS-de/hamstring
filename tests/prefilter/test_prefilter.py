@@ -171,6 +171,54 @@ class TestBootstrapPrefilteringProcess(unittest.TestCase):
         self.assertEqual(sut.subnet_id, "127.0.0.0_24")
 
     @patch("src.prefilter.prefilter.logger")
+    @patch("src.prefilter.prefilter.ExactlyOnceKafkaConsumeHandler")
+    @patch("src.prefilter.prefilter.ExactlyOnceKafkaProduceHandler")
+    @patch("src.prefilter.prefilter.ClickHouseKafkaSender")
+    def test_domainator_prefilter_forwards_only_names_with_subdomains(
+        self,
+        mock_clickhouse,
+        mock_produce_handler,
+        mock_consume_handler,
+        mock_logger,
+    ):
+        validation_config = [
+            ["ts", "Timestamp", "%Y-%m-%dT%H:%M:%S"],
+            ["src_ip", "IpAddress"],
+            [
+                "domain_name",
+                "RegEx",
+                r"^(?=.{1,253}$)((?!-)[A-Za-z0-9-]{1,63}(?<!-)\.)+" r"[A-Za-z]{2,63}$",
+            ],
+        ]
+        sut = Prefilter(
+            consume_topic="pipeline-batch_sender_to_prefilter-domainator_filter",
+            produce_topics=["pipeline-prefilter_to_inspector-domainator_inspector"],
+            relevance_function_name="check_domainator_relevance",
+            validation_config=validation_config,
+        )
+        records = [
+            {"logline_id": str(uuid.uuid4()), "domain_name": "google.com"},
+            {"logline_id": str(uuid.uuid4()), "domain_name": "www.google.com"},
+            {"logline_id": str(uuid.uuid4()), "domain_name": "amazon.co.uk"},
+            {"logline_id": str(uuid.uuid4()), "domain_name": "api.amazon.co.uk"},
+        ]
+        sut.unfiltered_data = records
+        sut.logline_timestamps.insert.reset_mock()
+
+        sut.check_data_relevance_using_rules()
+
+        self.assertEqual(
+            ["www.google.com", "api.amazon.co.uk"],
+            [record["domain_name"] for record in sut.filtered_data],
+        )
+        filtered_out_events = [
+            call.args[0]
+            for call in sut.logline_timestamps.insert.call_args_list
+            if call.args and call.args[0].get("status") == "filtered_out"
+        ]
+        self.assertEqual(2, len(filtered_out_events))
+
+    @patch("src.prefilter.prefilter.logger")
     @patch("src.prefilter.prefilter.LoglineHandler")
     @patch("src.prefilter.prefilter.ExactlyOnceKafkaConsumeHandler")
     @patch("src.prefilter.prefilter.ExactlyOnceKafkaProduceHandler")
@@ -256,7 +304,9 @@ class TestInit(unittest.TestCase):
         self.assertIsNotNone(sut.logline_handler)
 
         mock_produce_handler.assert_called_once()
-        mock_consume_handler.assert_called_once_with("test_topic")
+        mock_consume_handler.assert_called_once_with(
+            "test_topic", stage="log_filtering.prefilter"
+        )
         mock_logline_handler.assert_called_once()
 
 

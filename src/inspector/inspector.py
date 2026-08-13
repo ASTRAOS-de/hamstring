@@ -115,7 +115,9 @@ class InspectorBase(InspectorAbstractBase):
         self.messages = []
         self.anomalies = []
 
-        self.kafka_consume_handler = ExactlyOnceKafkaConsumeHandler(self.consume_topic)
+        self.kafka_consume_handler = ExactlyOnceKafkaConsumeHandler(
+            self.consume_topic, stage=module_name
+        )
         self.kafka_produce_handler = ExactlyOnceKafkaProduceHandler()
         self.monitoring_kafka_producer = ClickHouseKafkaSender.create_shared_producer()
 

@@ -43,7 +43,9 @@ class TestInit(unittest.TestCase):
 
         mock_batch_handler.assert_called_once()
         mock_logline_handler.assert_called_once()
-        mock_kafka_handler.assert_called_once_with("test_topic")
+        mock_kafka_handler.assert_called_once_with(
+            "test_topic", stage="log_collection.collector"
+        )
 
 
 class TestStart(unittest.IsolatedAsyncioTestCase):

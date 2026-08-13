@@ -57,7 +57,12 @@ class TestInit(unittest.TestCase):
         self.assertEqual(mock_consumer_instance, sut.consumer)
 
         mock_consumer.assert_called_once_with(expected_conf)
-        mock_consumer_instance.subscribe.assert_called_once()
+        mock_consumer_instance.subscribe.assert_called_once_with(
+            ["test_topic"],
+            on_assign=sut._on_assign,
+            on_revoke=sut._on_revoke,
+            on_lost=sut._on_lost,
+        )
 
     @patch(
         "src.base.kafka.config.KAFKA_BROKERS",
