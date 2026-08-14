@@ -102,3 +102,4 @@ class DomainatorDetector(DetectorBase):
 
                 if len(self.message_queues[message_domain]) >= 10:
                     del self.message_queues[message_domain][0]
+        logger.debug(f"Domainator Message queue length: {len(self.message_queues)}")

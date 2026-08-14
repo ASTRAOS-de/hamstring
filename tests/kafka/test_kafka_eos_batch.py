@@ -8,7 +8,9 @@ from src.base.kafka import (
     ExactlyOnceKafkaConsumeHandler,
     ExactlyOnceKafkaProduceHandler,
     KafkaConsumerMembershipLost,
+    KafkaInfrastructureUnavailable,
 )
+from src.base.kafka import config as kafka_config
 
 
 class TestTransactionalBatch(unittest.TestCase):
@@ -50,9 +52,13 @@ class TestTransactionalBatch(unittest.TestCase):
             producer.produce.call_args_list,
         )
         producer.send_offsets_to_transaction.assert_called_once_with(
-            offsets, group_metadata
+            offsets,
+            group_metadata,
+            timeout=kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS,
         )
-        producer.commit_transaction.assert_called_once_with()
+        producer.commit_transaction.assert_called_once_with(
+            timeout=kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS
+        )
 
     @patch("src.base.kafka.producer.Producer")
     def test_source_offsets_are_committed_when_processing_has_no_output(
@@ -73,8 +79,11 @@ class TestTransactionalBatch(unittest.TestCase):
         producer.send_offsets_to_transaction.assert_called_once_with(
             consumer.offsets_for.return_value,
             consumer.group_metadata.return_value,
+            timeout=kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS,
         )
-        producer.commit_transaction.assert_called_once_with()
+        producer.commit_transaction.assert_called_once_with(
+            timeout=kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS
+        )
 
     @patch(
         "src.base.kafka.producer.retry_forever",
@@ -97,7 +106,9 @@ class TestTransactionalBatch(unittest.TestCase):
         with handler.transaction_batch(consumer, source_messages):
             handler.produce("output", "result", key="source-key")
 
-        producer.abort_transaction.assert_called_once_with()
+        producer.abort_transaction.assert_called_once_with(
+            timeout=kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS
+        )
         producer.commit_transaction.assert_not_called()
         consumer.recover_group_membership.assert_called_once()
         self.assertEqual(1, mock_producer.call_count)
@@ -132,7 +143,9 @@ class TestTransactionalBatch(unittest.TestCase):
                 ):
                     handler.produce("output", "result")
 
-                producer.abort_transaction.assert_called_once_with()
+                producer.abort_transaction.assert_called_once_with(
+                    timeout=kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS
+                )
                 consumer.recover_group_membership.assert_called_once()
 
     @patch(
@@ -159,9 +172,41 @@ class TestTransactionalBatch(unittest.TestCase):
             handler.produce("output", "replayed-attempt")
 
         consumer.recover_group_membership.assert_called_once()
-        producer.abort_transaction.assert_called_once_with()
-        producer.commit_transaction.assert_called_once_with()
+        producer.abort_transaction.assert_called_once_with(
+            timeout=kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS
+        )
+        producer.commit_transaction.assert_called_once_with(
+            timeout=kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS
+        )
         self.assertEqual(2, producer.begin_transaction.call_count)
+
+    @patch(
+        "src.base.kafka.producer.retry_forever",
+        side_effect=lambda operation, *_args, **_kwargs: operation(),
+    )
+    @patch("src.base.kafka.producer.Producer")
+    def test_transport_timeout_resets_producer_and_consumer_before_replay(
+        self, mock_producer, _mock_retry_forever
+    ):
+        producer = mock_producer.return_value
+        producer.send_offsets_to_transaction.side_effect = KafkaException(
+            KafkaError(KafkaError._TIMED_OUT)
+        )
+        consumer = MagicMock()
+        handler = ExactlyOnceKafkaProduceHandler()
+
+        with handler.transaction_batch(
+            consumer,
+            [ConsumedKafkaMessage(None, "value", "source", 0, 1)],
+        ):
+            handler.produce("output", "result")
+
+        producer.abort_transaction.assert_called_once_with(
+            timeout=kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS
+        )
+        consumer.disconnect_for_recovery.assert_called_once()
+        consumer.reconnect_after_recovery.assert_called_once_with()
+        self.assertEqual(2, mock_producer.call_count)
 
     @patch("src.base.kafka.producer.Producer")
     def test_revoked_batch_is_rejected_before_a_transaction_begins(self, mock_producer):
@@ -246,9 +291,9 @@ class TestBatchConsumption(unittest.TestCase):
 
     def test_offsets_use_next_offset_and_highest_record_per_partition(self):
         records = [
-            ConsumedKafkaMessage(None, "one", "source", 0, 3),
-            ConsumedKafkaMessage(None, "two", "source", 1, 8),
-            ConsumedKafkaMessage(None, "three", "source", 0, 7),
+            ConsumedKafkaMessage(None, "one", "source", 0, 3, assignment_epoch=7),
+            ConsumedKafkaMessage(None, "two", "source", 1, 8, assignment_epoch=7),
+            ConsumedKafkaMessage(None, "three", "source", 0, 7, assignment_epoch=7),
         ]
 
         offsets = self.handler.offsets_for(records)
@@ -260,9 +305,9 @@ class TestBatchConsumption(unittest.TestCase):
 
     def test_commit_batch_commits_all_partition_offsets_synchronously(self):
         records = [
-            ConsumedKafkaMessage(None, "one", "source", 0, 3),
-            ConsumedKafkaMessage(None, "two", "source", 1, 8),
-            ConsumedKafkaMessage(None, "three", "source", 0, 7),
+            ConsumedKafkaMessage(None, "one", "source", 0, 3, assignment_epoch=7),
+            ConsumedKafkaMessage(None, "two", "source", 1, 8, assignment_epoch=7),
+            ConsumedKafkaMessage(None, "three", "source", 0, 7, assignment_epoch=7),
         ]
 
         self.handler.commit(records)
@@ -277,6 +322,35 @@ class TestBatchConsumption(unittest.TestCase):
                 for item in commit_kwargs["offsets"]
             },
         )
+
+    @patch("src.base.kafka.consumer.retry_with_timeout")
+    def test_commit_membership_loss_is_not_retried_forever(self, mock_retry):
+        record = ConsumedKafkaMessage(
+            None, "one", "source", 0, 3, assignment_epoch=7
+        )
+
+        def run_once(operation, *_args, **_kwargs):
+            return operation()
+
+        mock_retry.side_effect = run_once
+        self.handler.consumer.commit.side_effect = KafkaException(
+            KafkaError(KafkaError.UNKNOWN_MEMBER_ID)
+        )
+
+        with self.assertRaises(KafkaConsumerMembershipLost):
+            self.handler.commit([record])
+
+        self.handler.consumer.commit.assert_called_once()
+
+    @patch("src.base.kafka.consumer.retry_with_timeout")
+    def test_commit_retry_deadline_requests_fresh_kafka_connection(self, mock_retry):
+        record = ConsumedKafkaMessage(
+            None, "one", "source", 0, 3, assignment_epoch=7
+        )
+        mock_retry.side_effect = KafkaException(KafkaError(KafkaError._TIMED_OUT))
+
+        with self.assertRaises(KafkaInfrastructureUnavailable):
+            self.handler.commit([record])
 
     def test_max_poll_error_resets_membership_and_returns_no_records(self):
         message = MagicMock()

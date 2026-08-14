@@ -278,26 +278,30 @@ pipeline:
     plugins: []
   monitoring:
     kafka_consumer:
-      # Monitoring produces several records per pipeline message. Consume them
-      # in larger blocks so schema decoding, ClickHouse writes, and offset
-      # commits are amortized across the batch.
-      batch_size: 5000
+      # Keep the uncommitted replay window bounded. ClickHouse already flushes
+      # each table every 50 rows, so a much larger Kafka batch does not create
+      # larger ClickHouse inserts; it only delays the Kafka offset commit.
+      batch_size: 500
       # Match the ClickHouse partial-batch window. A shorter timeout forces
       # sparse tables into many small synchronous inserts.
       timeout_ms: 2000
     clickhouse_connector:
       batch_size: 50  # do not set higher
       batch_timeout: 2.0
+      # Keep a sink outage well below Kafka's max-poll interval. The monitoring
+      # agent leaves its consumer group before longer reconnect attempts.
+      connect_timeout_seconds: 10
+      operation_timeout_seconds: 30
 
 
   zeek:
     sensors:
       zeek:
-        static_analysis: true
+        static_analysis: false
         protocols:
           - dns
         interfaces:
-          - eth1
+          - wlp3s0
 
 environment:
   kafka_brokers:
@@ -317,13 +321,21 @@ environment:
     # Allow long-running detector batches without Kafka forcing a group rebalance.
     # Default librdkafka value is 300000 ms (5 minutes)
     max_poll_interval_ms: 300000
+    # A commit belongs to one consumer generation. Give transient coordinator
+    # errors a short recovery window, then resubscribe instead of retrying a
+    # stale generation forever.
+    commit_retry_timeout_seconds: 30
   kafka_producer:
     # Compress JSON pipeline and monitoring batches before replication.
     compression_type: zstd
+    # Bound native transactional calls so a broker/DNS outage returns control
+    # to coordinated producer/consumer recovery.
+    transaction_api_timeout_seconds: 30
+    message_timeout_ms: 60000
   kafka_transaction_batch:
     # Global fallback. Exact topic settings override stage settings, which
     # override these defaults. Environment variables remain final overrides.
-    size: 250
+    size: 50
     timeout_ms: 50
     stages:
       # CPU-heavy inference must return to Kafka much more frequently.
