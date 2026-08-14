@@ -325,9 +325,7 @@ class TestBatchConsumption(unittest.TestCase):
 
     @patch("src.base.kafka.consumer.retry_with_timeout")
     def test_commit_membership_loss_is_not_retried_forever(self, mock_retry):
-        record = ConsumedKafkaMessage(
-            None, "one", "source", 0, 3, assignment_epoch=7
-        )
+        record = ConsumedKafkaMessage(None, "one", "source", 0, 3, assignment_epoch=7)
 
         def run_once(operation, *_args, **_kwargs):
             return operation()
@@ -344,9 +342,7 @@ class TestBatchConsumption(unittest.TestCase):
 
     @patch("src.base.kafka.consumer.retry_with_timeout")
     def test_commit_retry_deadline_requests_fresh_kafka_connection(self, mock_retry):
-        record = ConsumedKafkaMessage(
-            None, "one", "source", 0, 3, assignment_epoch=7
-        )
+        record = ConsumedKafkaMessage(None, "one", "source", 0, 3, assignment_epoch=7)
         mock_retry.side_effect = KafkaException(KafkaError(KafkaError._TIMED_OUT))
 
         with self.assertRaises(KafkaInfrastructureUnavailable):

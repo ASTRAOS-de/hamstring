@@ -209,9 +209,7 @@ class TestRun(unittest.TestCase):
         self.sut._recover_kafka_commit(reason)
 
         self.sut.batch_sender.discard_all.assert_called_once_with()
-        self.sut.kafka_consumer.recover_group_membership.assert_called_once_with(
-            reason
-        )
+        self.sut.kafka_consumer.recover_group_membership.assert_called_once_with(reason)
 
     def test_failed_clickhouse_batch_does_not_commit_kafka_offsets(self):
         source_record = ConsumedKafkaMessage(
