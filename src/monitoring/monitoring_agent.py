@@ -6,8 +6,18 @@ from dataclasses import asdict
 import marshmallow_dataclass
 
 sys.path.append(os.getcwd())
-from src.monitoring.clickhouse_batch_sender import *
-from src.base.kafka import SimpleKafkaConsumeHandler
+from src.monitoring.clickhouse_batch_sender import (
+    CLICKHOUSE_CONNECT_TIMEOUT_SECONDS,
+    CLICKHOUSE_OPERATION_TIMEOUT_SECONDS,
+    ClickHouseBatchSender,
+    ClickHouseUnavailable,
+    create_clickhouse_client,
+)
+from src.base.kafka import (
+    KafkaConsumerMembershipLost,
+    KafkaInfrastructureUnavailable,
+    SimpleKafkaConsumeHandler,
+)
 from src.base.data_classes.clickhouse_connectors import TABLE_NAME_TO_TYPE
 from src.base.log_config import get_logger
 from src.base.utils import setup_config
@@ -101,16 +111,54 @@ class MonitoringAgent:
         ]
 
         self.topics = [f"clickhouse_{table_name}" for table_name in self.table_names]
-        self.kafka_consumer = SimpleKafkaConsumeHandler(self.topics)
         # This worker explicitly flushes before committing its Kafka offsets.
         # A timer would race with record decoding and create smaller inserts.
+        # Connect to the sink before joining Kafka so a ClickHouse startup
+        # outage cannot leave this worker holding a consumer assignment.
         self.batch_sender = ClickHouseBatchSender(use_timer=False)
+        self.kafka_consumer = SimpleKafkaConsumeHandler(self.topics)
         self.data_schemas = {
             table_name: marshmallow_dataclass.class_schema(
                 TABLE_NAME_TO_TYPE[table_name]
             )()
             for table_name in self.table_names
         }
+        logger.info(
+            "Monitoring worker %s configured with Kafka batch size %d, "
+            "batch timeout %dms, ClickHouse connect timeout %.1fs, and "
+            "ClickHouse operation timeout %.1fs.",
+            self.worker_id,
+            MONITORING_CONSUMER_BATCH_SIZE,
+            MONITORING_CONSUMER_TIMEOUT_MS,
+            CLICKHOUSE_CONNECT_TIMEOUT_SECONDS,
+            CLICKHOUSE_OPERATION_TIMEOUT_SECONDS,
+        )
+
+    def _recover_clickhouse(self, reason: Exception) -> None:
+        """Leave Kafka, wait for ClickHouse, then replay uncommitted input."""
+        logger.warning(
+            "Monitoring sink is unavailable; leaving the Kafka consumer group "
+            "before waiting for ClickHouse recovery: %s",
+            reason,
+        )
+        self.kafka_consumer.disconnect_for_recovery(reason)
+        self.batch_sender.discard_all()
+        self.batch_sender.recover_connection()
+        self.kafka_consumer.reconnect_after_recovery()
+        logger.info(
+            "Monitoring dependencies recovered; uncommitted Kafka records "
+            "will be replayed."
+        )
+
+    def _recover_kafka_commit(self, reason: Exception) -> None:
+        """Replace stale Kafka membership after an uncommitted sink batch."""
+        logger.warning(
+            "Monitoring Kafka offset commit cannot continue with the current "
+            "consumer; resubscribing for replay: %s",
+            reason,
+        )
+        self.batch_sender.discard_all()
+        self.kafka_consumer.recover_group_membership(reason)
 
     def run(self) -> None:
         """Starts the monitoring agent to consume and process data continuously.
@@ -145,6 +193,8 @@ class MonitoringAgent:
                                 source_record.value
                             )
                             self.batch_sender.add(table_name, asdict(data))
+                        except ClickHouseUnavailable:
+                            raise
                         except Exception as exception:
                             logger.warning(
                                 "Discarding invalid monitoring record at %s[%d] "
@@ -155,15 +205,34 @@ class MonitoringAgent:
                                 exception,
                             )
 
-                    self.batch_sender.insert_all()
-                    self.kafka_consumer.commit(source_records)
+                    try:
+                        self.batch_sender.insert_all()
+                    except ClickHouseUnavailable as exception:
+                        self._recover_clickhouse(exception)
+                        continue
+
+                    try:
+                        self.kafka_consumer.commit(source_records)
+                    except (
+                        KafkaConsumerMembershipLost,
+                        KafkaInfrastructureUnavailable,
+                    ) as exception:
+                        self._recover_kafka_commit(exception)
+                except ClickHouseUnavailable as exception:
+                    self._recover_clickhouse(exception)
                 except KeyboardInterrupt:
                     logger.info("Stopped MonitoringAgent.")
                     break
                 except Exception as e:
                     logger.warning(e)
         finally:
-            self.batch_sender.insert_all()
+            try:
+                self.batch_sender.insert_all()
+            except ClickHouseUnavailable as exception:
+                logger.warning(
+                    "Monitoring stopped with uncommitted ClickHouse rows: %s",
+                    exception,
+                )
 
 
 def build_monitoring_worker(worker_id: str) -> MonitoringAgent:

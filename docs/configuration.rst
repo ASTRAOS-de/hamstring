@@ -602,6 +602,18 @@ To entirely skip the anomaly detection phase, you can set ``inspector_module_nam
    * - clickhouse_connector.batch_timeout
      - ``2.0``
      - Maximum time in seconds before a partial monitoring batch is written.
+   * - clickhouse_connector.connect_timeout_seconds
+     - ``10``
+     - Timeout for one ClickHouse connection attempt. Reconnection continues after the monitoring consumer has left its Kafka group.
+   * - clickhouse_connector.operation_timeout_seconds
+     - ``30``
+     - Timeout for one ClickHouse HTTP request. A failed insert is replayed from uncommitted Kafka offsets after dependency recovery.
+   * - kafka_consumer.batch_size
+     - ``500``
+     - Maximum monitoring Kafka records fetched in one explicit sink batch.
+   * - kafka_consumer.timeout_ms
+     - ``2000``
+     - Maximum time spent collecting a partial monitoring Kafka batch.
 
 ``pipeline.zeek``
 ^^^^^^^^^^^^^^^^^
@@ -649,18 +661,27 @@ The following parameters control the infrastructure of the software.
    * - kafka_consumer.max_poll_interval_ms
      - ``1800000`` fallback; ``300000`` in the supplied ``config.yaml``
      - Maximum time in milliseconds between Kafka consumer polls before Kafka removes the consumer from its group. Increase this for long-running detector batches and keep batch processing comfortably below the interval. See :doc:`kafka_recovery` for automatic membership recovery, rebalance handling, and delivery guarantees.
+   * - kafka_consumer.commit_retry_timeout_seconds
+     - ``30``
+     - Maximum time to retry transient offset-commit failures with one consumer generation. Membership errors trigger immediate resubscription instead. ``KAFKA_CONSUMER_COMMIT_RETRY_TIMEOUT_SECONDS`` is the final environment override.
    * - kafka_transaction_batch.size / timeout_ms
-     - ``250`` / ``50`` in the supplied ``config.yaml``
+     - ``50`` / ``50`` in the supplied ``config.yaml``
      - Global Kafka consume/transaction batch defaults. ``size`` counts Kafka records and ``timeout_ms`` controls how long a consumer waits while collecting a batch.
    * - kafka_transaction_batch.stages
      - Detector ``size: 10``; alerter ``size: 25``
      - Per-consuming-stage overrides. Short names such as ``detector`` and fully-qualified names such as ``data_analysis.detector`` are supported.
    * - kafka_transaction_batch.topics
-     - Domainator input topic ``size: 5``
+     - None by default
      - Per-topic overrides keyed by the complete consumed topic name. Exact-topic settings override stage settings, which override the global defaults. See :doc:`kafka_recovery` for examples and environment-variable precedence.
    * - kafka_producer.compression_type
      - ``zstd``
      - Compression codec used by HAMSTRING's Python Kafka producers. Zeek is an external producer and must be configured separately if its image supports compression settings.
+   * - kafka_producer.transaction_api_timeout_seconds
+     - ``30``
+     - Timeout for one transactional producer initialization, commit, or abort call. A timeout causes coordinated producer and consumer recovery. ``KAFKA_TRANSACTION_API_TIMEOUT_SECONDS`` is the final environment override.
+   * - kafka_producer.message_timeout_ms
+     - ``60000``
+     - Maximum delivery time for a transactional Kafka output record. ``KAFKA_PRODUCER_MESSAGE_TIMEOUT_MS`` is the final environment override.
    * - kafka_topics.replication_factor
      - ``3``
      - Replication factor used when creating new Kafka topics. At runtime this is capped to the number of configured Kafka brokers.

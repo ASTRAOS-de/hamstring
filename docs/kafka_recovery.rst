@@ -41,6 +41,32 @@ stages.
 HAMSTRING also handles librdkafka's local ``_MAX_POLL_EXCEEDED`` consumer error
 through the same consumer-reset path.
 
+Broker and Docker-network outages
+---------------------------------
+
+Kafka transport failures such as ``_TIMED_OUT``, ``_MSG_TIMED_OUT``,
+``_TRANSPORT``, and ``_RESOLVE`` use coordinated recovery. Native transaction
+initialization, commit, and abort calls have an explicit API timeout. When a
+transactional stage loses Kafka connectivity it:
+
+#. aborts the transaction within the configured API timeout;
+#. closes the consumer, thereby leaving its current group generation;
+#. recreates and initializes the transactional producer;
+#. subscribes a fresh consumer after Kafka is reachable;
+#. reconsumes the uncommitted input batch.
+
+The service may remain in a visible reconnect loop while Kafka or Docker DNS
+is unavailable, but it no longer holds stale consumer membership while doing
+so. ``_PURGE_QUEUE`` delivery callbacks during the abort describe records
+discarded from the old local producer. They do not mean that the corresponding
+input offsets were committed.
+
+``environment.kafka_producer.transaction_api_timeout_seconds`` bounds each
+native transactional API call. ``message_timeout_ms`` bounds how long produced
+records may remain undelivered. The environment variables
+``KAFKA_TRANSACTION_API_TIMEOUT_SECONDS`` and
+``KAFKA_PRODUCER_MESSAGE_TIMEOUT_MS`` are final deployment overrides.
+
 Rebalance tracking
 ------------------
 
@@ -94,7 +120,7 @@ the consuming pipeline stage, or by the complete consumed topic name:
 
    environment:
      kafka_transaction_batch:
-       size: 250
+       size: 50
        timeout_ms: 50
        stages:
          detector:
@@ -120,9 +146,9 @@ corresponding short name. Exact topic keys must contain the full topic name
 consumed by the worker. If one consumer subscribes to multiple topics, it uses
 the smallest effective size and timeout across those topics.
 
-The supplied configuration sets the detector stage to 10 records, the alerter
-stage to 25 records, and the initial Domainator topic to 5 records. Other stages
-inherit the global value. A caller that explicitly supplies ``max_messages`` or
+The supplied configuration sets the global value to 50 records, the detector
+stage to 10 records, and the alerter stage to 25 records. Other stages inherit
+the global value. A caller that explicitly supplies ``max_messages`` or
 ``timeout_ms`` to ``consume_batch`` still overrides the resolved defaults; the
 collector uses this for its application-level batching configuration.
 
@@ -132,6 +158,38 @@ Operationally, alert on:
 * assignment revocation or loss followed by repeated recovery;
 * transaction aborts while consumer lag increases;
 * no successful output transaction while input offsets continue to arrive.
+
+Monitoring sink recovery
+------------------------
+
+The monitoring agent is not part of a Kafka transaction: it inserts a consumed
+batch into ClickHouse and then commits its Kafka offsets. Its recovery guarantee
+is therefore **at least once**, not exactly once.
+
+The supplied configuration consumes at most 500 monitoring records per Kafka
+batch while ClickHouse continues to flush each table every 50 rows. Increasing
+the Kafka value does not increase the ClickHouse insert size; it only delays the
+offset commit and enlarges the batch that must be replayed after a failure.
+
+ClickHouse connection and request calls are bounded by
+``pipeline.monitoring.clickhouse_connector.connect_timeout_seconds`` and
+``operation_timeout_seconds``. If an insert fails, the agent closes its Kafka
+consumer before waiting for ClickHouse to return. It discards the local batch,
+reconnects ClickHouse, subscribes a fresh Kafka consumer, and replays records
+from committed offsets.
+
+Normal offset commits retry transient coordinator errors only for
+``environment.kafka_consumer.commit_retry_timeout_seconds``. Membership errors
+such as ``UNKNOWN_MEMBER_ID`` skip that retry window and immediately cause a
+fresh subscription. Retrying a commit with the same expired generation can
+never succeed.
+
+An outage can occur after ClickHouse accepted an insert but before Kafka
+accepted its offset commit. Replaying the Kafka record can consequently insert
+a duplicate monitoring row. This is preferable to committing an offset for a
+row that may not have reached ClickHouse. Strict duplicate prevention requires
+an idempotent ClickHouse schema keyed by the source Kafka topic, partition, and
+offset; the current raw monitoring tables do not provide that guarantee.
 
 Delivery guarantees outside Kafka
 ---------------------------------

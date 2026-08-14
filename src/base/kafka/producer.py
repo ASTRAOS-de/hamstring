@@ -11,7 +11,10 @@ from confluent_kafka import KafkaException, Producer
 
 from src.base.kafka import config as kafka_config
 from src.base.kafka.client import KafkaHandler
-from src.base.kafka.errors import KafkaConsumerMembershipLost
+from src.base.kafka.errors import (
+    KafkaConsumerMembershipLost,
+    KafkaInfrastructureUnavailable,
+)
 from src.base.kafka.records import ConsumedKafkaMessage, KafkaProduceRecord
 from src.base.kafka.resilience import (
     is_consumer_membership_exception,
@@ -196,9 +199,16 @@ class ExactlyOnceKafkaProduceHandler(KafkaProduceHandler):
                 "enable.idempotence": True,
                 "compression.type": kafka_config.KAFKA_PRODUCER_COMPRESSION_TYPE,
                 "message.max.bytes": 1_000_000_000,
+                "message.timeout.ms": kafka_config.KAFKA_PRODUCER_MESSAGE_TIMEOUT_MS,
             }
         )
         self._init_transactions_with_retry()
+        logger.info(
+            "Kafka transactional producer configured with API timeout %.1fs "
+            "and message timeout %dms.",
+            kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS,
+            kafka_config.KAFKA_PRODUCER_MESSAGE_TIMEOUT_MS,
+        )
 
     def _reset_producer(self) -> None:
         super()._reset_producer()
@@ -206,7 +216,9 @@ class ExactlyOnceKafkaProduceHandler(KafkaProduceHandler):
 
     def _init_transactions_with_retry(self) -> None:
         retry_forever(
-            lambda: self.producer.init_transactions(),
+            lambda: self.producer.init_transactions(
+                timeout=kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS
+            ),
             "Kafka transactional producer initialization",
             kafka_config.RETRY_SETTINGS,
         )
@@ -253,6 +265,17 @@ class ExactlyOnceKafkaProduceHandler(KafkaProduceHandler):
                 # Offsets were not committed. A fresh subscription lets Kafka
                 # redeliver this batch from the last committed offsets.
                 consumer.recover_group_membership(exception)
+            except KafkaInfrastructureUnavailable as exception:
+                # Do not retain group membership while producer recovery may
+                # wait indefinitely for Kafka or Docker DNS to return.
+                logger.warning(
+                    "Kafka transaction lost broker connectivity; resetting "
+                    "producer and consumer before replay: %s",
+                    exception,
+                )
+                consumer.disconnect_for_recovery(exception)
+                self._reset_producer()
+                consumer.reconnect_after_recovery()
 
     def _run_transaction(
         self,
@@ -261,8 +284,8 @@ class ExactlyOnceKafkaProduceHandler(KafkaProduceHandler):
         consumed_messages: Sequence[ConsumedKafkaMessage] = (),
     ) -> None:
         def operation():
-            self.producer.begin_transaction()
             try:
+                self.producer.begin_transaction()
                 for record in records:
                     if not record.data:
                         continue
@@ -276,12 +299,15 @@ class ExactlyOnceKafkaProduceHandler(KafkaProduceHandler):
                     self.producer.send_offsets_to_transaction(
                         consumer.offsets_for(consumed_messages),
                         consumer.group_metadata(),
+                        timeout=kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS,
                     )
                 self.commit_transaction_with_retry()
             except Exception as exception:
                 logger.info("Aborting Kafka transaction.")
                 try:
-                    self.producer.abort_transaction()
+                    self.producer.abort_transaction(
+                        timeout=kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS
+                    )
                 except Exception as abort_exception:
                     logger.warning(
                         "Kafka transaction abort failed: %s", abort_exception
@@ -290,6 +316,8 @@ class ExactlyOnceKafkaProduceHandler(KafkaProduceHandler):
                 logger.error(exception)
                 if is_consumer_membership_exception(exception):
                     raise KafkaConsumerMembershipLost(str(exception)) from exception
+                if consumer is not None and is_retriable_kafka_exception(exception):
+                    raise KafkaInfrastructureUnavailable(str(exception)) from exception
                 raise
 
         self._with_producer_retry("Kafka transaction", operation)
@@ -301,7 +329,9 @@ class ExactlyOnceKafkaProduceHandler(KafkaProduceHandler):
         retry_count = 0
         while not committed and retry_count < max_retries:
             try:
-                self.producer.commit_transaction()
+                self.producer.commit_transaction(
+                    timeout=kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS
+                )
                 committed = True
             except KafkaException as exception:
                 if (

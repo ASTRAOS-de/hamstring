@@ -4,7 +4,11 @@ from datetime import datetime
 from typing import Optional
 from unittest.mock import patch, Mock
 
-from src.monitoring.clickhouse_batch_sender import ClickHouseBatchSender, Table
+from src.monitoring.clickhouse_batch_sender import (
+    ClickHouseBatchSender,
+    ClickHouseUnavailable,
+    Table,
+)
 
 
 class TestTable(unittest.TestCase):
@@ -247,12 +251,10 @@ class TestInsert(unittest.TestCase):
         )
         self.assertEqual([], self.sut.batch[test_table_name])
 
-    @patch("src.base.retry.time.sleep", return_value=None)
-    def test_filled_batch_retries_without_dropping_rows(self, mock_sleep):
+    def test_failed_insert_returns_control_without_dropping_rows(self):
         # Arrange
         test_table_name = "test_table"
         first_client = Mock()
-        second_client = Mock()
         first_client.insert.side_effect = RuntimeError("clickhouse unavailable")
 
         self.sut.tables = {
@@ -261,17 +263,23 @@ class TestInsert(unittest.TestCase):
         self.sut.batch = {test_table_name: ["one", "two", "three"]}
         self.sut._client = first_client
 
-        with patch.object(self.sut, "_connect_client", return_value=second_client):
+        with self.assertRaises(ClickHouseUnavailable):
             self.sut.insert(test_table_name)
 
         first_client.insert.assert_called_once()
-        second_client.insert.assert_called_once_with(
-            test_table_name,
-            ["one", "two", "three"],
-            column_names=["col_1", "col_2"],
-        )
-        self.assertEqual([], self.sut.batch[test_table_name])
-        mock_sleep.assert_called()
+        self.assertEqual(["one", "two", "three"], self.sut.batch[test_table_name])
+        self.assertIsNone(self.sut._client)
+
+    def test_recovery_waits_for_a_fresh_client(self):
+        old_client = Mock()
+        new_client = Mock()
+        self.sut._client = old_client
+
+        with patch.object(self.sut, "_connect_client", return_value=new_client):
+            self.sut.recover_connection()
+
+        old_client.close.assert_called_once_with()
+        self.assertIs(new_client, self.sut._client)
 
     def test_empty_batch(self):
         # Arrange
@@ -318,6 +326,16 @@ class TestInsertAll(unittest.TestCase):
 
         mock_insert.assert_any_call(test_table_name_1)
         mock_insert.assert_any_call(test_table_name_2)
+
+    def test_discard_all_clears_partial_uncommitted_batch(self):
+        self.sut.batch["server_logs"] = [["pending"]]
+        self.sut.batch["alerts"] = [["pending"]]
+        self.sut.timer = Mock()
+
+        self.sut.discard_all()
+
+        self.assertTrue(all(not rows for rows in self.sut.batch.values()))
+        self.assertIsNone(self.sut.timer)
 
 
 class TestStartTimer(unittest.TestCase):

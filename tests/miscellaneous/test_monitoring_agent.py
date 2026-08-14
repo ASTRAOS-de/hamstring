@@ -7,7 +7,8 @@ from unittest.mock import patch, Mock, call, mock_open
 import marshmallow_dataclass
 
 from src.base.data_classes.clickhouse_connectors import ServerLogs
-from src.base.kafka import ConsumedKafkaMessage
+from src.base.kafka import ConsumedKafkaMessage, KafkaConsumerMembershipLost
+from src.monitoring.clickhouse_batch_sender import ClickHouseUnavailable
 from src.monitoring.monitoring_agent import (
     CREATE_TABLES_DIRECTORY,
     MONITORING_CONSUMER_BATCH_SIZE,
@@ -174,6 +175,96 @@ class TestRun(unittest.TestCase):
         self.assertEqual(2, self.sut.batch_sender.insert_all.call_count)
         self.sut.kafka_consumer.commit.assert_called_once_with(source_records)
         mock_class_schema.assert_not_called()
+
+    def test_clickhouse_recovery_leaves_kafka_before_waiting_for_sink(self):
+        events = []
+        self.sut.kafka_consumer.disconnect_for_recovery.side_effect = (
+            lambda *_args: events.append("disconnect-kafka")
+        )
+        self.sut.batch_sender.discard_all.side_effect = lambda: events.append(
+            "discard-batch"
+        )
+        self.sut.batch_sender.recover_connection.side_effect = lambda: events.append(
+            "recover-clickhouse"
+        )
+        self.sut.kafka_consumer.reconnect_after_recovery.side_effect = (
+            lambda: events.append("reconnect-kafka")
+        )
+
+        self.sut._recover_clickhouse(ClickHouseUnavailable("sink down"))
+
+        self.assertEqual(
+            [
+                "disconnect-kafka",
+                "discard-batch",
+                "recover-clickhouse",
+                "reconnect-kafka",
+            ],
+            events,
+        )
+
+    def test_stale_commit_discards_local_state_and_resubscribes(self):
+        reason = KafkaConsumerMembershipLost("unknown member")
+
+        self.sut._recover_kafka_commit(reason)
+
+        self.sut.batch_sender.discard_all.assert_called_once_with()
+        self.sut.kafka_consumer.recover_group_membership.assert_called_once_with(reason)
+
+    def test_failed_clickhouse_batch_does_not_commit_kafka_offsets(self):
+        source_record = ConsumedKafkaMessage(
+            key="key",
+            value="{}",
+            topic="clickhouse_server_logs",
+            partition=0,
+            offset=4,
+        )
+        self.sut.kafka_consumer.consume_batch.side_effect = [
+            [source_record],
+            KeyboardInterrupt(),
+        ]
+        decoded = ServerLogs(
+            message_id=uuid.UUID("35871c8c-ff72-44ad-a9b7-4f02cf92d484"),
+            timestamp_in=datetime.datetime(2025, 4, 3, 12, 32, 7),
+            message_text="test",
+        )
+        self.sut.data_schemas["server_logs"] = Mock(loads=Mock(return_value=decoded))
+        self.sut.batch_sender.insert_all.side_effect = [
+            ClickHouseUnavailable("sink down"),
+            None,
+        ]
+
+        with patch.object(self.sut, "_recover_clickhouse") as mock_recover:
+            self.sut.run()
+
+        self.sut.kafka_consumer.commit.assert_not_called()
+        mock_recover.assert_called_once()
+
+    def test_membership_loss_after_insert_uses_replay_recovery(self):
+        source_record = ConsumedKafkaMessage(
+            key="key",
+            value="{}",
+            topic="clickhouse_server_logs",
+            partition=0,
+            offset=4,
+        )
+        self.sut.kafka_consumer.consume_batch.side_effect = [
+            [source_record],
+            KeyboardInterrupt(),
+        ]
+        decoded = ServerLogs(
+            message_id=uuid.UUID("35871c8c-ff72-44ad-a9b7-4f02cf92d484"),
+            timestamp_in=datetime.datetime(2025, 4, 3, 12, 32, 7),
+            message_text="test",
+        )
+        self.sut.data_schemas["server_logs"] = Mock(loads=Mock(return_value=decoded))
+        membership_error = KafkaConsumerMembershipLost("unknown member")
+        self.sut.kafka_consumer.commit.side_effect = membership_error
+
+        with patch.object(self.sut, "_recover_kafka_commit") as mock_recover:
+            self.sut.run()
+
+        mock_recover.assert_called_once_with(membership_error)
 
 
 class TestScaling(unittest.IsolatedAsyncioTestCase):

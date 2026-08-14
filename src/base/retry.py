@@ -87,6 +87,62 @@ def retry_forever(
             )
 
 
+def retry_with_timeout(
+    operation: Callable[[], T],
+    description: str,
+    settings: RetrySettings,
+    timeout_seconds: float,
+    retryable: tuple[type[BaseException], ...] = (Exception,),
+) -> T:
+    """Retry an operation for a bounded period, then re-raise its last error.
+
+    This is intended for operations whose validity is tied to external state,
+    such as a Kafka consumer generation.  Retrying those operations forever
+    can never succeed after that state has expired.
+    """
+    timeout_seconds = max(0.0, float(timeout_seconds))
+    deadline = time.monotonic() + timeout_seconds
+    delay = settings.initial_delay_seconds
+    attempt = 0
+
+    while True:
+        try:
+            return operation()
+        except retryable as exception:
+            attempt += 1
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                logger.warning(
+                    "%s did not recover within %.1fs; abandoning this state: %s",
+                    description,
+                    timeout_seconds,
+                    exception,
+                )
+                raise
+            if attempt == 1 or attempt % settings.log_every_attempts == 0:
+                logger.warning(
+                    "%s failed on attempt %d: %s. Retrying in %.1fs.",
+                    description,
+                    attempt,
+                    exception,
+                    min(delay, remaining),
+                )
+            sleep_for = min(
+                remaining,
+                delay
+                + (
+                    random.uniform(0, settings.jitter_seconds)
+                    if settings.jitter_seconds
+                    else 0
+                ),
+            )
+            time.sleep(sleep_for)
+            delay = min(
+                settings.max_delay_seconds,
+                delay * settings.backoff_multiplier,
+            )
+
+
 def _float_setting(config: dict[str, Any], key: str) -> float:
     env_key = f"HAMSTRING_RETRY_{key.upper()}"
     value = os.getenv(env_key, config.get(key, _DEFAULT_CONFIG[key]))

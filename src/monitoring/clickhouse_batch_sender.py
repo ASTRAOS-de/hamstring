@@ -26,6 +26,20 @@ BATCH_SIZE = CONFIG["pipeline"]["monitoring"]["clickhouse_connector"]["batch_siz
 BATCH_TIMEOUT = CONFIG["pipeline"]["monitoring"]["clickhouse_connector"][
     "batch_timeout"
 ]
+CLICKHOUSE_CONNECT_TIMEOUT_SECONDS = float(
+    CONFIG["pipeline"]["monitoring"]["clickhouse_connector"].get(
+        "connect_timeout_seconds", 10
+    )
+)
+CLICKHOUSE_OPERATION_TIMEOUT_SECONDS = float(
+    CONFIG["pipeline"]["monitoring"]["clickhouse_connector"].get(
+        "operation_timeout_seconds", 30
+    )
+)
+
+
+class ClickHouseUnavailable(RuntimeError):
+    """Raised when a monitoring batch cannot currently reach ClickHouse."""
 
 
 def create_clickhouse_client():
@@ -33,6 +47,8 @@ def create_clickhouse_client():
         host=CLICKHOUSE_HOSTNAME,
         username=CLICKHOUSE_USERNAME,
         password=CLICKHOUSE_PASSWORD,
+        connect_timeout=CLICKHOUSE_CONNECT_TIMEOUT_SECONDS,
+        send_receive_timeout=CLICKHOUSE_OPERATION_TIMEOUT_SECONDS,
     )
 
 
@@ -244,7 +260,7 @@ class ClickHouseBatchSender:
             RETRY_SETTINGS,
         )
 
-    def _reset_client(self) -> None:
+    def _close_client(self) -> None:
         try:
             if self._client:
                 self._client.close()
@@ -253,10 +269,21 @@ class ClickHouseBatchSender:
                 "Ignoring ClickHouse client close failure during reconnect: %s",
                 exception,
             )
+        self._client = None
+
+    def recover_connection(self) -> None:
+        """Wait for a fresh ClickHouse connection after leaving Kafka's group."""
+        self._close_client()
         self._client = self._connect_client()
+        logger.info("ClickHouse connection recovered; monitoring can resume.")
 
     def __del__(self):
-        self.insert_all()
+        try:
+            self.insert_all()
+        except Exception as exception:
+            logger.warning(
+                "Unable to flush monitoring rows while closing: %s", exception
+            )
 
     def add(self, table_name: str, data: dict[str, Any]):
         """Adds the data to the batch for the table.
@@ -300,6 +327,8 @@ class ClickHouseBatchSender:
 
                 def insert_batch():
                     try:
+                        if self._client is None:
+                            raise RuntimeError("ClickHouse client is disconnected.")
                         self._client.insert(
                             table_name,
                             pending_rows,
@@ -311,14 +340,13 @@ class ClickHouseBatchSender:
                             table_name,
                             exception,
                         )
-                        self._reset_client()
-                        raise
+                        self._close_client()
+                        raise ClickHouseUnavailable(
+                            f"ClickHouse insert for table '{table_name}' failed: "
+                            f"{exception}"
+                        ) from exception
 
-                retry_forever(
-                    insert_batch,
-                    f"ClickHouse insert for table '{table_name}'",
-                    RETRY_SETTINGS,
-                )
+                insert_batch()
                 logger.debug(
                     "Inserted %d monitoring row(s) into %s.",
                     len(pending_rows),
@@ -339,6 +367,14 @@ class ClickHouseBatchSender:
             self.timer.cancel()
 
         self.timer = None
+
+    def discard_all(self) -> None:
+        """Discard rows from an uncommitted Kafka batch before it is replayed."""
+        with self.lock:
+            self.batch = {key: [] for key in self.tables}
+            if self.timer:
+                self.timer.cancel()
+            self.timer = None
 
     def _start_timer(self):
         """Sets the timer for batch processing of data insertion.
