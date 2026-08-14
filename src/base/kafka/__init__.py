@@ -8,6 +8,7 @@ from src.base.kafka.consumer import (
 )
 from src.base.kafka.errors import (
     KafkaConsumerMembershipLost,
+    KafkaInfrastructureUnavailable,
     KafkaMessageFetchException,
     TooManyFailedAttemptsError,
 )
@@ -31,6 +32,7 @@ __all__ = [
     "ExactlyOnceKafkaProduceHandler",
     "KafkaConsumeHandler",
     "KafkaConsumerMembershipLost",
+    "KafkaInfrastructureUnavailable",
     "KafkaHandler",
     "KafkaMessageFetchException",
     "KafkaProduceHandler",

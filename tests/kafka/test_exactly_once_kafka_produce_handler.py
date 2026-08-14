@@ -4,6 +4,10 @@ from unittest.mock import MagicMock, patch
 from confluent_kafka import KafkaException
 
 from src.base.kafka import ExactlyOnceKafkaProduceHandler
+from src.base.kafka.config import (
+    KAFKA_PRODUCER_MESSAGE_TIMEOUT_MS,
+    KAFKA_TRANSACTION_API_TIMEOUT_SECONDS,
+)
 
 
 class TestInit(unittest.TestCase):
@@ -37,6 +41,7 @@ class TestInit(unittest.TestCase):
             "enable.idempotence": True,
             "compression.type": "zstd",
             "message.max.bytes": 1000000000,
+            "message.timeout.ms": KAFKA_PRODUCER_MESSAGE_TIMEOUT_MS,
         }
 
         sut = ExactlyOnceKafkaProduceHandler()
@@ -45,7 +50,9 @@ class TestInit(unittest.TestCase):
         self.assertEqual(mock_producer_instance, sut.producer)
 
         mock_producer.assert_called_once_with(expected_conf)
-        mock_producer_instance.init_transactions.assert_called_once()
+        mock_producer_instance.init_transactions.assert_called_once_with(
+            timeout=KAFKA_TRANSACTION_API_TIMEOUT_SECONDS
+        )
 
     @patch("src.base.retry.time.sleep", return_value=None)
     @patch("src.base.kafka.config.HOSTNAME", "default_tid")
@@ -82,6 +89,7 @@ class TestInit(unittest.TestCase):
             "enable.idempotence": True,
             "compression.type": "zstd",
             "message.max.bytes": 1000000000,
+            "message.timeout.ms": KAFKA_PRODUCER_MESSAGE_TIMEOUT_MS,
         }
 
         mock_producer_instance.init_transactions.side_effect = [

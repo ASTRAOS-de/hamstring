@@ -12,6 +12,7 @@ from src.base.kafka import config as kafka_config
 from src.base.kafka.client import KafkaHandler
 from src.base.kafka.errors import (
     KafkaConsumerMembershipLost,
+    KafkaInfrastructureUnavailable,
     KafkaMessageFetchException,
     TooManyFailedAttemptsError,
 )
@@ -28,7 +29,7 @@ from src.base.kafka.topics import (
     topic_partition_count,
 )
 from src.base.log_config import get_logger
-from src.base.retry import retry_forever
+from src.base.retry import retry_forever, retry_with_timeout
 
 logger = get_logger()
 
@@ -51,6 +52,16 @@ class KafkaConsumeHandler(KafkaSerializationMixin, KafkaHandler):
         self.brokers = kafka_config.bootstrap_servers()
         self.conf = self._build_consumer_conf()
         self._connect_consumer()
+        logger.info(
+            "Kafka consumer configured for stage %s with batch size %d, "
+            "batch timeout %dms, max poll interval %dms, and commit retry "
+            "timeout %.1fs.",
+            self.stage or "unspecified",
+            self.transaction_batch_size,
+            self.transaction_batch_timeout_ms,
+            kafka_config.KAFKA_CONSUMER_MAX_POLL_INTERVAL_MS,
+            kafka_config.KAFKA_CONSUMER_COMMIT_RETRY_TIMEOUT_SECONDS,
+        )
 
     def _build_consumer_conf(self) -> dict:
         return {
@@ -95,6 +106,15 @@ class KafkaConsumeHandler(KafkaSerializationMixin, KafkaHandler):
         )
 
     def _reset_consumer(self) -> None:
+        self.disconnect_for_recovery()
+        self.reconnect_after_recovery()
+
+    def disconnect_for_recovery(self, reason: Exception | None = None) -> None:
+        """Leave the current group before waiting for a failed dependency."""
+        if reason:
+            logger.warning(
+                "Closing Kafka consumer before dependency recovery: %s", reason
+            )
         try:
             if self.consumer:
                 self.consumer.close()
@@ -103,7 +123,14 @@ class KafkaConsumeHandler(KafkaSerializationMixin, KafkaHandler):
                 "Ignoring Kafka consumer close failure during reconnect: %s",
                 exception,
             )
+        self.consumer = None
         self._last_consumed_message = None
+        self._assignment_epoch += 1
+        self._assignment_valid = False
+        self._assigned_partitions.clear()
+
+    def reconnect_after_recovery(self) -> None:
+        """Create and subscribe a new consumer after dependencies are reachable."""
         self._connect_consumer()
 
     def recover_group_membership(self, reason: Exception | None = None) -> None:
@@ -181,29 +208,55 @@ class KafkaConsumeHandler(KafkaSerializationMixin, KafkaHandler):
     ) -> None:
         """Commit an explicit batch or the latest record from ``consume``."""
         if not self.consumer:
-            return
+            raise KafkaInfrastructureUnavailable(
+                "Kafka offset commit requested without a connected consumer."
+            )
+
+        def commit_with_current_membership(operation) -> None:
+            def commit_once():
+                try:
+                    return operation()
+                except KafkaException as exception:
+                    if is_consumer_membership_error(
+                        exception.args[0] if exception.args else None
+                    ):
+                        raise KafkaConsumerMembershipLost(
+                            f"Kafka offset commit used stale membership: {exception}"
+                        ) from exception
+                    raise
+
+            try:
+                retry_with_timeout(
+                    commit_once,
+                    "Kafka consumer batch offset commit",
+                    kafka_config.RETRY_SETTINGS,
+                    kafka_config.KAFKA_CONSUMER_COMMIT_RETRY_TIMEOUT_SECONDS,
+                    retryable=(KafkaException, RuntimeError, OSError),
+                )
+            except KafkaConsumerMembershipLost:
+                raise
+            except (KafkaException, RuntimeError, OSError) as exception:
+                raise KafkaInfrastructureUnavailable(
+                    "Kafka offset commit did not recover before its retry "
+                    f"deadline: {exception}"
+                ) from exception
 
         if consumed_messages is not None:
             if not consumed_messages:
                 return
-            retry_forever(
+            self.ensure_batch_assignment_current(consumed_messages)
+            commit_with_current_membership(
                 lambda: self.consumer.commit(
                     offsets=self.offsets_for(consumed_messages),
                     asynchronous=False,
-                ),
-                "Kafka consumer batch offset commit",
-                kafka_config.RETRY_SETTINGS,
-                retryable=(KafkaException, RuntimeError, OSError),
+                )
             )
             self._last_consumed_message = None
             return
 
         if self._last_consumed_message is not None:
-            retry_forever(
-                lambda: self.consumer.commit(self._last_consumed_message),
-                "Kafka consumer offset commit",
-                kafka_config.RETRY_SETTINGS,
-                retryable=(KafkaException, RuntimeError, OSError),
+            commit_with_current_membership(
+                lambda: self.consumer.commit(self._last_consumed_message)
             )
             self._last_consumed_message = None
 

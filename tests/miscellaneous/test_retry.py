@@ -1,7 +1,12 @@
 import unittest
 from unittest.mock import MagicMock, patch
 
-from src.base.retry import RetrySettings, load_retry_settings, retry_forever
+from src.base.retry import (
+    RetrySettings,
+    load_retry_settings,
+    retry_forever,
+    retry_with_timeout,
+)
 
 
 class TestRetrySettings(unittest.TestCase):
@@ -52,6 +57,24 @@ class TestRetrySettings(unittest.TestCase):
         )
 
         self.assertEqual("done", result)
+        self.assertEqual(2, operation.call_count)
+        mock_sleep.assert_called_once_with(0.25)
+
+    @patch("src.base.retry.time.sleep")
+    @patch("src.base.retry.time.monotonic", side_effect=[0.0, 0.5, 1.1])
+    def test_bounded_retry_reraises_after_deadline(self, _mock_time, mock_sleep):
+        operation = MagicMock(side_effect=RuntimeError("still unavailable"))
+        settings = RetrySettings(0.25, 1, 2, 0, 1)
+
+        with self.assertRaisesRegex(RuntimeError, "still unavailable"):
+            retry_with_timeout(
+                operation,
+                "bounded operation",
+                settings,
+                timeout_seconds=1,
+                retryable=(RuntimeError,),
+            )
+
         self.assertEqual(2, operation.call_count)
         mock_sleep.assert_called_once_with(0.25)
 

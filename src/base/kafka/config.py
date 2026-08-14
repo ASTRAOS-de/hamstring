@@ -18,10 +18,28 @@ KAFKA_CONSUMER_CONFIG = CONFIG["environment"].get("kafka_consumer", {})
 KAFKA_CONSUMER_MAX_POLL_INTERVAL_MS = int(
     KAFKA_CONSUMER_CONFIG.get("max_poll_interval_ms", 1_800_000)
 )
+KAFKA_CONSUMER_COMMIT_RETRY_TIMEOUT_SECONDS = float(
+    os.getenv(
+        "KAFKA_CONSUMER_COMMIT_RETRY_TIMEOUT_SECONDS",
+        KAFKA_CONSUMER_CONFIG.get("commit_retry_timeout_seconds", 30),
+    )
+)
 KAFKA_PRODUCER_CONFIG = CONFIG["environment"].get("kafka_producer", {})
 KAFKA_PRODUCER_COMPRESSION_TYPE = os.getenv(
     "KAFKA_PRODUCER_COMPRESSION_TYPE",
     KAFKA_PRODUCER_CONFIG.get("compression_type", "zstd"),
+)
+KAFKA_TRANSACTION_API_TIMEOUT_SECONDS = float(
+    os.getenv(
+        "KAFKA_TRANSACTION_API_TIMEOUT_SECONDS",
+        KAFKA_PRODUCER_CONFIG.get("transaction_api_timeout_seconds", 30),
+    )
+)
+KAFKA_PRODUCER_MESSAGE_TIMEOUT_MS = int(
+    os.getenv(
+        "KAFKA_PRODUCER_MESSAGE_TIMEOUT_MS",
+        KAFKA_PRODUCER_CONFIG.get("message_timeout_ms", 60_000),
+    )
 )
 
 KAFKA_TRANSACTION_BATCH_CONFIG = CONFIG["environment"].get(

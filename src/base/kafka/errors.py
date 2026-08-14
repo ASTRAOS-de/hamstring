@@ -11,3 +11,7 @@ class KafkaMessageFetchException(Exception):
 
 class KafkaConsumerMembershipLost(Exception):
     """Raised when a transaction uses stale consumer-group membership."""
+
+
+class KafkaInfrastructureUnavailable(Exception):
+    """Raised when Kafka transport failure requires coordinated client recovery."""
