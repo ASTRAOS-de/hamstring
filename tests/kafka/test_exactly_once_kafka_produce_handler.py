@@ -51,7 +51,7 @@ class TestInit(unittest.TestCase):
 
         mock_producer.assert_called_once_with(expected_conf)
         mock_producer_instance.init_transactions.assert_called_once_with(
-            timeout=KAFKA_TRANSACTION_API_TIMEOUT_SECONDS
+            KAFKA_TRANSACTION_API_TIMEOUT_SECONDS
         )
 
     @patch("src.base.retry.time.sleep", return_value=None)
@@ -103,6 +103,19 @@ class TestInit(unittest.TestCase):
         mock_producer.assert_called_once_with(expected_conf)
         self.assertEqual(2, mock_producer_instance.init_transactions.call_count)
         mock_sleep.assert_called()
+
+    @patch("src.base.kafka.producer.Producer")
+    def test_init_does_not_retry_programming_errors(self, mock_producer):
+        mock_producer.return_value.init_transactions.side_effect = TypeError(
+            "unsupported call signature"
+        )
+
+        with self.assertRaisesRegex(TypeError, "unsupported call signature"):
+            ExactlyOnceKafkaProduceHandler()
+
+        mock_producer.return_value.init_transactions.assert_called_once_with(
+            KAFKA_TRANSACTION_API_TIMEOUT_SECONDS
+        )
 
 
 class TestSend(unittest.TestCase):
