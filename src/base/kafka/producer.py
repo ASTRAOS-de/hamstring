@@ -217,10 +217,11 @@ class ExactlyOnceKafkaProduceHandler(KafkaProduceHandler):
     def _init_transactions_with_retry(self) -> None:
         retry_forever(
             lambda: self.producer.init_transactions(
-                timeout=kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS
+                kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS
             ),
             "Kafka transactional producer initialization",
             kafka_config.RETRY_SETTINGS,
+            retryable=(KafkaException, RuntimeError, OSError),
         )
 
     def produce(self, topic: str, data: str, key: None | str = None) -> None:
@@ -299,14 +300,14 @@ class ExactlyOnceKafkaProduceHandler(KafkaProduceHandler):
                     self.producer.send_offsets_to_transaction(
                         consumer.offsets_for(consumed_messages),
                         consumer.group_metadata(),
-                        timeout=kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS,
+                        kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS,
                     )
                 self.commit_transaction_with_retry()
             except Exception as exception:
                 logger.info("Aborting Kafka transaction.")
                 try:
                     self.producer.abort_transaction(
-                        timeout=kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS
+                        kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS
                     )
                 except Exception as abort_exception:
                     logger.warning(
@@ -330,7 +331,7 @@ class ExactlyOnceKafkaProduceHandler(KafkaProduceHandler):
         while not committed and retry_count < max_retries:
             try:
                 self.producer.commit_transaction(
-                    timeout=kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS
+                    kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS
                 )
                 committed = True
             except KafkaException as exception:

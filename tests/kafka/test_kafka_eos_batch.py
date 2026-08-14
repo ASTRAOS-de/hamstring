@@ -54,10 +54,10 @@ class TestTransactionalBatch(unittest.TestCase):
         producer.send_offsets_to_transaction.assert_called_once_with(
             offsets,
             group_metadata,
-            timeout=kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS,
+            kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS,
         )
         producer.commit_transaction.assert_called_once_with(
-            timeout=kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS
+            kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS
         )
 
     @patch("src.base.kafka.producer.Producer")
@@ -79,10 +79,10 @@ class TestTransactionalBatch(unittest.TestCase):
         producer.send_offsets_to_transaction.assert_called_once_with(
             consumer.offsets_for.return_value,
             consumer.group_metadata.return_value,
-            timeout=kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS,
+            kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS,
         )
         producer.commit_transaction.assert_called_once_with(
-            timeout=kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS
+            kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS
         )
 
     @patch(
@@ -107,7 +107,7 @@ class TestTransactionalBatch(unittest.TestCase):
             handler.produce("output", "result", key="source-key")
 
         producer.abort_transaction.assert_called_once_with(
-            timeout=kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS
+            kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS
         )
         producer.commit_transaction.assert_not_called()
         consumer.recover_group_membership.assert_called_once()
@@ -144,7 +144,7 @@ class TestTransactionalBatch(unittest.TestCase):
                     handler.produce("output", "result")
 
                 producer.abort_transaction.assert_called_once_with(
-                    timeout=kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS
+                    kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS
                 )
                 consumer.recover_group_membership.assert_called_once()
 
@@ -173,10 +173,10 @@ class TestTransactionalBatch(unittest.TestCase):
 
         consumer.recover_group_membership.assert_called_once()
         producer.abort_transaction.assert_called_once_with(
-            timeout=kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS
+            kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS
         )
         producer.commit_transaction.assert_called_once_with(
-            timeout=kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS
+            kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS
         )
         self.assertEqual(2, producer.begin_transaction.call_count)
 
@@ -202,7 +202,7 @@ class TestTransactionalBatch(unittest.TestCase):
             handler.produce("output", "result")
 
         producer.abort_transaction.assert_called_once_with(
-            timeout=kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS
+            kafka_config.KAFKA_TRANSACTION_API_TIMEOUT_SECONDS
         )
         consumer.disconnect_for_recovery.assert_called_once()
         consumer.reconnect_after_recovery.assert_called_once_with()
