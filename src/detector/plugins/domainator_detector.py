@@ -1,9 +1,6 @@
 from src.detector.detector import DetectorBase
 import numpy as np
 from collections import defaultdict
-import itertools
-import pylcs
-import Levenshtein
 
 from src.base.log_config import get_logger
 from src.detector.plugins.domainator_utils import (
@@ -100,6 +97,6 @@ class DomainatorDetector(DetectorBase):
                     }
                     self.warnings.append(warning)
 
-                if len(self.message_queues[message_domain]) >= 10:
+                if len(self.message_queues[message_domain]) >= 5:
                     del self.message_queues[message_domain][0]
         logger.debug(f"Domainator Message queue length: {len(self.message_queues)}")
