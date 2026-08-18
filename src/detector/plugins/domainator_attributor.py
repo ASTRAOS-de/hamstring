@@ -122,5 +122,5 @@ class DomainatorAttributor(DetectorBase):
                     }
                     self.warnings.append(warning)
 
-                if len(self.message_queues[message_domain]) >= 10:
+                if len(self.message_queues[message_domain]) >= 5:
                     del self.message_queues[message_domain][0]
