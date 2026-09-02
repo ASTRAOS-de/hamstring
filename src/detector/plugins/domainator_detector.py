@@ -90,7 +90,7 @@ class DomainatorDetector(DetectorBase):
                 if np.argmax(y_pred, axis=1) == 1 and y_pred[0][1] > self.threshold:
                     logger.info("Append malicious request domain to warning.")
                     warning = {
-                        "request": self.message_queues[message_domain],
+                        "request": self.message_queues[message_domain].copy(),
                         "probability": float(y_pred[0][1]),
                         "name": self.name,
                         "sha256": self.checksum,

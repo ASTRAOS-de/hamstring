@@ -93,6 +93,41 @@ class TestDomainatorAttributor(unittest.TestCase):
             sut.detect()
             self.assertNotEqual([], sut.warnings)
 
+    def test_detect_snapshots_each_warning_request(self):
+        sut = self._create_detector()
+        sut.labels = ["benign", "tool-A"]
+        sut.messages = [
+            {
+                **DEFAULT_DATA,
+                "domain_name": f"subdomain-{index}.example.org",
+                "logline_id": str(index),
+            }
+            for index in range(5)
+        ]
+
+        with patch.object(
+            sut,
+            "predict",
+            return_value=np.array([[0.01, 0.99]]),
+        ):
+            sut.detect()
+
+        self.assertEqual(
+            [
+                ["0", "1", "2"],
+                ["0", "1", "2", "3"],
+                ["0", "1", "2", "3", "4"],
+            ],
+            [
+                [message["logline_id"] for message in warning["request"]]
+                for warning in sut.warnings
+            ],
+        )
+        self.assertEqual(
+            ["1", "2", "3", "4"],
+            [message["logline_id"] for message in sut.message_queues["example"]],
+        )
+
     def test_detect_emits_for_attribution_class_other_than_index_one(self):
         mock_kafka = MagicMock()
         mock_ch = MagicMock()

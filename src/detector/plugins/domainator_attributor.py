@@ -113,7 +113,7 @@ class DomainatorAttributor(DetectorBase):
                 if not is_legitimate and winning_probability >= self.threshold:
                     logger.debug("Append malicious request domain to warning.")
                     warning = {
-                        "request": self.message_queues[message_domain],
+                        "request": self.message_queues[message_domain].copy(),
                         "probability": winning_probability,
                         "predicted_class": winning_label,
                         "attributes": y_pred_labelled,
