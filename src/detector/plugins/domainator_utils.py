@@ -36,7 +36,7 @@ def strip_domain(query: str):
     domain = ""
 
     if len(query) >= 2:
-        domain = query[-2]
+        domain = '.'.join(query[-2:])
 
     return domain
 
@@ -56,7 +56,7 @@ def get_domainator_features(queries: list) -> pd.DataFrame:
     """
 
     queries = [query.strip(".") for query in queries]
-    subdomains = [".".join(domain.split(".")[:-2]) for domain in queries]
+    subdomains = ["".join(domain.split(".")[:-2]) for domain in queries]
 
     metrics = {column: [] for column in DOMAINATOR_FEATURE_COLUMNS}
 
@@ -64,7 +64,7 @@ def get_domainator_features(queries: list) -> pd.DataFrame:
     cartesian = list(itertools.combinations(subdomains, 2))
 
     metrics["levenshtein"] = np.mean(
-        [Levenshtein.ratio(product[0], product[1]) for product in cartesian]
+        [Levenshtein.distance(product[0], product[1])/max(len(product[0]), len(product[1])) for product in cartesian]
     )
     metrics["jaro"] = np.mean(
         [Levenshtein.jaro(product[0], product[1]) for product in cartesian]
@@ -91,7 +91,7 @@ def get_domainator_features(queries: list) -> pd.DataFrame:
         [
             (
                 pylcs.lcs_sequence_length(product[0], product[1])
-                / ((len(product[0]) + len(product[1])) / 2)
+                / (max(len(product[0]), len(product[1])))
                 if len(product[0]) and len(product[1])
                 else 0.0
             )
@@ -102,7 +102,7 @@ def get_domainator_features(queries: list) -> pd.DataFrame:
         [
             (
                 pylcs.lcs_string_length(product[0], product[1])
-                / ((len(product[0]) + len(product[1])) / 2)
+                / (max(len(product[0]), len(product[1])))
                 if len(product[0]) and len(product[1])
                 else 0.0
             )
