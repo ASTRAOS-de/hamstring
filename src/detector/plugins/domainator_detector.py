@@ -45,7 +45,7 @@ class DomainatorDetector(DetectorBase):
             consume_topic (str): Kafka topic from which the detector will consume messages.
         """
         self.model_base_url = detector_config["base_url"]
-        self.message_queues = defaultdict(list)
+        self.message_queues = defaultdict(lambda: defaultdict(list))
         super().__init__(
             detector_config, consume_topic, produce_topics, downstream_detector_topics
         )
@@ -66,16 +66,17 @@ class DomainatorDetector(DetectorBase):
             np.ndarray: Prediction probabilities for each class. Typically a 2D array
                 where the shape is (1, 2) for binary classification (benign/malicious).
         """
-        queries = [message["domain_name"] for message in messages]
+        y_pred = self.model.predict_proba(get_domainator_features(messages))
+        y_pred = dict(zip(self.model.classes_, y_pred[0]))
 
-        y_pred = self.model.predict_proba(get_domainator_features(queries))
         return y_pred
 
     def detect(self):
         logger.info("Start detecting malicious requests.")
         for message in self.messages:
+            message_src  = message["src_ip"]
             message_domain = strip_domain(message["domain_name"])
-            self.message_queues[message_domain].append(message)
+            self.message_queues[message_src][message_domain].append(message["domain_name"])
 
             # currently receives 1 message batch at a time iterates over it and adds to the queue
             # right now let's say we fetch 100 messages in a batch, we iterate over the messages to add to the dict, worst case: 97 predictions necessary (len of 3, sliding window over all 100 messsages)
@@ -84,19 +85,20 @@ class DomainatorDetector(DetectorBase):
             # improvement suggestion: try to predict only at the end for each domain seen in the batch IF len > 3. If prediction happened maybe clear the queue ? --> suboptimal for no sliding window approach
             # further improvement: kafka partitoin key shold not be src_ip but rather domain name --> make adjustable for other detectors as well !!
 
-            if len(self.message_queues[message_domain]) >= 3:
-                y_pred = self.predict(self.message_queues[message_domain])
+            if len(self.message_queues[message_src][message_domain]) >= 10:
+                y_pred = self.predict(self.message_queues[message_src][message_domain])
                 logger.info(f"Prediction: {y_pred}")
-                if np.argmax(y_pred, axis=1) == 1 and y_pred[0][1] > self.threshold:
+                if y_pred["malicious"] == max(y_pred.values()) and y_pred["malicious"] > self.threshold:
                     logger.info("Append malicious request domain to warning.")
                     warning = {
-                        "request": self.message_queues[message_domain].copy(),
-                        "probability": float(y_pred[0][1]),
+                        "request": self.message_queues[message_src][message_domain].copy(),
+                        "probability": float(y_pred["malicious"]),
                         "name": self.name,
                         "sha256": self.checksum,
                     }
                     self.warnings.append(warning)
 
-                if len(self.message_queues[message_domain]) >= 5:
-                    del self.message_queues[message_domain][0]
+                # The statement here can be removed if the minimum and maximum window sizes are kept the same
+                if len(self.message_queues[message_src][message_domain]) >= 10:
+                    del self.message_queues[message_src][message_domain][0:5]
         logger.debug(f"Domainator Message queue length: {len(self.message_queues)}")
