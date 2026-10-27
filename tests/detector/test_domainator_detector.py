@@ -36,7 +36,12 @@ class TestDomainatorDetector(unittest.TestCase):
         self.mock_logger = patcher.start()
         self.addCleanup(patcher.stop)
 
-    def _create_detector(self, mock_kafka_handler=None, mock_clickhouse=None):
+    def _create_detector(
+        self,
+        mock_kafka_handler=None,
+        mock_clickhouse=None,
+        detector_config_overrides=None,
+    ):
         """Helper method to create a DomainatorDetector instance with proper mocks."""
         if mock_kafka_handler is None:
             mock_kafka_handler = MagicMock()
@@ -51,9 +56,9 @@ class TestDomainatorDetector(unittest.TestCase):
             "checksum": "9d86d66b4976c9b325bed0934a9a9eb3a20960b08be9afe491454624cc0aaa6c",
             "base_url": "https://heibox.uni-heidelberg.de/d/0d5cbcbe16cd46a58021/",
             "threshold": 0.005,
-            "domain_expiration_hours": 1,
-            "expiry_check_interval_hours": 1
         }
+        if detector_config_overrides:
+            detector_config.update(detector_config_overrides)
 
         with patch(
             "src.detector.detector.ExactlyOnceKafkaConsumeHandler",
@@ -71,6 +76,35 @@ class TestDomainatorDetector(unittest.TestCase):
             detector.scaler = MagicMock()
             return detector
 
+    def test_expiry_defaults_support_existing_config(self):
+        detector = self._create_detector()
+
+        self.assertEqual(detector.domain_expiration_hours, timedelta(hours=1))
+        self.assertEqual(detector.expiry_check_interval, timedelta(hours=1))
+
+    def test_expiry_settings_are_configurable(self):
+        detector = self._create_detector(
+            detector_config_overrides={
+                "domain_expiration_hours": 2,
+                "expiry_check_interval_hours": 0.25,
+            }
+        )
+
+        self.assertEqual(detector.domain_expiration_hours, timedelta(hours=2))
+        self.assertEqual(detector.expiry_check_interval, timedelta(minutes=15))
+
+    def test_detect_empty_batch_does_not_start_expiry_clock(self):
+        detector = self._create_detector()
+
+        with patch.object(detector, "expire_stale_domains") as mock_expire:
+            detector.detect()
+            mock_expire.assert_not_called()
+
+        self.assertIsNone(detector.latest_message_timestamp)
+        self.assertIsNone(detector.latest_expiry_timestamp)
+        self.assertEqual(detector.expire_stale_domains(), 0)
+        self.assertEqual(detector.message_queues, {})
+
     def test_get_model_download_url(self):
         """Test that the model download URL is correctly formatted."""
         mock_kafka = MagicMock()
@@ -87,13 +121,13 @@ class TestDomainatorDetector(unittest.TestCase):
         mock_ch = MagicMock()
         sut = self._create_detector(mock_kafka, mock_ch)
         window_size = 4
-        sut.requests_detect_threshold = window_size 
-        
+        sut.requests_detect_threshold = window_size
+
         for _ in range(0, window_size, 1):
             sut.messages.append((DEFAULT_DATA))
         with patch(
             "src.detector.plugins.domainator_detector.DomainatorDetector.predict",
-            return_value={'legitimate': 0.01, 'malicious': 0.99},
+            return_value={"legitimate": 0.01, "malicious": 0.99},
         ):
             sut.detect()
             self.assertNotEqual([], sut.warnings)
@@ -112,12 +146,12 @@ class TestDomainatorDetector(unittest.TestCase):
         ]
         sut.requests_detect_threshold = 3
         sut.max_window_requests = 5
-        sut.max_window_cut = 1 # [0:1] is the same as [0]
+        sut.max_window_cut = 1  # [0:1] is the same as [0]
 
         with patch.object(
             sut,
             "predict",
-            return_value={'legitimate': 0.01, 'malicious': 0.99},
+            return_value={"legitimate": 0.01, "malicious": 0.99},
         ):
             sut.detect()
 
@@ -133,7 +167,7 @@ class TestDomainatorDetector(unittest.TestCase):
             ],
         )
 
-        message_queues = sut.message_queues[DEFAULT_DATA['src_ip']][domain_name]
+        message_queues = sut.message_queues[DEFAULT_DATA["src_ip"]][domain_name]
 
         self.assertEqual(
             ["1", "2", "3", "4"],
@@ -145,7 +179,7 @@ class TestDomainatorDetector(unittest.TestCase):
         mock_kafka = MagicMock()
         mock_ch = MagicMock()
         detector = self._create_detector(mock_kafka, mock_ch)
-        detector.model.classes_ = ['legitimate', 'malicious']
+        detector.model.classes_ = ["legitimate", "malicious"]
 
         # Mock model prediction
         mock_prediction = np.array([[0.2, 0.8]])
@@ -164,15 +198,15 @@ class TestDomainatorDetector(unittest.TestCase):
         assert_frame_equal(called_features, expected_features)
 
         # Verify prediction result
-        np.testing.assert_array_equal(result['legitimate'], mock_prediction[0][0])
-        np.testing.assert_array_equal(result['malicious'], mock_prediction[0][1])
+        np.testing.assert_array_equal(result["legitimate"], mock_prediction[0][0])
+        np.testing.assert_array_equal(result["malicious"], mock_prediction[0][1])
 
     def test_predict_uses_domainator_feature_order(self):
         """Test that predict passes features in Domainator's generated order."""
         mock_kafka = MagicMock()
         mock_ch = MagicMock()
         detector = self._create_detector(mock_kafka, mock_ch)
-        detector.model.classes_ = ['legitimate', 'malicious']
+        detector.model.classes_ = ["legitimate", "malicious"]
 
         mock_prediction = np.array([[0.2, 0.8]])
         detector.model.predict_proba.return_value = mock_prediction
@@ -192,8 +226,8 @@ class TestDomainatorDetector(unittest.TestCase):
             called_features.columns.tolist(),
             DOMAINATOR_FEATURE_COLUMNS,
         )
-        np.testing.assert_array_equal(result['legitimate'], mock_prediction[0][0])
-        np.testing.assert_array_equal(result['malicious'], mock_prediction[0][1])
+        np.testing.assert_array_equal(result["legitimate"], mock_prediction[0][0])
+        np.testing.assert_array_equal(result["malicious"], mock_prediction[0][1])
 
     def test_get_features_basic_attributes(self):
         """Test basic label features calculation."""
@@ -340,12 +374,8 @@ class TestDomainatorDetector(unittest.TestCase):
         }
         sut.latest_message_timestamp = datetime(2011, 8, 17, 10, 10, 0)
 
-        with patch.object(
-            sut,
-            "expire_stale_domains",
-            return_value=0
-        ) as mock_expire:
-            
+        with patch.object(sut, "expire_stale_domains", return_value=0) as mock_expire:
+
             sut.detect()
             # First run, latest_expiry_timestamp is still None
             self.assertEqual(mock_expire.call_count, 1)
@@ -353,9 +383,13 @@ class TestDomainatorDetector(unittest.TestCase):
             sut.latest_message_timestamp = datetime(2011, 8, 17, 10, 15, 0)  # +5m
             sut.detect()  # 5m < 15m -> skipped
             self.assertEqual(mock_expire.call_count, 1)
-            self.assertEqual(sut.latest_expiry_timestamp, datetime(2011, 8, 17, 10, 10, 0))
+            self.assertEqual(
+                sut.latest_expiry_timestamp, datetime(2011, 8, 17, 10, 10, 0)
+            )
 
             sut.latest_message_timestamp = datetime(2011, 8, 17, 11, 15, 0)  # +1h15m
             sut.detect()
             self.assertEqual(mock_expire.call_count, 2)
-            self.assertEqual(sut.latest_expiry_timestamp, datetime(2011, 8, 17, 11, 15, 0))
+            self.assertEqual(
+                sut.latest_expiry_timestamp, datetime(2011, 8, 17, 11, 15, 0)
+            )

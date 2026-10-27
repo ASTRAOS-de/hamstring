@@ -540,6 +540,12 @@ To entirely skip the anomaly detection phase, you can set ``inspector_module_nam
    * - threshold
      - ``0.5``
      - Threshold for the detector's classification.
+   * - domain_expiration_hours
+     - ``1``
+     - Domainator only: discard source/domain windows that have been inactive for more than this many hours, measured using observed message timestamps rather than wall-clock time.
+   * - expiry_check_interval_hours
+     - ``1``
+     - Domainator only: interval between stale-window checks, measured using observed message timestamps.
    * - produce_topics
      - ``(empty)``
      - (Optional) Comma-separated list of alerter topic suffixes to produce alerts to. If left empty, defaults to the ``generic`` alerter topic. Use ``send_to_alerter: false`` or ``produce_topics: []`` for intermediary detectors that should not produce to an alerter.

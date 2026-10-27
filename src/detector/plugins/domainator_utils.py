@@ -36,7 +36,7 @@ def strip_domain(query: str):
     domain = ""
 
     if len(query) >= 2:
-        domain = '.'.join(query[-2:])
+        domain = ".".join(query[-2:])
 
     return domain
 
@@ -70,8 +70,9 @@ def get_domainator_features(queries: list) -> pd.DataFrame:
                 / max(len(product[0]), len(product[1]))
                 if len(product[0]) and len(product[1])
                 else 0.0
-            ) 
-            for product in cartesian]
+            )
+            for product in cartesian
+        ]
     )
     metrics["jaro"] = np.mean(
         [Levenshtein.jaro(product[0], product[1]) for product in cartesian]

@@ -125,7 +125,7 @@ class TestDomainatorAttributor(unittest.TestCase):
         )
         self.assertEqual(
             ["1", "2", "3", "4"],
-            [message["logline_id"] for message in sut.message_queues["example"]],
+            [message["logline_id"] for message in sut.message_queues["example.org"]],
         )
 
     def test_detect_emits_for_attribution_class_other_than_index_one(self):
@@ -248,7 +248,7 @@ class TestDomainatorAttributor(unittest.TestCase):
         jaro_dist = features.iloc[0, 1]  # Jaro distance
         lcs = features.iloc[0, 6]  # Longest common string
 
-        self.assertEqual(leven_dist, 0.75)
+        self.assertEqual(leven_dist, 0.25)
         self.assertAlmostEqual(jaro_dist, 0.833, 3)  # Rounded to 3 decimal places
         self.assertEqual(lcs, 0.75)
 
@@ -262,8 +262,8 @@ class TestDomainatorAttributor(unittest.TestCase):
 
         # Basic features
         self.assertEqual(
-            features.iloc[0, 0], 1.0
-        )  # Levenshtein distance of empty strings is 1
+            features.iloc[0, 0], 0.0
+        )  # Normalized Levenshtein distance is 0 for empty subdomains
         self.assertEqual(
             features.iloc[0, 1], 1.0
         )  # Jaro distance of empty strings is 1
@@ -293,8 +293,8 @@ class TestDomainatorAttributor(unittest.TestCase):
 
         # Basic features
         self.assertEqual(
-            features.iloc[0, 0], 1.0
-        )  # Levenshtein distance of same strings is 1
+            features.iloc[0, 0], 0.0
+        )  # Identical subdomains have zero Levenshtein distance
         self.assertEqual(features.iloc[0, 1], 1.0)  # Jaro distance of same strings is 1
         self.assertEqual(
             features.iloc[0, 2], 1.0
