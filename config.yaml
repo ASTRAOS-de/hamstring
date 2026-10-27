@@ -196,6 +196,8 @@ pipeline:
       detector_class_name: "DomainatorDetector"
       model: domainator
       use_scaler: false
+      domain_expiration_hours: 1
+      expiry_check_interval_hours: 1
       checksum: a4aac4c585f1e614c3cf0d737e80b960c5de6e87b253f7cdd07125d9ce486476
       base_url: https://heibox.uni-heidelberg.de/d/0d5cbcbe16cd46a58021/
       threshold: 0.5
