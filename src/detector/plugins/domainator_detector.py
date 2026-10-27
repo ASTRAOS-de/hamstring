@@ -1,6 +1,7 @@
 from src.detector.detector import DetectorBase
 import numpy as np
 from collections import defaultdict
+from datetime import datetime, timedelta
 
 from src.base.log_config import get_logger
 from src.detector.plugins.domainator_utils import (
@@ -45,10 +46,63 @@ class DomainatorDetector(DetectorBase):
             consume_topic (str): Kafka topic from which the detector will consume messages.
         """
         self.model_base_url = detector_config["base_url"]
-        self.message_queues = defaultdict(list)
+        # How long a domain has to have been stale for before it gets removed from the dictionary
+        self.domain_expiration_hours = timedelta(
+            hours=detector_config.get("domain_expiration_hours", 1)
+        )
+        # How often the detector checks whether entries have expired
+        self.expiry_check_interval = timedelta(
+            hours=detector_config.get("expiry_check_interval_hours", 1)
+        )
+
+        self.message_queues = defaultdict(
+            lambda: defaultdict(lambda: {"timestamp": None, "messages": []})
+        )
+        self.latest_message_timestamp = None
+        self.latest_expiry_timestamp = None
+
+        self.requests_detect_threshold = 10
+        self.max_window_requests = 10
+        self.max_window_cut = 5
+
         super().__init__(
             detector_config, consume_topic, produce_topics, downstream_detector_topics
         )
+
+    def expire_stale_domains(self):
+        """
+        Drop windows for src_ip/domain pairs that have not been seen for a certain period of time.
+
+        The method deliberately avoids using the current time and instead tracks the
+        timestamp of the observed data. This keeps the tracking correct for both live
+        traffic and historical data.
+
+        Returns:
+            int: Number of ``(src_ip, domain)`` entries removed.
+        """
+        if self.latest_message_timestamp is None:
+            return 0
+
+        removed_domains = 0
+
+        stale_entries = []
+        for src, domains in self.message_queues.items():
+            for domain, entry in domains.items():
+                entry_timestamp = datetime.fromisoformat(entry["timestamp"])
+                if (
+                    self.latest_message_timestamp - entry_timestamp
+                    > self.domain_expiration_hours
+                ):
+                    stale_entries.append((src, domain))
+
+        for src, domain in stale_entries:
+            del self.message_queues[src][domain]
+            removed_domains += 1
+
+            if not self.message_queues[src]:
+                del self.message_queues[src]
+
+        return removed_domains
 
     def predict(self, messages):
         """
@@ -63,19 +117,31 @@ class DomainatorDetector(DetectorBase):
                 a "domain_name" key with the domain to analyze.
 
         Returns:
-            np.ndarray: Prediction probabilities for each class. Typically a 2D array
-                where the shape is (1, 2) for binary classification (benign/malicious).
+            dict: Prediction probabilities keyed by the model's class labels.
         """
         queries = [message["domain_name"] for message in messages]
 
         y_pred = self.model.predict_proba(get_domainator_features(queries))
+        y_pred = dict(zip(self.model.classes_, y_pred[0]))
+
         return y_pred
 
     def detect(self):
         logger.info("Start detecting malicious requests.")
         for message in self.messages:
+            message_src = message["src_ip"]
             message_domain = strip_domain(message["domain_name"])
-            self.message_queues[message_domain].append(message)
+            message_queue = self.message_queues[message_src][message_domain]
+
+            message_queue["messages"].append(message)
+            message_queue["timestamp"] = message["ts"]
+
+            datetime_timestamp = datetime.fromisoformat(message_queue["timestamp"])
+            if (
+                self.latest_message_timestamp is None
+                or datetime_timestamp > self.latest_message_timestamp
+            ):
+                self.latest_message_timestamp = datetime_timestamp
 
             # currently receives 1 message batch at a time iterates over it and adds to the queue
             # right now let's say we fetch 100 messages in a batch, we iterate over the messages to add to the dict, worst case: 97 predictions necessary (len of 3, sliding window over all 100 messsages)
@@ -84,19 +150,35 @@ class DomainatorDetector(DetectorBase):
             # improvement suggestion: try to predict only at the end for each domain seen in the batch IF len > 3. If prediction happened maybe clear the queue ? --> suboptimal for no sliding window approach
             # further improvement: kafka partitoin key shold not be src_ip but rather domain name --> make adjustable for other detectors as well !!
 
-            if len(self.message_queues[message_domain]) >= 3:
-                y_pred = self.predict(self.message_queues[message_domain])
+            if len(message_queue["messages"]) >= self.requests_detect_threshold:
+                y_pred = self.predict(message_queue["messages"])
                 logger.info(f"Prediction: {y_pred}")
-                if np.argmax(y_pred, axis=1) == 1 and y_pred[0][1] > self.threshold:
+                if (
+                    y_pred["malicious"] == max(y_pred.values())
+                    and y_pred["malicious"] > self.threshold
+                ):
                     logger.info("Append malicious request domain to warning.")
                     warning = {
-                        "request": self.message_queues[message_domain].copy(),
-                        "probability": float(y_pred[0][1]),
+                        "request": message_queue["messages"].copy(),
+                        "probability": float(y_pred["malicious"]),
                         "name": self.name,
                         "sha256": self.checksum,
                     }
                     self.warnings.append(warning)
 
-                if len(self.message_queues[message_domain]) >= 5:
-                    del self.message_queues[message_domain][0]
+                # The statement here can be removed if the minimum and maximum window sizes are kept the same
+                if len(message_queue["messages"]) >= self.max_window_requests:
+                    del message_queue["messages"][0 : self.max_window_cut]
+
+        # The check is done based on the message's timestamps to support historical data
+        if self.latest_message_timestamp is not None and (
+            self.latest_expiry_timestamp is None
+            or self.latest_message_timestamp - self.latest_expiry_timestamp
+            > self.expiry_check_interval
+        ):
+            removed_domains = self.expire_stale_domains()
+            self.latest_expiry_timestamp = self.latest_message_timestamp
+            if removed_domains:
+                logger.info(f"Expired {removed_domains} stale window(s).")
+
         logger.debug(f"Domainator Message queue length: {len(self.message_queues)}")
