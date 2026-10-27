@@ -64,7 +64,14 @@ def get_domainator_features(queries: list) -> pd.DataFrame:
     cartesian = list(itertools.combinations(subdomains, 2))
 
     metrics["levenshtein"] = np.mean(
-        [Levenshtein.distance(product[0], product[1])/max(len(product[0]), len(product[1])) for product in cartesian]
+        [
+            (
+                Levenshtein.distance(product[0], product[1])
+                / max(len(product[0]), len(product[1]))
+                if len(product[0]) and len(product[1])
+                else 0.0
+            ) 
+            for product in cartesian]
     )
     metrics["jaro"] = np.mean(
         [Levenshtein.jaro(product[0], product[1]) for product in cartesian]
